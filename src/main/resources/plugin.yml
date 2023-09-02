@@ -1,0 +1,13 @@
+name: SoT
+version: '${project.version}'
+main: com.clarkson.sot.SoT
+api-version: '1.20'
+author: ZacClarkson
+description: A minecraft game based on MCC
+commands:
+  generatedungeon:
+    description: Generates a dungeon based on the player's current location.
+    usage: /generatedungeon
+  cloneDoor:
+    description: Clones the door to the player's location
+    usage: /<command>
