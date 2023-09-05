@@ -24,7 +24,7 @@ public class SoT extends JavaPlugin {
 
         this.getCommand("generatedungeon").setExecutor(commandManager);
         this.getCommand("cloneDoor").setExecutor(commandManager);
-        ItemCollector testThing = new ItemCollector(new Location(Bukkit.getWorld("world"), -19, 141,231), new ItemStack(Material.MAGMA_CREAM , 1));
+        FloorItem testThing = new FloorItem(new Location(Bukkit.getWorld("world"), -19, 141,231), new ItemStack(Material.MAGMA_CREAM , 1));
         this.getServer().getPluginManager().registerEvents(testThing, this);
     }
 
