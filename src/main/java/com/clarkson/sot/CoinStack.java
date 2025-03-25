@@ -8,7 +8,6 @@ import org.bukkit.entity.Player;
 import org.bukkit.event.player.PlayerMoveEvent;
 import org.bukkit.inventory.EquipmentSlot;
 import org.bukkit.inventory.ItemStack;
-import org.bukkit.util.EulerAngle;
 import org.jetbrains.annotations.NotNull;
 
 import java.util.Random;

@@ -148,6 +148,9 @@ public class Segment {
     public Location getStartLocation() {
         return bounds.getMinPoint();
     }
+    public Location getEndLocation() {
+        return bounds.getMaxPoint();
+    }
     public String getName() {
         return name;
     }
