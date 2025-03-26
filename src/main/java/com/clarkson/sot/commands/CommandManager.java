@@ -1,6 +1,5 @@
 package com.clarkson.sot.commands;
 
-import org.bukkit.Location;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.CommandSender;
@@ -47,20 +46,6 @@ public class CommandManager implements CommandExecutor {
             return true;
         }
 
-        if (command.getName().equalsIgnoreCase("cloneDoor")) {
-            if (door == null) {
-                player.sendMessage("Door has not been initialized.");
-                return true;
-            }
-
-            System.out.println("Your location: " + player.getLocation());
-            DoorClone newDoor = door.cloneByLocation(new Location(player.getWorld(), player.getLocation().getBlockX(), player.getLocation().getBlockY(), player.getLocation().getBlockZ()));
-            doorClones.add(newDoor);
-            plugin.getServer().getPluginManager().registerEvents(newDoor, plugin);
-            player.sendMessage("Door cloned to your location!");
-
-            return true;
-        }
 
         return false; // Return false if no known commands were executed
     }
