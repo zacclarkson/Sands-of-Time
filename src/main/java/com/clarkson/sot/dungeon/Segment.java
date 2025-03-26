@@ -16,22 +16,47 @@ import com.sk89q.worldedit.regions.CuboidRegion;
 import com.sk89q.worldedit.session.ClipboardHolder;
 import org.bukkit.Location;
 import org.jetbrains.annotations.NotNull;
+
+import java.util.ArrayList;
 import java.util.List;
 
 public class Segment {
-
 
     private String name;
     private SegmentType type;
     private List<EntryPoint> entryPoints;
     private final Area bounds;
 
-    public Segment(String name, SegmentType type, List<EntryPoint> entryPoints, Location minPoint, Location maxPoint) {
-        this.name = name;
-        this.type = type;
-        this.entryPoints = entryPoints;
-        this.bounds = new Area(minPoint, maxPoint);
+    private List<Location> sandSpawnLocations = new ArrayList<>();
+    private List<Location> itemSpawnLocations = new ArrayList<>();
+    private List<Location> coinSpawnLocations = new ArrayList<>();
+    private int totalCoins; // Total number of coins to spawn
+
+    public Segment(String name, SegmentType type, List<EntryPoint> entryPoints, Location minPoint, Location maxPoint,
+                   List<Location> sandSpawnLocations, List<Location> itemSpawnLocations, List<Location> coinSpawnLocations, int totalCoins) {
+                           this.name = name;
+                           this.type = type;
+                           this.entryPoints = entryPoints;
+                           this.bounds = new Area(minPoint, maxPoint);
+                           this.sandSpawnLocations = sandSpawnLocations;
+                           this.itemSpawnLocations = itemSpawnLocations;
+                           this.coinSpawnLocations = coinSpawnLocations;
+                           this.totalCoins = totalCoins;
     }
+
+    // Getters for spawn locations
+    public List<Location> getSandSpawnLocations() {
+        return sandSpawnLocations;
+    }
+
+    public List<Location> getItemSpawnLocations() {
+        return itemSpawnLocations;
+    }
+
+    public List<Location> getCoinSpawnLocations() {
+        return coinSpawnLocations;
+    }
+
 
     public void cloneToLocation(Location to) throws WorldEditException {
         com.sk89q.worldedit.world.World world = BukkitAdapter.adapt(bounds.getMinPoint().getWorld());
@@ -183,6 +208,10 @@ public class Segment {
         result += bounds.getMinPoint() + "\n";
         result += bounds.getMaxPoint() + "\n";
         return result;
+    }
+
+    public int getTotalCoins() {
+        return totalCoins;
     }
 
 

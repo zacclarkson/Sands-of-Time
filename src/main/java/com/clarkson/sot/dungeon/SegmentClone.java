@@ -16,7 +16,7 @@ public class SegmentClone extends Segment {
 
     // This is an auxiliary constructor that takes the precomputed entryPoints.
     private SegmentClone(Segment originalSegment, Location startLocation, Location endLocation, List<EntryPoint> newEntryPoints) {
-        super(originalSegment.getName(), originalSegment.getType(), newEntryPoints, startLocation, endLocation);
+        super(originalSegment.getName(), originalSegment.getType(), newEntryPoints, startLocation, endLocation, originalSegment.getCoinSpawnLocations(), originalSegment.getCoinSpawnLocations(), originalSegment.getCoinSpawnLocations(), originalSegment.getTotalCoins());
         this.originalSegment = originalSegment;
     }
 
