@@ -17,16 +17,25 @@ import java.util.stream.Collectors;
  */
 public class DungeonManager {
 
-    // All possible segment templates (rooms, corridors, corners, etc.).
     private final List<Segment> segments = new ArrayList<>();
+    private final Random random; // Random instance for deterministic generation
+    private final long seed; // Seed for reproducibility
+    private static final int MAX_TRIES_PER_ENTRANCE = 5; // Maximum attempts to place a segment per entrance
+    private static final int MAX_DISTANCE = 100; // Maximum distance from the start room to place segments
+    private static final int MAX_SEGMENTS = 50; // Maximum number of segments allowed in the dungeon
 
-    // Limits or constraints for generation
-    private static final int MAX_SEGMENTS = 50;           // Stop once we place 50 segments
-    private static final int MAX_TRIES_PER_ENTRANCE = 5;  // Limit attempts to find a valid segment for each entrance
-    private static final int MAX_DISTANCE = 50;           // Distance from start location
+    public DungeonManager(long seed) {
+        this.seed = seed;
+        this.random = new Random(seed); // Initialize Random with the seed
+        initializeSegments();
+    }
 
     public DungeonManager() {
-        initializeSegments();
+        this(System.currentTimeMillis()); // Default to a random seed based on the current time
+    }
+
+    public long getSeed() {
+        return seed;
     }
 
     /**
@@ -35,22 +44,15 @@ public class DungeonManager {
      * @throws WorldEditException if the WorldEdit cloning fails.
      */
     public void generateDungeon(Location startRoomLocation) throws WorldEditException {
-
-        // -------------------------------------------------------------
-        // 1. Setup: Place the starting segment, track active entrances
-        // -------------------------------------------------------------
-        // For simplicity, assume index 0 is always your "start" segment
+        // Setup: Place the starting segment
         Segment startSegmentTemplate = segments.get(0);
-
-        // Clone (place) it at the given startRoomLocation
         startSegmentTemplate.cloneToLocation(startRoomLocation);
 
         // Compute bounding box corners in world space
-        double width  = Math.abs(startSegmentTemplate.getBounds().getWidth());
+        double width = Math.abs(startSegmentTemplate.getBounds().getWidth());
         double height = Math.abs(startSegmentTemplate.getBounds().getHeight());
-        double depth  = Math.abs(startSegmentTemplate.getBounds().getDepth());
+        double depth = Math.abs(startSegmentTemplate.getBounds().getDepth());
 
-        // Make the placed instance
         Location endCorner = new Location(
                 Bukkit.getWorld("world"),
                 startRoomLocation.getBlockX() + width,
@@ -62,49 +64,28 @@ public class DungeonManager {
         List<SegmentClone> activeSegments = new ArrayList<>();
         activeSegments.add(startClone);
 
-        // Collect the available entrances from the newly placed segment
         List<EntryPoint> activeEnds = new ArrayList<>(startClone.getEntryPoints());
-
-        // The "remainingSegments" (excluding the start segment template if desired)
         List<Segment> remainingSegments = new ArrayList<>(segments);
-        // Optionally remove the start segment if you only want it placed once:
         remainingSegments.remove(startSegmentTemplate);
 
-        Random rand = new Random();
-
-        // -------------------------------------------------------------
-        // 2. Main Loop: Keep placing new segments while possible
-        // -------------------------------------------------------------
+        // Main loop: Place new segments
         while (!activeEnds.isEmpty() && !remainingSegments.isEmpty() && activeSegments.size() < MAX_SEGMENTS) {
+                int randomEndIndex = random.nextInt(activeEnds.size());
+                EntryPoint selectedEnd = activeEnds.get(randomEndIndex);
 
-            // Pick a random Entrance from our pool
-            int randomEndIndex = rand.nextInt(activeEnds.size());
-            EntryPoint selectedEnd = activeEnds.get(randomEndIndex);
-            System.out.println("[DEBUG] Chosen End: " + selectedEnd);
+                List<Segment> matchingSegments = findMatchingSegments(selectedEnd, remainingSegments);
+                boolean segmentPlaced = false;
+                int tries = 0;
 
-            // Based on the direction of this Entrance, find segment templates that have
-            // an entrance facing the opposite direction (so they can connect).
-            List<Segment> matchingSegments = findMatchingSegments(selectedEnd, remainingSegments);
-
-            boolean segmentPlaced = false;
-            int tries = 0;
-
-            // Try multiple times to place a valid segment at this entrance
-            while (!segmentPlaced && tries < MAX_TRIES_PER_ENTRANCE && !matchingSegments.isEmpty()) {
+                while (!segmentPlaced && tries < MAX_TRIES_PER_ENTRANCE && !matchingSegments.isEmpty()) {
                 tries++;
-
-                // Pick a random segment from the matching list
-                int randomSegmentIndex = rand.nextInt(matchingSegments.size());
+                int randomSegmentIndex = random.nextInt(matchingSegments.size());
                 Segment selectedTemplate = matchingSegments.get(randomSegmentIndex);
 
-                // Calculate where the new segment would start
-                // (Using your custom findRelativeNwCorner or similar logic)
                 Location newSegmentLocation = selectedTemplate.findRelativeNwCorner(selectedEnd);
-
-                // Also compute the bounding box end corner
-                double newWidth  = Math.abs(selectedTemplate.getBounds().getWidth());
+                double newWidth = Math.abs(selectedTemplate.getBounds().getWidth());
                 double newHeight = Math.abs(selectedTemplate.getBounds().getHeight());
-                double newDepth  = Math.abs(selectedTemplate.getBounds().getDepth());
+                double newDepth = Math.abs(selectedTemplate.getBounds().getDepth());
 
                 Location newEndCorner = new Location(
                         Bukkit.getWorld("world"),
@@ -115,62 +96,29 @@ public class DungeonManager {
 
                 SegmentClone newClone = new SegmentClone(selectedTemplate, newSegmentLocation, newEndCorner);
 
-                System.out.println("[DEBUG] Attempting to place: " + newClone);
-
-                // 3. Overlap Check
-                if (!doesOverlap(newClone, activeSegments)) {
-                    System.out.println("[DEBUG] Passed overlap check.");
-
-                    // 4. Distance Check (optional)
-                    if (isWithinDistance(startRoomLocation, newClone.getStartLocation(), MAX_DISTANCE)) {
-                        System.out.println("[DEBUG] Passed distance check.");
-
-                        // Place it in the world (WorldEdit clone, etc.)
+                if (!doesOverlap(newClone, activeSegments) &&
+                        isWithinDistance(startRoomLocation, newClone.getStartLocation(), MAX_DISTANCE)) {
                         selectedTemplate.cloneByEntryPoint(selectedEnd);
-
-                        // Add to our active segment list
                         activeSegments.add(newClone);
 
-                        // Mark the entrance we used as "used"
-                        // (Optional: You could store a boolean in the EntryPoint itself or remove it from the list)
-
-                        // Add the new segment's "unused" entrances to activeEnds
-                        // Exclude the entrance that aligns with `selectedEnd.getOppositeDirection()`
                         for (EntryPoint ep : newClone.getEntryPoints()) {
-                            if (ep.getDirection() != selectedEnd.getOppositeDirection()) {
+                        if (ep.getDirection() != selectedEnd.getOppositeDirection()) {
                                 activeEnds.add(ep);
-                            }
+                        }
                         }
 
-                        // Mark success
                         segmentPlaced = true;
-                    } else {
-                        System.out.println("[DEBUG] Failed distance check (> " + MAX_DISTANCE + " blocks).");
-                    }
-                } else {
-                    System.out.println("[DEBUG] Failed overlap check.");
                 }
 
-                // Remove this template from the matching list so we don't pick it again
-                // in the same attempt cycle (if it failed either overlap or distance).
                 matchingSegments.remove(randomSegmentIndex);
-            }
+                }
 
-            // Whether placed or not, we remove this end from the pool
-            // because we've tried at least once.
-            activeEnds.remove(randomEndIndex);
+                activeEnds.remove(randomEndIndex);
         }
 
-        // -------------------------------------------------------------
-        // 3. (Optional) Post-Processing: Seal off open entrances, etc.
-        // -------------------------------------------------------------
         closeUnusedEntrances(activeEnds);
-
-        // If you have vaults or keys to place, you might run a check here:
-        // ensure required segments got placed, otherwise repeat or fix up.
-
         System.out.println("[INFO] Dungeon generation finished. Segments placed: " + activeSegments.size());
-    }
+        }
 
     /**
      * Checks if a new segment placement overlaps with any already placed segments.
