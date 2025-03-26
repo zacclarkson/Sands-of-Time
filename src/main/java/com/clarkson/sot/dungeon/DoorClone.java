@@ -7,10 +7,10 @@ import com.clarkson.sot.main.SoT;
 import com.clarkson.sot.utils.Direction;
 
 public class DoorClone extends Door {
-    private Door originalDoor;
+    private final Door originalDoor;
 
-    public DoorClone(Door originalDoor ,SoT plugin, Location minPoint, Location maxPoint, Direction axis) {
-        super(plugin, minPoint, maxPoint, axis );
+    public DoorClone(Door originalDoor, SoT plugin, Location minPoint, Location maxPoint, Location lockLocation, Direction axis) {
+        super(plugin, minPoint, maxPoint, lockLocation, axis); // Pass lockLocation to the Door constructor
         this.originalDoor = originalDoor;
     }
 
