@@ -1,6 +1,10 @@
-package com.clarkson.sot;
+package com.clarkson.sot.dungeon;
 
 import org.bukkit.Location;
+
+import com.clarkson.sot.entities.Door;
+import com.clarkson.sot.main.SoT;
+import com.clarkson.sot.utils.Direction;
 
 public class DoorClone extends Door {
     private Door originalDoor;

@@ -1,4 +1,4 @@
-package com.clarkson.sot;
+package com.clarkson.sot.main;
 
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
@@ -8,6 +8,12 @@ import org.bukkit.entity.ArmorStand;
 import org.bukkit.entity.Entity;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.plugin.java.JavaPlugin;
+
+import com.clarkson.sot.commands.CommandManager;
+import com.clarkson.sot.dungeon.DungeonManager;
+import com.clarkson.sot.entities.Door;
+import com.clarkson.sot.entities.FloorItem;
+import com.clarkson.sot.utils.Direction;
 
 public class SoT extends JavaPlugin {
 

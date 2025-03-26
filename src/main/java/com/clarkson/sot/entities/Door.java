@@ -1,5 +1,8 @@
-package com.clarkson.sot;
+package com.clarkson.sot.entities;
 
+import com.clarkson.sot.dungeon.DoorClone;
+import com.clarkson.sot.main.SoT;
+import com.clarkson.sot.utils.Direction;
 import com.sk89q.worldedit.EditSession;
 import com.sk89q.worldedit.WorldEdit;
 import com.sk89q.worldedit.WorldEditException;

@@ -1,6 +1,8 @@
-package com.clarkson.sot;
+package com.clarkson.sot.dungeon;
 
 import org.bukkit.Location;
+
+import com.clarkson.sot.utils.EntryPoint;
 
 import java.util.ArrayList;
 import java.util.List;

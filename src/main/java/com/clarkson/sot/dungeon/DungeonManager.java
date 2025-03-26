@@ -1,5 +1,7 @@
-package com.clarkson.sot;
+package com.clarkson.sot.dungeon;
 
+import com.clarkson.sot.utils.Direction;
+import com.clarkson.sot.utils.EntryPoint;
 import com.sk89q.worldedit.WorldEditException;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;

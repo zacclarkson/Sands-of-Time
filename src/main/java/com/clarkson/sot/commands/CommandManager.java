@@ -1,4 +1,4 @@
-package com.clarkson.sot;
+package com.clarkson.sot.commands;
 
 import org.bukkit.Location;
 import org.bukkit.command.Command;
@@ -7,6 +7,10 @@ import org.bukkit.command.CommandSender;
 import org.bukkit.entity.Player;
 import org.bukkit.plugin.Plugin;
 import org.jetbrains.annotations.NotNull;
+
+import com.clarkson.sot.dungeon.DoorClone;
+import com.clarkson.sot.dungeon.DungeonManager;
+import com.clarkson.sot.entities.Door;
 
 import java.util.ArrayList;
 

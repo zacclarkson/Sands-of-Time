@@ -1,4 +1,4 @@
-package com.clarkson.sot;
+package com.clarkson.sot.utils;
 
 import org.bukkit.Location;
 
