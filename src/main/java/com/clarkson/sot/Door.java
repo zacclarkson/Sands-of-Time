@@ -5,29 +5,22 @@ import com.sk89q.worldedit.WorldEdit;
 import com.sk89q.worldedit.WorldEditException;
 import com.sk89q.worldedit.bukkit.BukkitAdapter;
 import com.sk89q.worldedit.bukkit.BukkitWorld;
-import com.sk89q.worldedit.bukkit.WorldEditPlugin;
-import com.sk89q.worldedit.command.RegionCommands;
 import com.sk89q.worldedit.extent.clipboard.BlockArrayClipboard;
 import com.sk89q.worldedit.function.operation.ForwardExtentCopy;
 import com.sk89q.worldedit.function.operation.Operation;
 import com.sk89q.worldedit.function.operation.Operations;
 import com.sk89q.worldedit.math.BlockVector3;
 import com.sk89q.worldedit.regions.CuboidRegion;
-import com.sk89q.worldedit.regions.Region;
 import com.sk89q.worldedit.session.ClipboardHolder;
 import com.sk89q.worldedit.world.block.BlockTypes;
-import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.Material;
-import org.bukkit.Sound;
 import org.bukkit.block.Block;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.inventory.ItemStack;
-
-import java.util.concurrent.ForkJoinTask;
 
 public class Door implements Listener {
 
@@ -134,9 +127,13 @@ public class Door implements Listener {
                 BlockVector3.at(weLocMin.getX(), weLocMin.getY(), weLocMin.getZ()),
                 BlockVector3.at(weLocMax.getX(), weLocMax.getY(), weLocMax.getZ()));
 
-        try (EditSession editSession = WorldEdit.getInstance().getEditSessionFactory().getEditSession(world, -1)) {
+        try (EditSession editSession = WorldEdit.getInstance().newEditSession(world)) {
             BlockVector3 offset = BlockVector3.at(0, -1, 0);
-            editSession.moveRegion(region, offset, 1, false, false, null, BlockTypes.AIR.getDefaultState());
+            if (BlockTypes.AIR != null) {
+                editSession.moveRegion(region, offset, 1, false, false, null, BlockTypes.AIR.getDefaultState());
+            } else {
+                System.err.println("BlockTypes.AIR is null, cannot move region.");
+            }
             region.shift(offset);
         } catch (Exception e) {
             e.printStackTrace();
