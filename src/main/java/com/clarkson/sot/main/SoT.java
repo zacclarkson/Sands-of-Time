@@ -2,17 +2,14 @@ package com.clarkson.sot.main;
 
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
-import org.bukkit.Material;
 import org.bukkit.World;
 import org.bukkit.entity.ArmorStand;
 import org.bukkit.entity.Entity;
-import org.bukkit.inventory.ItemStack;
 import org.bukkit.plugin.java.JavaPlugin;
 
 import com.clarkson.sot.commands.CommandManager;
 import com.clarkson.sot.dungeon.DungeonManager;
 import com.clarkson.sot.entities.Door;
-import com.clarkson.sot.entities.FloorItem;
 import com.clarkson.sot.utils.Direction;
 
 public class SoT extends JavaPlugin {
@@ -21,10 +18,11 @@ public class SoT extends JavaPlugin {
     public void onEnable() {
         DungeonManager dungeonManager = new DungeonManager();
         Door door = new Door(
-                this,
-                new Location(Bukkit.getWorld("world"), 3, 138, 214),
-                new Location(Bukkit.getWorld("world"), 1, 141, 214),
-                Direction.NORTH); // Initialize your door here with appropriate arguments
+            this,
+            new Location(Bukkit.getWorld("world"), 3, 138, 214),
+            new Location(Bukkit.getWorld("world"), 1, 141, 214),
+            new Location(Bukkit.getWorld("world"), 2, 139, 214), // Lock location
+            Direction.NORTH); // Initialize your door here with appropriate arguments
 
         CommandManager commandManager = new CommandManager(dungeonManager, door, this);
 
