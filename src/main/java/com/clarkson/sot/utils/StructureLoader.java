@@ -1,3 +1,5 @@
+package com.clarkson.sot.utils;
+
 import com.google.gson.Gson;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
