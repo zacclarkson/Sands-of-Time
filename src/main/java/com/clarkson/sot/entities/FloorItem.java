@@ -1,86 +1,50 @@
 package com.clarkson.sot.entities;
 
 import org.bukkit.Location;
-import org.bukkit.entity.ArmorStand;
-import org.bukkit.entity.EntityType;
+import org.bukkit.NamespacedKey;
+import org.bukkit.entity.ItemDisplay;
 import org.bukkit.entity.Player;
-import org.bukkit.event.EventHandler;
-import org.bukkit.event.Listener;
-import org.bukkit.event.player.PlayerMoveEvent;
-import org.bukkit.inventory.EquipmentSlot;
 import org.bukkit.inventory.ItemStack;
-import org.bukkit.util.EulerAngle;
+import org.bukkit.persistence.PersistentDataContainer;
+import org.bukkit.persistence.PersistentDataType;
+import org.bukkit.plugin.Plugin;
 
-import java.util.Random;
+import java.util.UUID;
 
-public class FloorItem implements Listener {
+public class FloorItem {
 
-    private Location location;
+    private final Location location;
+    private final ItemStack item;
+    private ItemDisplay itemDisplay;
+    private boolean isPickedUp;
+    private final UUID uniqueId; // Unique identifier for this FloorItem
+    private final Plugin plugin;
 
-
-    private ItemStack item;
-    ArmorStand armorStand; // Reference to the armor stand
-    boolean isPickedup;
-
-    public FloorItem(Location location, ItemStack item) {
+    public FloorItem(Location location, ItemStack item, Plugin plugin) {
         this.location = location;
         this.item = item;
-        System.out.println("creating armor stand with: " + item);
-        System.out.println("its Material is: " + item.getType());
-        spawnItemRepresentation(item);
+        this.plugin = plugin;
+        this.uniqueId = UUID.randomUUID(); // Generate a unique ID for this item
+        spawnItemRepresentation();
     }
 
-    private void spawnItemRepresentation(ItemStack item) {
+    private void spawnItemRepresentation() {
+        Location spawnLocation = this.location.clone().add(0.5, -0.8, 0.5);
 
-        //location = this.location.clone().add(0.85, -0.8, 0.15);
-        location = this.location.clone().add(0.5, -0.8, 0.5);
+        // Spawn the ItemDisplay entity
+        this.itemDisplay = (ItemDisplay) spawnLocation.getWorld().spawn(spawnLocation, ItemDisplay.class, display -> {
+            display.setItemStack(item); // Set the item to display
+            display.setGravity(false);  // Prevent it from falling
+            display.setPersistent(false); // Ensure it doesn't persist when the chunk unloads
+            display.setInvulnerable(true);
 
-        this.armorStand = (ArmorStand) location.getWorld().spawnEntity(location, EntityType.ARMOR_STAND);
-
-        armorStand.setGravity(false);
-        armorStand.setVisible(false);
-        armorStand.setSmall(false);
-        armorStand.setBasePlate(false);
-        armorStand.setCustomName("StaticItem");
-        armorStand.setCustomNameVisible(false);
-        armorStand.setInvulnerable(true);
-        armorStand.setItem(EquipmentSlot.HAND, item);
-
-        // Pose to make the item lay flat on the ground
-        armorStand.setArms(true);
-        armorStand.setRightArmPose(new EulerAngle(0,0,0));
-
-        Random rand = new Random();
-        float yaw = rand.nextFloat() * 360.0F;  // Generate a random angle between 0 and 360 degrees
-        armorStand.setRotation(yaw, 0F);
-
+            // Store the UUID in the persistent data container
+            NamespacedKey key = new NamespacedKey(plugin, "floor_item_uuid");
+            PersistentDataContainer dataContainer = display.getPersistentDataContainer();
+            dataContainer.set(key, PersistentDataType.STRING, uniqueId.toString());
+        });
     }
 
-    @EventHandler
-    public void onPlayerMove(PlayerMoveEvent event) {
-        if (isPickedup) return;
-
-        Player player = event.getPlayer();
-        Location playerLocation = player.getLocation();
-
-        double distance = playerLocation.distance(this.armorStand.getLocation());
-        if(distance <= 1.5) {
-            // If the entity is our custom ArmorStand
-            if (this.armorStand.getCustomName() != null && this.armorStand.getCustomName().equals("StaticItem")) {
-                // Give item to player
-                if (item != null) {
-                    player.getInventory().addItem(item);
-                    player.sendTitle("Picked up " + item.getI18NDisplayName() + " [" + item.getAmount() + "x]", "",  10, 20, 10);
-                    player.playSound(playerLocation, org.bukkit.Sound.ENTITY_ITEM_PICKUP, 1.0f, 1.0f);
-
-                }
-
-                // Remove the armor stand
-                this.armorStand.remove();
-                isPickedup = true;
-            }
-        }
-    }
     public Location getLocation() {
         return location;
     }
@@ -89,12 +53,32 @@ public class FloorItem implements Listener {
         return item;
     }
 
-    public ArmorStand getArmorStand() {
-        return armorStand;
+    public boolean isPickedUp() {
+        return isPickedUp;
     }
 
-    public boolean isPickedup() {
-        return isPickedup;
+    public UUID getUniqueId() {
+        return uniqueId;
     }
 
+    public ItemDisplay getItemDisplay() {
+        return itemDisplay;
+    }
+
+    public void markAsPickedUp() {
+        this.isPickedUp = true;
+        if (itemDisplay != null) {
+            itemDisplay.remove();
+        }
+    }
+
+    /**
+     * Handles the pickup mechanic. Can be overridden by subclasses.
+     */
+    public void handlePickup(Player player) {
+        // Default behavior: add the item to the player's inventory
+        player.getInventory().addItem(item);
+        player.sendMessage("You picked up " + item.getAmount() + "x " + item.getType().name() + "!");
+        markAsPickedUp();
+    }
 }
