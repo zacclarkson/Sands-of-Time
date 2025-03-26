@@ -1,120 +1,89 @@
 package com.clarkson.sot.entities;
-
-import com.clarkson.sot.dungeon.DoorClone;
 import com.clarkson.sot.main.SoT;
 import com.clarkson.sot.utils.Direction;
 import com.sk89q.worldedit.EditSession;
 import com.sk89q.worldedit.WorldEdit;
-import com.sk89q.worldedit.WorldEditException;
 import com.sk89q.worldedit.bukkit.BukkitAdapter;
 import com.sk89q.worldedit.bukkit.BukkitWorld;
-import com.sk89q.worldedit.extent.clipboard.BlockArrayClipboard;
-import com.sk89q.worldedit.function.operation.ForwardExtentCopy;
-import com.sk89q.worldedit.function.operation.Operation;
-import com.sk89q.worldedit.function.operation.Operations;
 import com.sk89q.worldedit.math.BlockVector3;
 import com.sk89q.worldedit.regions.CuboidRegion;
-import com.sk89q.worldedit.session.ClipboardHolder;
 import com.sk89q.worldedit.world.block.BlockTypes;
 import org.bukkit.Location;
 import org.bukkit.Material;
+import org.bukkit.NamespacedKey;
 import org.bukkit.block.Block;
 import org.bukkit.entity.Player;
-import org.bukkit.event.EventHandler;
-import org.bukkit.event.Listener;
-import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.inventory.ItemStack;
+import java.util.UUID;
+import org.bukkit.persistence.PersistentDataContainer;
+import org.bukkit.persistence.PersistentDataType;
 
-public class Door implements Listener {
+public class Door {
 
-    private SoT plugin;
+    private final SoT plugin;
+    private final Location lockLocation; // Location of the lock block
     private Area bounds;
+    private final UUID doorId; // Unique identifier for this door
+    private final Direction axis;
+    private boolean isOpen;
     private Location floor;
 
-    private Direction axis;
-    private boolean isOpen;
-
-    public Door(SoT plugin, Location minPoint, Location maxPoint, Direction axis) {
+    public Door(SoT plugin, Location minPoint, Location maxPoint, Location lockLocation, Direction axis) {
         this.plugin = plugin;
         this.bounds = new Area(minPoint, maxPoint);
+        this.lockLocation = lockLocation;
+        this.doorId = UUID.randomUUID(); // Generate a unique ID for this door
+        this.axis = axis;
+        this.isOpen = false;
         this.floor = bounds.getMinPoint().clone().subtract(0, 1, 0);
         if (axis == Direction.SOUTH)
             axis = Direction.NORTH;
         if (axis == Direction.EAST)
             axis = Direction.WEST;
-        this.axis = axis;
-        isOpen = false;
+        // Tag the lock block with the door's UUID
+        tagLockBlock();
     }
 
-    public DoorClone cloneByLocation(Location locationToCloneTo) {
-        // Convert the Bukkit locations to WorldEdit locations
-        System.out.println("cloning to: " + locationToCloneTo);
-        com.sk89q.worldedit.util.Location weLocMin = BukkitAdapter.adapt(bounds.getMinPoint());
-        com.sk89q.worldedit.util.Location weLocMax = BukkitAdapter.adapt(bounds.getMaxPoint());
-        BukkitWorld world = new BukkitWorld(locationToCloneTo.getWorld());
-
-        CuboidRegion region = new CuboidRegion(world,
-                BlockVector3.at(weLocMin.getX(), weLocMin.getY(), weLocMin.getZ()),
-                BlockVector3.at(weLocMax.getX(), weLocMax.getY(), weLocMax.getZ()));
-
-        try (EditSession editSession = WorldEdit.getInstance().getEditSessionFactory().getEditSession(world, -1)) {
-            BlockArrayClipboard clipboard = new BlockArrayClipboard(region);
-            clipboard.setOrigin(region.getMinimumPoint());
-
-            ForwardExtentCopy copy = new ForwardExtentCopy(editSession, region, clipboard, region.getMinimumPoint());
-            Operations.completeLegacy(copy);
-            System.out.println("Copied!");
-
-            // Convert the destination Bukkit location to WorldEdit location
-            com.sk89q.worldedit.util.Location weTo = BukkitAdapter.adapt(locationToCloneTo);
-
-            ClipboardHolder holder = new ClipboardHolder(clipboard);
-            Operation operation = holder.createPaste(editSession)
-                    .to(BlockVector3.at(weTo.getX(), weTo.getY(), weTo.getZ()))
-                    .build();
-            Operations.completeLegacy(operation);
-
-            System.out.println("Pasted!");
-
-
-            Location newMaxPoint = new Location(locationToCloneTo.getWorld(), locationToCloneTo.getX() + bounds.getWidth(), locationToCloneTo.getY() + bounds.getHeight(), locationToCloneTo.getZ() + bounds.getDepth());
-
-            return new DoorClone(this, plugin, locationToCloneTo, newMaxPoint, axis);
-
-        } catch (WorldEditException e) {
-            e.printStackTrace();
-        }
-        return null;
+    private void tagLockBlock() {
+        Block lockBlock = lockLocation.getBlock();
+        PersistentDataContainer dataContainer = lockBlock.getChunk().getPersistentDataContainer();
+        dataContainer.set(new NamespacedKey(plugin, "door_id"), PersistentDataType.STRING, doorId.toString());
     }
 
+    public UUID getDoorId() {
+        return doorId;
+    }
 
-    @EventHandler
-    public void onPlayerInteract(PlayerInteractEvent event) {
-        Player player = event.getPlayer();
-        Block clickedBlock = event.getClickedBlock();
+    public boolean isBlockPartOfDoor(Block block) {
+        Location blockLocation = block.getLocation();
+        return blockLocation.getX() >= bounds.getMinPoint().getX() &&
+                blockLocation.getX() <= bounds.getMaxPoint().getX() &&
+                blockLocation.getY() >= bounds.getMinPoint().getY() &&
+                blockLocation.getY() <= bounds.getMaxPoint().getY() &&
+                blockLocation.getZ() >= bounds.getMinPoint().getZ() &&
+                blockLocation.getZ() <= bounds.getMaxPoint().getZ();
+    }
 
-        if (clickedBlock == null) return;
+    public boolean isLockBlock(Block block) {
+        return block.getLocation().equals(lockLocation);
+    }
+
+    public void onPlayerInteract(Player player) {
         if (isOpen) return;
 
-        ItemStack itemInHand = player.getInventory().getItemInMainHand();
+        // Check if the player is holding the correct key (e.g., a slimeball)
+        if (player.getInventory().getItemInMainHand().getType() == Material.SLIME_BALL) {
+            // Open the door
+            lowerDoor(lockLocation.getBlock());
+            isOpen = true;
 
-        // Check if the clicked block is part of the door
-        if (!isBlockPartOfDoor(clickedBlock)) return;
-        // Check if player right-clicks the "door" (White Glazed Terracotta) with the "key" (Slimeball)
-        if (clickedBlock.getType() == Material.WHITE_GLAZED_TERRACOTTA &&
-                itemInHand.getType() == Material.SLIME_BALL) {
-
-            // Decrement slimeball quantity by one
+            // Remove one slimeball from the player's hand
+            ItemStack itemInHand = player.getInventory().getItemInMainHand();
             if (itemInHand.getAmount() > 1) {
                 itemInHand.setAmount(itemInHand.getAmount() - 1);
             } else {
                 player.getInventory().setItemInMainHand(null);
             }
-
-            // Call the method to lower the door
-            lowerDoor(clickedBlock);
-            isOpen = true;
-
         }
     }
 
@@ -145,22 +114,13 @@ public class Door implements Listener {
         // Use a delay to make the movement of the door smooth
         plugin.getServer().getScheduler().scheduleSyncDelayedTask(plugin, () -> {
             // Since the door has moved down, adjust the bounds
-            bounds = new Area(bounds.getMinPoint().subtract(0, 1, 0), bounds.getMaxPoint().subtract(0, 1, 0));
+            this.bounds = new Area(bounds.getMinPoint().subtract(0, 1, 0), bounds.getMaxPoint().subtract(0, 1, 0));
 
             // Check if the door's bottom has reached the floor (or any other desired condition)
             if (bounds.getMaxPoint().getY() > floor.blockY()) {  // Assuming floorY is the Y-coordinate of the floor
                 lowerDoor(keyBlock.getRelative(0, -1, 0));
             }
         }, 4L); // 10 ticks or 0.5 seconds delay for example
-    }
-    private boolean isBlockPartOfDoor(Block block) {
-        Location blockLocation = block.getLocation();
-        return blockLocation.getX() >= bounds.getMinPoint().getX() &&
-                blockLocation.getX() <= bounds.getMaxPoint().getX() &&
-                blockLocation.getY() >= bounds.getMinPoint().getY() &&
-                blockLocation.getY() <= bounds.getMaxPoint().getY() &&
-                blockLocation.getZ() >= bounds.getMinPoint().getZ() &&
-                blockLocation.getZ() <= bounds.getMaxPoint().getZ();
     }
 
     public Direction getAxis() {

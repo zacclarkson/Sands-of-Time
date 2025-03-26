@@ -1,6 +1,5 @@
 package com.clarkson.sot.events;
 
-import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.entity.ItemDisplay;
 import org.bukkit.entity.Player;
@@ -17,11 +16,9 @@ import java.util.UUID;
 public class FloorItemManager implements Listener {
 
     private final Map<UUID, FloorItem> floorItems = new HashMap<>();
-    private final Plugin plugin;
 
     public FloorItemManager(Plugin plugin) {
-        this.plugin = plugin;
-        Bukkit.getPluginManager().registerEvents(this, plugin);
+
     }
 
     public void addFloorItem(FloorItem floorItem) {
