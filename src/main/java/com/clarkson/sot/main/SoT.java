@@ -8,7 +8,7 @@ public class SoT extends JavaPlugin {
 
     @Override
     public void onEnable() {
-        DungeonManager dungeonManager = new DungeonManager();
+        DungeonManager dungeonManager = new DungeonManager(this);
 
         CommandManager commandManager = new CommandManager(dungeonManager);
 

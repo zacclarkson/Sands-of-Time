@@ -1,6 +1,7 @@
 package com.clarkson.sot.entities;
 
 import org.bukkit.Location;
+import org.jetbrains.annotations.NotNull;
 
 public class Area {
 
@@ -56,6 +57,12 @@ public class Area {
 
     public double getDepth() {
         return depth;
+    }
+
+
+    public boolean intersects(Area worldBounds) {
+        // TODO Auto-generated method stub
+        throw new UnsupportedOperationException("Unimplemented method 'intersects'");
     }
 
     // Getters, setters, and other methods...
