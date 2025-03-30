@@ -1,7 +1,6 @@
 package com.clarkson.sot.entities;
 
 import org.bukkit.Location;
-import org.jetbrains.annotations.NotNull;
 
 public class Area {
 
