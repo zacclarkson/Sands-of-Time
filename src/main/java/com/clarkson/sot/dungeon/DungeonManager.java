@@ -1,9 +1,10 @@
 package com.clarkson.sot.dungeon;
 
 // Local project imports
-import com.clarkson.sot.utils.Direction;
+import com.clarkson.sot.utils.Direction; // Ensure this has getBlockVector() and getOpposite()
 import com.clarkson.sot.utils.EntryPoint; // Absolute location EntryPoint
 import com.clarkson.sot.utils.StructureLoader;
+import com.clarkson.sot.entities.Area; // Ensure this has a working intersects() method for AABB checks
 
 // WorldEdit imports (as before)
 import com.sk89q.worldedit.WorldEdit;
@@ -23,7 +24,10 @@ import com.sk89q.worldedit.world.World; // WorldEdit World
 // Bukkit imports
 import org.bukkit.Location;
 import org.bukkit.Material;
-import org.bukkit.block.Block; // For placing sand
+import org.bukkit.block.Block;
+import org.bukkit.block.Chest; // For item spawning example
+import org.bukkit.inventory.Inventory; // For item spawning example
+import org.bukkit.inventory.ItemStack; // For item spawning example
 import org.bukkit.plugin.Plugin;
 import org.bukkit.util.Vector;
 
@@ -41,11 +45,13 @@ import java.util.stream.Collectors;
 public class DungeonManager {
 
     // --- Enums ---
+    // Ensure this enum exists and matches the values used (GOLD, RED, GREEN, BLUE, NONE)
     public enum VaultType { GOLD, RED, GREEN, BLUE, NONE }
 
     // --- Dependencies & State ---
     private final Plugin plugin;
     private final StructureLoader structureLoader;
+    // Stores loaded templates by name. Ensure Segment class has getVaultType(), getKeyForVault(), isPuzzleRoom() getters.
     private final Map<String, Segment> segmentTemplates = new HashMap<>();
     private final Random random;
     private final long seed;
@@ -57,22 +63,22 @@ public class DungeonManager {
     private final Stack<DfsState> expansionStack = new Stack<>(); // DFS stack
 
     // --- Generation Parameters ---
+    // IMPORTANT: Ensure a template named "start_room_1" exists and is loaded.
     private static final String START_ROOM_NAME = "start_room_1";
     private static final int MAX_TRIES_PER_ENTRANCE = 5;
-    private static final int MAX_DISTANCE_FROM_START = 200; // Increased distance maybe
-    private static final int MAX_SEGMENTS = 50; // Overall max
+    private static final int MAX_DISTANCE_FROM_START = 200;
+    private static final int MAX_SEGMENTS = 50;
     private static final String SCHEMATICS_SUBDIR = "schematics";
 
-    // Depth Rules (Min depth can be added for vaults/keys if desired)
+    // Depth Rules
     private static final Map<VaultType, Integer> MAX_DEPTH_MAP = Map.of(
-        VaultType.NONE, 2,   // Normal/Puzzle branches
+        VaultType.NONE, 2,
         VaultType.GREEN, 3,
         VaultType.BLUE, 7,
         VaultType.RED, 10,
         VaultType.GOLD, 13
     );
      private static final Map<VaultType, Integer> MIN_DEPTH_VAULT_MAP = Map.of(
-         // Vaults shouldn't appear too early
          VaultType.GREEN, 3,
          VaultType.BLUE, 5,
          VaultType.RED, 7,
@@ -83,25 +89,34 @@ public class DungeonManager {
     // Internal state for DFS steps
     private record DfsState(EntryPoint exitPoint, int depth, VaultType pathColor) {}
 
-    // Constructor and Loader (similar to before)
+    // Constructor and Loader
     public DungeonManager(Plugin plugin, long seed) {
         this.plugin = Objects.requireNonNull(plugin, "Plugin cannot be null");
-        this.structureLoader = new StructureLoader(plugin);
+        this.structureLoader = new StructureLoader(plugin); // Assumes StructureLoader is correctly implemented
         this.seed = seed;
         this.random = new Random(seed);
         plugin.getLogger().info("DungeonManager initialized with seed: " + seed);
     }
      public DungeonManager(Plugin plugin) { this(plugin, System.currentTimeMillis()); }
-     public boolean loadSegmentTemplates(File dataDir) { /* ... same as before ... */
+
+     /**
+      * Loads segment templates. Ensure StructureLoader loads vaultType, keyForVault, isPuzzleRoom fields.
+      */
+     public boolean loadSegmentTemplates(File dataDir) {
         plugin.getLogger().info("Loading segment templates from: " + dataDir.getAbsolutePath());
         segmentTemplates.clear();
-        List<Segment> loadedList = structureLoader.loadSegmentTemplates(dataDir);
+        List<Segment> loadedList = structureLoader.loadSegmentTemplates(dataDir); // Assumes loader is correct
         if (loadedList.isEmpty()) {
             plugin.getLogger().severe("No segment templates loaded. Dungeon generation will fail.");
             return false;
         }
         loadedList.forEach(template -> segmentTemplates.put(template.getName(), template));
         plugin.getLogger().info("Successfully loaded " + segmentTemplates.size() + " segment templates.");
+        // IMPORTANT: Verify that loaded templates include necessary metadata (vault, key, puzzle flags)
+        // Example check (optional):
+        // if (!segmentTemplates.containsKey(START_ROOM_NAME)) {
+        //     plugin.getLogger().severe("CRITICAL: Start room template '" + START_ROOM_NAME + "' is missing!");
+        // }
         return !segmentTemplates.isEmpty();
     }
      public long getSeed() { return seed; }
@@ -116,36 +131,49 @@ public class DungeonManager {
         keysPlaced.clear();
         placedSegments.clear();
         expansionStack.clear();
-        random.setSeed(seed); // Reset random for reproducibility
+        random.setSeed(seed);
 
         // --- Validate ---
-        if (segmentTemplates.isEmpty()) { /* ... log error ... */ return; }
-        if (startRoomOrigin == null || startRoomOrigin.getWorld() == null) { /* ... log error ... */ return; }
+        if (segmentTemplates.isEmpty()) {
+            plugin.getLogger().severe("Cannot generate dungeon: No segment templates loaded.");
+            return;
+        }
+        if (startRoomOrigin == null || startRoomOrigin.getWorld() == null) {
+             plugin.getLogger().severe("Cannot generate dungeon: Start room location or its world is null.");
+             return;
+        }
 
         // --- Setup Start Room ---
         Segment startTemplate = segmentTemplates.get(START_ROOM_NAME);
-        if (startTemplate == null) { /* ... log error ... */ return; }
+        if (startTemplate == null) {
+             plugin.getLogger().severe("Cannot generate dungeon: Start room template '" + START_ROOM_NAME + "' not found.");
+             return;
+        }
 
         PlacedSegment startPlacedSegment = new PlacedSegment(startTemplate, startRoomOrigin);
-        if (!pasteSegment(startPlacedSegment)) { /* ... log error ... */ return; }
+        if (!pasteSegment(startPlacedSegment)) {
+            plugin.getLogger().severe("Failed to place starting room schematic. Aborting dungeon generation.");
+            return;
+        }
         placedSegments.add(startPlacedSegment);
+        // Populate features for start room too, if any
+        populateSegmentFeatures(startPlacedSegment);
         plugin.getLogger().info("Placed start room: " + startTemplate.getName());
 
         // --- Designate Initial Paths & Populate Stack ---
         List<EntryPoint> startExits = startPlacedSegment.getAbsoluteEntryPoints();
         Collections.shuffle(startExits, random);
+        // Ensure enough colors for available exits, or handle fewer exits gracefully
         List<VaultType> colorsToAssign = new ArrayList<>(List.of(VaultType.GOLD, VaultType.RED, VaultType.BLUE, VaultType.GREEN));
 
         for (EntryPoint exit : startExits) {
             VaultType assignedColor = VaultType.NONE;
             if (!colorsToAssign.isEmpty()) {
-                // Assign a color to this path if available
-                assignedColor = colorsToAssign.remove(0); // Assign colors in order of list
+                assignedColor = colorsToAssign.remove(0);
                 plugin.getLogger().info("Designating path from exit " + exit.getLocation().toVector() + " as " + assignedColor);
             }
-            expansionStack.push(new DfsState(exit, 1, assignedColor)); // Depth 1, assign color or NONE
+            expansionStack.push(new DfsState(exit, 1, assignedColor));
         }
-        // Shuffle stack again to mix colored/normal paths initial exploration order
         Collections.shuffle(expansionStack, random);
 
         // --- Main DFS Loop ---
@@ -157,15 +185,16 @@ public class DungeonManager {
             VaultType currentPathColor = currentState.pathColor();
 
             // --- Check Depth Limit ---
-            int maxDepth = MAX_DEPTH_MAP.getOrDefault(currentPathColor, 2); // Default to normal path depth
+            int maxDepth = MAX_DEPTH_MAP.getOrDefault(currentPathColor, 2);
             if (currentDepth >= maxDepth) {
                 closeUnusedEntrance(currentExit);
-                continue; // Stop exploring this path
+                continue;
             }
 
             // --- Find and Prioritize Candidate Templates ---
             Direction requiredDir = currentExit.getDirection().getOpposite();
             List<Segment> potentialTemplates = findMatchingTemplates(requiredDir);
+            // Ensure Segment class has the methods getVaultType(), getKeyForVault(), isPuzzleRoom()
             List<Segment> orderedCandidates = prioritizeCandidates(potentialTemplates, currentPathColor, currentDepth);
 
             // --- Attempt Placement ---
@@ -173,10 +202,10 @@ public class DungeonManager {
             int tries = 0;
             while (!connected && tries < MAX_TRIES_PER_ENTRANCE && !orderedCandidates.isEmpty()) {
                 tries++;
-                Segment candidateTemplate = orderedCandidates.remove(0); // Try highest priority first
+                Segment candidateTemplate = orderedCandidates.remove(0);
 
                 Segment.RelativeEntryPoint candidateEntryPoint = candidateTemplate.findEntryPointByDirection(requiredDir);
-                if (candidateEntryPoint == null) continue; // Should not happen
+                if (candidateEntryPoint == null) continue;
 
                 Location candidateOrigin = calculatePlacementOrigin(currentExit, candidateEntryPoint);
                 if (candidateOrigin == null) continue;
@@ -194,13 +223,15 @@ public class DungeonManager {
                         connected = true;
 
                         // Update placed vaults/keys state
-                        if (candidateTemplate.getVaultType() != VaultType.NONE) {
-                            vaultsPlaced.add(candidateTemplate.getVaultType());
-                            plugin.getLogger().info("Placed VAULT: " + candidateTemplate.getVaultType());
+                        VaultType placedVault = candidateTemplate.getVaultType();
+                        VaultType placedKey = candidateTemplate.getKeyForVault();
+                        if (placedVault != VaultType.NONE) {
+                            vaultsPlaced.add(placedVault);
+                            plugin.getLogger().info("Placed VAULT: " + placedVault);
                         }
-                        if (candidateTemplate.getKeyForVault() != VaultType.NONE) {
-                            keysPlaced.add(candidateTemplate.getKeyForVault());
-                             plugin.getLogger().info("Placed KEY for: " + candidateTemplate.getKeyForVault());
+                        if (placedKey != VaultType.NONE) {
+                            keysPlaced.add(placedKey);
+                             plugin.getLogger().info("Placed KEY for: " + placedKey);
                         }
 
                         // Populate features (sand, items)
@@ -216,29 +247,45 @@ public class DungeonManager {
 
                         // ** Branch Pruning **
                         if (currentPathColor == VaultType.NONE && !newExits.isEmpty()) {
-                            // Only allow normal paths to branch once (or not at all if puzzle?)
-                             if (candidateTemplate.isPuzzleRoom() || currentDepth >= 1) { // Limit depth 1 or puzzle rooms
-                                 // Don't add any exits from shallow normal paths/puzzles
+                            // Pruning for Normal Paths
+                             if (candidateTemplate.isPuzzleRoom() || currentDepth >= 1) {
                                  plugin.getLogger().fine("Pruning branches from normal path segment: " + candidateTemplate.getName());
+                                 // Close these exits immediately instead of adding to stack
+                                 newExits.forEach(this::closeUnusedEntrance);
                              } else {
-                                 // Allow one random branch from first normal segment
+                                 // Allow only one random branch from the first normal segment
                                  Collections.shuffle(newExits, random);
                                  expansionStack.push(new DfsState(newExits.get(0), currentDepth + 1, VaultType.NONE));
+                                 // Close the other exits from this segment
+                                 for (int i = 1; i < newExits.size(); i++) {
+                                     closeUnusedEntrance(newExits.get(i));
+                                 }
                              }
                         } else if (!newExits.isEmpty()) {
                             // Colored paths: Add all exits, maintaining color
                             Collections.shuffle(newExits, random);
                             for (EntryPoint newExit : newExits) {
-                                expansionStack.push(new DfsState(newExit, currentDepth + 1, currentPathColor));
+                                // Only push if the vault for this color hasn't been placed yet,
+                                // or if this segment IS the vault (allowing exits from vault room?)
+                                if (!vaultsPlaced.contains(currentPathColor) || candidateTemplate.getVaultType() == currentPathColor) {
+                                    expansionStack.push(new DfsState(newExit, currentDepth + 1, currentPathColor));
+                                } else {
+                                    // Vault already placed on this path, close further exits
+                                    closeUnusedEntrance(newExit);
+                                }
                             }
                         }
-                        // Shuffle stack after adding to mix exploration order
+                        // Shuffle stack after potential adds
                         Collections.shuffle(expansionStack, random);
 
                         plugin.getLogger().info("Placed segment #" + segmentsPlacedCount + ": " + candidateTemplate.getName() + " (Path: " + currentPathColor + ", Depth: " + (currentDepth+1) + ")");
 
-                    } else { /* Paste failed, log warning */ }
-                } else { /* Overlap or distance fail, log fine */ }
+                    } else {
+                        plugin.getLogger().warning("Placement validation passed for " + candidateTemplate.getName() + ", but schematic pasting failed.");
+                    }
+                } else {
+                     plugin.getLogger().fine("Skipped placing " + candidateTemplate.getName() + ": Overlap=" + doesOverlap(candidatePlaced, placedSegments) + ", TooFar=" + !isWithinDistance(startRoomOrigin, candidateOrigin, MAX_DISTANCE_FROM_START));
+                }
             } // End attempts loop
 
             if (!connected) {
@@ -249,7 +296,7 @@ public class DungeonManager {
         // Final cleanup
         while (!expansionStack.isEmpty()) { closeUnusedEntrance(expansionStack.pop()); }
         plugin.getLogger().info("Dungeon generation finished. Total segments placed: " + placedSegments.size());
-        // Log missing vaults/keys?
+        // Log missing vaults/keys
         for (VaultType vt : VaultType.values()) {
             if (vt != VaultType.NONE) {
                 if (!vaultsPlaced.contains(vt)) plugin.getLogger().warning("Vault NOT placed: " + vt);
@@ -264,7 +311,7 @@ public class DungeonManager {
     private List<Segment> prioritizeCandidates(List<Segment> candidates, VaultType pathColor, int currentDepth) {
         List<Segment> priorityVault = new ArrayList<>();
         List<Segment> priorityKey = new ArrayList<>();
-        List<Segment> priorityPath = new ArrayList<>();
+        List<Segment> priorityPath = new ArrayList<>(); // Segments specifically for colored paths?
         List<Segment> priorityPuzzle = new ArrayList<>();
         List<Segment> normal = new ArrayList<>();
 
@@ -274,37 +321,34 @@ public class DungeonManager {
             VaultType templateVault = template.getVaultType();
             VaultType templateKey = template.getKeyForVault();
 
-            // --- Vault Placement Logic ---
+            // --- Vault Placement ---
             if (templateVault != VaultType.NONE) {
-                // Is it the *correct* vault for this path? Is depth sufficient? Is it already placed?
-                if (templateVault == pathColor &&
-                    nextDepth >= MIN_DEPTH_VAULT_MAP.getOrDefault(pathColor, Integer.MAX_VALUE) &&
-                    !vaultsPlaced.contains(templateVault))
+                if (templateVault == pathColor && // Must match path color
+                    nextDepth >= MIN_DEPTH_VAULT_MAP.getOrDefault(pathColor, Integer.MAX_VALUE) && // Must meet min depth
+                    !vaultsPlaced.contains(templateVault)) // Must not be placed yet
                 {
-                    priorityVault.add(template); continue; // Highest priority
+                    priorityVault.add(template); continue;
                 } else {
-                    continue; // Don't place wrong vault or if already placed or too early
+                    continue; // Don't place wrong vault, duplicate, or too early
                 }
             }
 
-            // --- Key Placement Logic ---
+            // --- Key Placement ---
              if (templateKey != VaultType.NONE) {
-                 // Has this key already been placed?
-                 if (!keysPlaced.contains(templateKey)) {
-                     // Allow keys anywhere, but maybe prioritize on non-matching colored paths or normal paths?
-                     priorityKey.add(template); continue;
+                 if (!keysPlaced.contains(templateKey)) { // Must not be placed yet
+                     priorityKey.add(template); continue; // Keys can go anywhere not yet placed
                  } else {
                      continue; // Don't place duplicate keys
                  }
              }
 
-            // --- Pathway/Puzzle/Normal Logic ---
+            // --- Pathway/Puzzle/Normal ---
+            // TODO: Refine pathway segment identification. Assuming non-special for now.
+            // Maybe add a SegmentType.PATHWAY_COLOR or check name pattern?
             if (pathColor != VaultType.NONE) {
-                // On a colored path, prefer matching pathway segments
-                // (Need a way to identify pathway segments - assume non-special for now)
-                 priorityPath.add(template); // Treat normal segments as pathway segments for now
+                 priorityPath.add(template); // On colored path, prefer pathway segments first
             } else {
-                // On a normal path, prefer puzzle rooms
+                // On normal path, prefer puzzle rooms
                 if (template.isPuzzleRoom()) {
                     priorityPuzzle.add(template);
                 } else {
@@ -321,16 +365,15 @@ public class DungeonManager {
         Collections.shuffle(normal, random);
 
         List<Segment> ordered = new ArrayList<>();
-        ordered.addAll(priorityVault);
-        ordered.addAll(priorityKey);
-        // On colored path, place path segments before puzzles/normal
-        if (pathColor != VaultType.NONE) {
-            ordered.addAll(priorityPath);
-            ordered.addAll(priorityPuzzle); // Puzzles less likely on main path?
-            ordered.addAll(normal);
-        } else { // On normal path, place puzzles before normal
-             ordered.addAll(priorityPuzzle);
-             ordered.addAll(normal);
+        ordered.addAll(priorityVault); // Vault for this path is highest priority if conditions met
+        ordered.addAll(priorityKey);   // Keys are next highest
+        if (pathColor != VaultType.NONE) { // On colored path
+            ordered.addAll(priorityPath); // Then pathway segments
+            ordered.addAll(priorityPuzzle); // Then puzzles (less common on main path?)
+            ordered.addAll(normal);        // Then normal filler
+        } else { // On normal path
+             ordered.addAll(priorityPuzzle); // Puzzles first
+             ordered.addAll(normal);        // Then normal filler
         }
 
         return ordered;
@@ -351,21 +394,27 @@ public class DungeonManager {
                 List<BlockVector3> shuffledSpawns = new ArrayList<>(relativeSandSpawns);
                 Collections.shuffle(shuffledSpawns, random);
 
+                plugin.getLogger().info("Attempting to place sand in vault: " + template.getName());
                 for (BlockVector3 relPos : shuffledSpawns) {
                     if (sandPlaced >= maxSand) break;
                     try {
                         Location absLoc = placedSegment.getAbsoluteLocation(relPos);
                         Block block = absLoc.getBlock();
-                        // Check if block is replaceable (e.g., air) before placing sand
-                        if (block.getType().isAir() || block.isLiquid() || !block.getType().isSolid()) {
-                             block.setType(Material.SAND); // Or SOUL_SAND etc.
+                        // Only place sand if the spot is empty (air) or liquid
+                        if (block.getType().isAir() || block.isLiquid()) {
+                             block.setType(Material.SAND); // Consider SAND or SOUL_SAND?
                              sandPlaced++;
+                             plugin.getLogger().fine("Placed sand at " + absLoc.toVector());
+                        } else {
+                            plugin.getLogger().fine("Skipped placing sand at " + absLoc.toVector() + ", block not replaceable: " + block.getType());
                         }
                     } catch (Exception e) {
                         plugin.getLogger().log(Level.WARNING, "Error placing sand at relative pos " + relPos + " for segment " + template.getName(), e);
                     }
                 }
-                 plugin.getLogger().info("Placed " + sandPlaced + " sand blocks in vault: " + template.getName());
+                 plugin.getLogger().info("Placed " + sandPlaced + "/" + maxSand + " sand blocks in vault: " + template.getName());
+            } else {
+                 plugin.getLogger().warning("Vault segment " + template.getName() + " has no sand spawn locations defined.");
             }
         }
 
@@ -375,40 +424,88 @@ public class DungeonManager {
              plugin.getLogger().info("Processing " + relativeItemSpawns.size() + " item spawn locations for " + template.getName());
              for (BlockVector3 relPos : relativeItemSpawns) {
                  Location absLoc = placedSegment.getAbsoluteLocation(relPos);
-                 // TODO: Implement Item Spawning Logic
-                 // - Check if block at absLoc is suitable (e.g., AIR for item drop, CHEST for inventory)
-                 // - Determine loot based on template type, path color, depth, etc.
-                 // - Place item/chest/entity
-                 // Example: Place a chest
-                 // absLoc.getBlock().setType(Material.CHEST);
-                 // Chest chest = (Chest) absLoc.getBlock().getState();
-                 // Inventory inv = chest.getBlockInventory();
-                 // inv.setItem(random.nextInt(inv.getSize()), new ItemStack(Material.DIAMOND)); // Example item
-                 plugin.getLogger().fine("Item spawn placeholder at " + absLoc.toVector() + " for " + template.getName());
+                 plugin.getLogger().fine("Attempting item spawn at " + absLoc.toVector() + " for " + template.getName());
+
+                 // --- START: Item Spawning Logic Implementation ---
+                 try {
+                     // Example: Place a chest with a placeholder item (diamond)
+                     Block block = absLoc.getBlock();
+                     if (block.getType().isAir() || !block.getType().isSolid()) { // Check if replaceable
+                         block.setType(Material.CHEST);
+                         if (block.getState() instanceof Chest) {
+                             Chest chest = (Chest) block.getState();
+                             Inventory inv = chest.getBlockInventory();
+
+                             // TODO: Determine actual loot based on rules (path color, depth, room type, key/vault status etc.)
+                             // This requires a loot table system or hardcoded logic.
+                             ItemStack lootItem;
+                             VaultType keyType = template.getKeyForVault();
+                             if (keyType != VaultType.NONE) {
+                                 // This is a key room, place the corresponding key
+                                 lootItem = createKeyItem(keyType); // Need createKeyItem helper method
+                             } else {
+                                 // Placeholder loot (e.g., a diamond)
+                                 lootItem = new ItemStack(Material.DIAMOND, 1);
+                                 // Add more complex loot table logic here based on context
+                             }
+
+                             if (lootItem != null) {
+                                 // Place item in a random slot (or specific slots)
+                                 inv.setItem(random.nextInt(inv.getSize()), lootItem);
+                                 plugin.getLogger().fine("Placed chest with item " + lootItem.getType() + " at " + absLoc.toVector());
+                             } else {
+                                 plugin.getLogger().warning("Loot item was null for spawn at " + absLoc.toVector());
+                             }
+                         } else {
+                              plugin.getLogger().warning("Placed CHEST material, but block state is not a Chest at " + absLoc.toVector());
+                         }
+                     } else {
+                          plugin.getLogger().warning("Skipped placing chest at " + absLoc.toVector() + ", block not replaceable: " + block.getType());
+                     }
+                 } catch (Exception e) {
+                      plugin.getLogger().log(Level.WARNING, "Error during item spawning at " + absLoc.toVector(), e);
+                 }
+                 // --- END: Item Spawning Logic Implementation ---
              }
         }
     }
 
+    /**
+     * Helper method to create a placeholder key item.
+     * TODO: Customize appearance, lore, NBT tags as needed.
+     */
+    private ItemStack createKeyItem(VaultType vaultType) {
+        Material material;
+        String name;
+        switch (vaultType) {
+            case GOLD: material = Material.GOLD_NUGGET; name = "§6Gold Vault Key"; break; // Example
+            case RED: material = Material.REDSTONE; name = "§cRed Vault Key"; break;
+            case GREEN: material = Material.EMERALD; name = "§aGreen Vault Key"; break;
+            case BLUE: material = Material.LAPIS_LAZULI; name = "§9Blue Vault Key"; break;
+            default: return null; // No key for NONE
+        }
+        ItemStack key = new ItemStack(material, 1);
+        // TODO: Add custom model data, lore, NBT tags to make keys unique/functional
+        // ItemMeta meta = key.getItemMeta();
+        // if (meta != null) {
+        //    meta.setDisplayName(name);
+        //    meta.setLore(List.of("Unlocks the " + vaultType + " Vault"));
+        //    // meta.setCustomModelData(12345); // Example
+        //    key.setItemMeta(meta);
+        // }
+        return key;
+    }
 
-    // --- Helper methods (calculatePlacementOrigin, pasteSegment, doesOverlap, findMatchingTemplates, areConnectingEntryPoints, isWithinDistance, closeUnusedEntrance) ---
-    // (Keep these methods largely the same as in the previous version, ensuring they use the correct classes like PlacedSegment, EntryPoint, Direction etc.)
-    // Minor adjustments might be needed based on exact class definitions.
 
-    // [Include the implementations for the helper methods from the previous version here, verifying parameters and logic]
-    // calculatePlacementOrigin - Seems okay
-    // pasteSegment - Seems okay
-    // doesOverlap - Needs PlacedSegment's getWorldBounds() which uses Area. Ensure Area.intersects works.
-    // findMatchingTemplates - Seems okay
-    // areConnectingEntryPoints - Seems okay
-    // isWithinDistance - Seems okay
-    // closeUnusedEntrance - Seems okay
+    // --- Helper methods ---
+    // [Implementations for calculatePlacementOrigin, pasteSegment, doesOverlap, findMatchingTemplates, areConnectingEntryPoints, isWithinDistance, closeUnusedEntrance]
+    // (Copied from previous version - verify they are still correct)
 
-    // [Pasting helper methods from previous version for completeness]
     private Location calculatePlacementOrigin(EntryPoint currentExitPoint, Segment.RelativeEntryPoint candidateEntryPoint) {
         try {
             Location exitLoc = currentExitPoint.getLocation();
             Direction exitDir = currentExitPoint.getDirection();
-            Location targetEntryPointLoc = exitLoc.clone().add(exitDir.getBlockVector());
+            Location targetEntryPointLoc = exitLoc.clone().add(exitDir.getBlockVector()); // Use Direction's vector method
             BlockVector3 candidateEntryRelPos = candidateEntryPoint.getRelativePosition();
             Location candidateOrigin = targetEntryPointLoc.clone().subtract(
                 candidateEntryRelPos.getX(), candidateEntryRelPos.getY(), candidateEntryRelPos.getZ()
@@ -427,7 +524,7 @@ public class DungeonManager {
         Location origin = placedSegment.getWorldOrigin();
         File schematicFile = template.getSchematicFile(plugin.getDataFolder(), SCHEMATICS_SUBDIR);
         if (schematicFile == null || !schematicFile.exists() || !schematicFile.isFile()) {
-            plugin.getLogger().severe("Schematic file not found: " + (schematicFile != null ? schematicFile.getPath() : "null")); return false;
+            plugin.getLogger().severe("Schematic file not found: " + (schematicFile != null ? schematicFile.getPath() : "null") + " for template " + template.getName()); return false;
         }
         Clipboard clipboard;
         ClipboardFormat format = ClipboardFormats.findByFile(schematicFile);
@@ -450,22 +547,22 @@ public class DungeonManager {
                 Operation operation = new ClipboardHolder(clipboard)
                         .createPaste(editSession)
                         .to(BukkitAdapter.asBlockVector(origin))
-                        .ignoreAirBlocks(false)
+                        .ignoreAirBlocks(false) // Usually false for dungeons
                         .build();
                 Operations.complete(operation);
                 return true;
             }
         } catch (WorldEditException e) {
-            plugin.getLogger().log(Level.SEVERE, "WorldEditException pasting: " + template.getName(), e); return false;
+            plugin.getLogger().log(Level.SEVERE, "WorldEditException pasting: " + template.getName() + " at " + origin.toVector(), e); return false;
         } catch (Exception e) {
-             plugin.getLogger().log(Level.SEVERE, "Unexpected error pasting: " + template.getName(), e); return false;
+             plugin.getLogger().log(Level.SEVERE, "Unexpected error pasting: " + template.getName() + " at " + origin.toVector(), e); return false;
         }
     }
 
     private boolean doesOverlap(PlacedSegment newSegment, List<PlacedSegment> activeSegments) {
         for (PlacedSegment placed : activeSegments) {
             if (!newSegment.getWorld().equals(placed.getWorld())) continue;
-            // Ensure Area class has a working intersects method for AABB check
+            // IMPORTANT: Ensure your Area class has a working intersects(Area other) method for AABB check
             if (newSegment.getWorldBounds().intersects(placed.getWorldBounds())) {
                 return true;
             }
@@ -474,15 +571,18 @@ public class DungeonManager {
     }
 
     private List<Segment> findMatchingTemplates(Direction requiredDirection) {
+        // Ensure Segment has hasEntryPointInDirection(Direction)
         return segmentTemplates.values().stream()
                 .filter(template -> template.hasEntryPointInDirection(requiredDirection))
                 .collect(Collectors.toList());
     }
 
     private boolean areConnectingEntryPoints(EntryPoint ep1, EntryPoint ep2) {
+        // Ensure Direction has getOpposite() and getBlockVector()
         if (ep1 == null || ep2 == null || ep1.getLocation() == null || ep2.getLocation() == null || ep1.getDirection() == null || ep2.getDirection() == null) return false;
         if (!ep1.getDirection().equals(ep2.getDirection().getOpposite())) return false;
         Location expectedLoc2 = ep1.getLocation().clone().add(ep1.getDirection().getBlockVector());
+        // Compare block coordinates
         return expectedLoc2.getBlockX() == ep2.getLocation().getBlockX() &&
                expectedLoc2.getBlockY() == ep2.getLocation().getBlockY() &&
                expectedLoc2.getBlockZ() == ep2.getLocation().getBlockZ();
@@ -497,9 +597,12 @@ public class DungeonManager {
          if (unusedEnd == null || unusedEnd.getLocation() == null || unusedEnd.getDirection() == null) return;
          plugin.getLogger().info("[Dungeon] Closing off unused entrance at " + unusedEnd.getLocation().toVector() + " facing " + unusedEnd.getDirection());
          try {
-              Location blockLoc = unusedEnd.getLocation().clone().add(unusedEnd.getDirection().getBlockVector());
-              blockLoc.getBlock().setType(Material.STONE_BRICKS); // Example
-         } catch (Exception e) { /* log warning */ }
+              // Place block one step IN the direction the entrance faces (inside the segment)
+              Location blockLoc = unusedEnd.getLocation(); //.clone().add(unusedEnd.getDirection().getBlockVector()); // Place *at* the entrance marker? Or one block out? Let's try *at*.
+              blockLoc.getBlock().setType(Material.STONE_BRICKS); // Example closing material
+         } catch (Exception e) {
+             plugin.getLogger().log(Level.WARNING,"Failed to place closing block for unused entrance.", e);
+         }
      }
 
 }
