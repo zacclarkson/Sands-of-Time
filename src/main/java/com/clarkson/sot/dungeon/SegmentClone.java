@@ -39,8 +39,7 @@ public class SegmentClone extends Segment {
         return originalSegment;
     }
 
-
-    // You can also override some methods if required or add new methods specific to the clone.
+    
 }
 
 

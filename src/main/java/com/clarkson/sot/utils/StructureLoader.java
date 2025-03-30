@@ -6,29 +6,20 @@ import com.google.gson.JsonObject;
 import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.World;
+import com.clarkson.sot.dungeon.Segment;
 
 import java.io.File;
 import java.io.FileReader;
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.List;
 
 public class StructureLoader {
 
     private final Gson gson = new Gson();
 
-    public void loadStructure(File file, Location location) throws Exception {
-        // Read the JSON file
-        JsonObject json = gson.fromJson(new FileReader(file), JsonObject.class);
+    public List <Segment> loadSegments(File file) throws IOException {
 
-        JsonArray blocks = json.getAsJsonArray("blocks");
-        World world = location.getWorld();
 
-        for (int i = 0; i < blocks.size(); i++) {
-            JsonObject blockData = blocks.get(i).getAsJsonObject();
-            int x = blockData.get("x").getAsInt() + location.getBlockX();
-            int y = blockData.get("y").getAsInt() + location.getBlockY();
-            int z = blockData.get("z").getAsInt() + location.getBlockZ();
-            Material type = Material.valueOf(blockData.get("type").getAsString());
-
-            world.getBlockAt(x, y, z).setType(type);
-        }
     }
 }

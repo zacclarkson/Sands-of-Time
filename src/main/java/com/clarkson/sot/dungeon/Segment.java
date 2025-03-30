@@ -59,11 +59,13 @@ public class Segment {
 
 
     public void cloneToLocation(Location to) throws WorldEditException {
+        // convert the bounds to WorldEdit's format
         com.sk89q.worldedit.world.World world = BukkitAdapter.adapt(bounds.getMinPoint().getWorld());
         BlockVector3 min = BukkitAdapter.asBlockVector(bounds.getMinPoint());
         BlockVector3 max = BukkitAdapter.asBlockVector(bounds.getMaxPoint());
         BlockVector3 destination = BukkitAdapter.asBlockVector(to);
 
+        // Create a region and clipboard
         CuboidRegion region = new CuboidRegion(world, min, max);
         BlockArrayClipboard clipboard = new BlockArrayClipboard(region);
 
@@ -213,10 +215,6 @@ public class Segment {
     public int getTotalCoins() {
         return totalCoins;
     }
-
-
-
-    // Getters, setters, and other methods...
 }
 
 

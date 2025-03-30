@@ -1,19 +1,19 @@
 package com.clarkson.sot.utils;
 
+import com.clarkson.sot.dungeon.Segment;
+import com.clarkson.sot.entities.Area;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
-import com.sk89q.worldedit.math.BlockVector3;
-import com.sk89q.worldedit.regions.CuboidRegion;
+import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
 import org.bukkit.Location;
-import org.bukkit.Material;
-import org.bukkit.block.Block;
 import org.bukkit.plugin.Plugin;
+import java.util.List;
 
 import java.io.File;
 import java.io.FileWriter;
 import java.io.IOException;
-import java.util.ArrayList;
-import java.util.List;
 
 public class StructureSaver {
 
@@ -25,66 +25,77 @@ public class StructureSaver {
         this.gson = new GsonBuilder().setPrettyPrinting().create(); // Pretty print for better readability
     }
 
-    public void saveStructure(Location minPoint, Location maxPoint, String structureName) throws IOException {
-        // Create BlockVector3 objects for the minimum and maximum points
-        BlockVector3 minVector = BlockVector3.at(minPoint.getBlockX(), minPoint.getBlockY(), minPoint.getBlockZ());
-        BlockVector3 maxVector = BlockVector3.at(maxPoint.getBlockX(), maxPoint.getBlockY(), maxPoint.getBlockZ());
+    public void saveStructure(Segment segment) throws IOException { 
 
-        // Create a CuboidRegion using the updated API
-        CuboidRegion region = new CuboidRegion(minVector, maxVector);
+        File file = new File(plugin.getDataFolder(), "segments.json");
 
-        // Create a list to store block data
-        List<BlockData> blocks = new ArrayList<>();
-        for (BlockVector3 vector : region) {
-            Block block = minPoint.getWorld().getBlockAt(vector.x(), vector.y(), vector.z()); // Use x(), y(), z()
-            if (block.getType() != Material.AIR) {
-                blocks.add(new BlockData(
-                        vector.x() - minPoint.getBlockX(),
-                        vector.y() - minPoint.getBlockY(),
-                        vector.z() - minPoint.getBlockZ(),
-                        block.getType().name()
-                ));
+        // Ensure the file exists
+        if (!file.exists()) {
+            if (file.createNewFile()) {
+                System.out.println("File created: " + file.getAbsolutePath());
+            } else {
+                System.out.println("Failed to create the file.");
             }
         }
 
-        // Create the structure object
-        Structure structure = new Structure(structureName, blocks);
-
-        // Write the structure to a JSON file
-        File file = new File(plugin.getDataFolder(), structureName + ".json");
+        // Write to the file
         try (FileWriter writer = new FileWriter(file)) {
-            gson.toJson(structure, writer);
-        }
-    }
-    // Inner class to represent block data
-    private static class BlockData {
-        @SuppressWarnings("unused") // Used by Gson for serialization
-        private final int x;
-        @SuppressWarnings("unused") // Used by Gson for serialization
-        private final int y;
-        @SuppressWarnings("unused") // Used by Gson for serialization
-        private final int z;
-        @SuppressWarnings("unused") // Used by Gson for serialization
-        private final String type;
-
-        public BlockData(int x, int y, int z, String type) {
-            this.x = x;
-            this.y = y;
-            this.z = z;
-            this.type = type;
+            writer.write(gson.toJson(serializeSegment(segment)));
         }
     }
 
-    // Inner class to represent the structure
-    private static class Structure {
-        @SuppressWarnings("unused") // Used by Gson for serialization
-        private final String name;
-        @SuppressWarnings("unused") // Used by Gson for serialization
-        private final List<BlockData> blocks;
+    private JsonElement serializeSegment(Segment segment) {
+    JsonObject json = new JsonObject();
+    json.addProperty("name", segment.getName());
+    json.addProperty("type", segment.getType().toString());
+    json.add("bounds", serializeBounds(segment.getBounds()));
 
-        public Structure(String name, List<BlockData> blocks) {
-            this.name = name;
-            this.blocks = blocks;
+    // Serialize entry points
+    JsonArray entryPoints = new JsonArray();
+    for (EntryPoint ep : segment.getEntryPoints()) {
+        JsonObject epJson = new JsonObject();
+        epJson.addProperty("x", ep.getLocation().getBlockX());
+        epJson.addProperty("y", ep.getLocation().getBlockY());
+        epJson.addProperty("z", ep.getLocation().getBlockZ());
+        epJson.addProperty("direction", ep.getDirection().toString());
+        entryPoints.add(epJson);
+    }
+    json.add("entryPoints", entryPoints);
+
+    // Serialize spawn locations
+    json.add("sandSpawnLocations", serializeLocations(segment.getSandSpawnLocations()));
+    json.add("itemSpawnLocations", serializeLocations(segment.getItemSpawnLocations()));
+    json.add("coinSpawnLocations", serializeLocations(segment.getCoinSpawnLocations()));
+
+    json.addProperty("totalCoins", segment.getTotalCoins());
+
+    return json;
+}
+
+    private JsonElement serializeBounds(Area bounds) {
+        JsonObject boundsJson = new JsonObject();
+        boundsJson.add("minPoint", serializeLocation(bounds.getMinPoint()));
+        boundsJson.add("maxPoint", serializeLocation(bounds.getMaxPoint()));
+        return boundsJson;
+    }
+
+    private JsonElement serializeLocation(Location minPoint) {
+        JsonObject locJson = new JsonObject();
+        locJson.addProperty("x", minPoint.getBlockX());
+        locJson.addProperty("y", minPoint.getBlockY());
+        locJson.addProperty("z", minPoint.getBlockZ());
+        return locJson;
+    }
+
+    private JsonArray serializeLocations(List<Location> locations) {
+        JsonArray jsonArray = new JsonArray();
+        for (Location loc : locations) {
+            JsonObject locJson = new JsonObject();
+            locJson.addProperty("x", loc.getBlockX());
+            locJson.addProperty("y", loc.getBlockY());
+            locJson.addProperty("z", loc.getBlockZ());
+            jsonArray.add(locJson);
         }
+        return jsonArray;
     }
 }

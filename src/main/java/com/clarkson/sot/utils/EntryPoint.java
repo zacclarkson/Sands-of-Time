@@ -47,7 +47,4 @@ public class EntryPoint {
                 ", direction=" + direction +
                 '}';
     }
-
-
-    // Getters, setters, and other methods...
 }
