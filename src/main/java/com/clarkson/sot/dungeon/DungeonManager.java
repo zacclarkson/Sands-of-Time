@@ -325,9 +325,22 @@ public class DungeonManager {
         }
     }
 
-    private void closeUnusedEntrance(DfsState pop) {
-        // TODO Auto-generated method stub
-        throw new UnsupportedOperationException("Unimplemented method 'closeUnusedEntrance'");
+    private void closeUnusedEntrance(DfsState state) {
+        if (state == null || state.getExitPoint() == null || state.getExitPoint().getLocation() == null || state.getExitPoint().getDirection() == null) {
+            plugin.getLogger().warning("Invalid state or exit point provided for closing unused entrance.");
+            return;
+        }
+
+        EntryPoint unusedEnd = state.getExitPoint();
+        plugin.getLogger().info("[Dungeon] Closing off unused entrance at " + unusedEnd.getLocation().toVector() + " facing " + unusedEnd.getDirection());
+
+        try {
+            // Place block one step IN the direction the entrance faces (inside the segment)
+            Location blockLoc = unusedEnd.getLocation().clone().add(unusedEnd.getDirection().getBlockVector());
+            blockLoc.getBlock().setType(Material.STONE_BRICKS); // Example closing material
+        } catch (Exception e) {
+            plugin.getLogger().log(Level.WARNING, "Failed to place closing block for unused entrance.", e);
+        }
     }
     /**
      * Orders candidate templates based on current path color, depth, and game rules.
