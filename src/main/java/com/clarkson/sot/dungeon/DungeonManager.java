@@ -4,7 +4,6 @@ package com.clarkson.sot.dungeon;
 import com.clarkson.sot.utils.Direction; // Ensure this has getBlockVector() and getOpposite()
 import com.clarkson.sot.utils.EntryPoint; // Absolute location EntryPoint
 import com.clarkson.sot.utils.StructureLoader;
-import com.clarkson.sot.entities.Area; // Ensure this has a working intersects() method for AABB checks
 
 // WorldEdit imports (as before)
 import com.sk89q.worldedit.WorldEdit;
@@ -18,7 +17,7 @@ import com.sk89q.worldedit.function.operation.Operation;
 import com.sk89q.worldedit.function.operation.Operations;
 import com.sk89q.worldedit.math.BlockVector3;
 import com.sk89q.worldedit.session.ClipboardHolder;
-import com.sk89q.worldedit.session.EditSession;
+import com.sk89q.worldedit.EditSession;
 import com.sk89q.worldedit.world.World; // WorldEdit World
 
 // Bukkit imports
@@ -29,7 +28,6 @@ import org.bukkit.block.Chest; // For item spawning example
 import org.bukkit.inventory.Inventory; // For item spawning example
 import org.bukkit.inventory.ItemStack; // For item spawning example
 import org.bukkit.plugin.Plugin;
-import org.bukkit.util.Vector;
 
 // Java imports
 import java.io.File;
@@ -87,7 +85,29 @@ public class DungeonManager {
 
 
     // Internal state for DFS steps
-    private record DfsState(EntryPoint exitPoint, int depth, VaultType pathColor) {}
+    private static class DfsState {
+        private final EntryPoint exitPoint;
+        private final int depth;
+        private final VaultType pathColor;
+
+        public DfsState(EntryPoint exitPoint, int depth, VaultType pathColor) {
+            this.exitPoint = exitPoint;
+            this.depth = depth;
+            this.pathColor = pathColor;
+        }
+
+        public EntryPoint getExitPoint() {
+            return exitPoint;
+        }
+
+        public int getDepth() {
+            return depth;
+        }
+
+        public VaultType getPathColor() {
+            return pathColor;
+        }
+    }
 
     // Constructor and Loader
     public DungeonManager(Plugin plugin, long seed) {
@@ -180,9 +200,9 @@ public class DungeonManager {
         int segmentsPlacedCount = 1;
         while (!expansionStack.isEmpty() && segmentsPlacedCount < MAX_SEGMENTS) {
             DfsState currentState = expansionStack.pop();
-            EntryPoint currentExit = currentState.exitPoint();
-            int currentDepth = currentState.depth();
-            VaultType currentPathColor = currentState.pathColor();
+            EntryPoint currentExit = currentState.getExitPoint();
+            int currentDepth = currentState.getDepth();
+            VaultType currentPathColor = currentState.getPathColor();
 
             // --- Check Depth Limit ---
             int maxDepth = MAX_DEPTH_MAP.getOrDefault(currentPathColor, 2);
@@ -305,6 +325,10 @@ public class DungeonManager {
         }
     }
 
+    private void closeUnusedEntrance(DfsState pop) {
+        // TODO Auto-generated method stub
+        throw new UnsupportedOperationException("Unimplemented method 'closeUnusedEntrance'");
+    }
     /**
      * Orders candidate templates based on current path color, depth, and game rules.
      */
@@ -508,7 +532,7 @@ public class DungeonManager {
             Location targetEntryPointLoc = exitLoc.clone().add(exitDir.getBlockVector()); // Use Direction's vector method
             BlockVector3 candidateEntryRelPos = candidateEntryPoint.getRelativePosition();
             Location candidateOrigin = targetEntryPointLoc.clone().subtract(
-                candidateEntryRelPos.getX(), candidateEntryRelPos.getY(), candidateEntryRelPos.getZ()
+                candidateEntryRelPos.x(), candidateEntryRelPos.y(), candidateEntryRelPos.z()
             );
             if (!candidateOrigin.getWorld().equals(exitLoc.getWorld())) {
                 plugin.getLogger().severe("World mismatch during origin calculation!"); return null;
