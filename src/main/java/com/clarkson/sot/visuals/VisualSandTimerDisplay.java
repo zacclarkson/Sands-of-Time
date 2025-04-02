@@ -91,12 +91,20 @@ public class VisualSandTimerDisplay {
         // Get current visual blocks (could be slightly out of sync)
         int currentBlocks = countCurrentSandBlocks();
 
+        // Avoid redundant updates if the visual state hasn't changed
+        if (targetBlocks == lastKnownVisualBlocks) {
+            return;
+        }
+
         // If the target is lower than current, remove blocks
         // We remove one block at a time per interval to make it look like it's draining
         if (targetBlocks < currentBlocks) {
             removeBottomSandBlock();
             // Optional: Recalculate currentBlocks if needed for immediate accuracy
         }
+
+        // Update the last known visual state
+        lastKnownVisualBlocks = targetBlocks;
         // If target is higher (e.g., time was added), syncVisualState handles adding blocks back.
         // We could potentially call syncVisualState here periodically too, but it's more intensive.
     }
