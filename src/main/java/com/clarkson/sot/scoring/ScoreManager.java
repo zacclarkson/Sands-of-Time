@@ -1,7 +1,12 @@
-package com.clarkson.sot.utils;
+package com.clarkson.sot.scoring;
+
+import java.util.UUID;
 
 import org.bukkit.Location;
 import org.bukkit.entity.Player;
+
+import com.clarkson.sot.utils.SoTTeam;
+import com.clarkson.sot.utils.TeamManager;
 
 public class ScoreManager {
     private final TeamManager teamManager; // To update team banked scores
@@ -56,6 +61,21 @@ public class ScoreManager {
         // Called by GameManager for players trapped inside
         // Clear player's unbanked score (they lose everything)
         // setPlayerUnbankedScore(player, 0);
+    }
+
+    public void applyTimerEndPenalty(UUID memberUUID) {
+        // TODO Auto-generated method stub
+        throw new UnsupportedOperationException("Unimplemented method 'applyTimerEndPenalty'");
+    }
+
+    public void applyDeathPenalty(UUID uniqueId) {
+        // TODO Auto-generated method stub
+        throw new UnsupportedOperationException("Unimplemented method 'applyDeathPenalty'");
+    }
+
+    public void playerEscaped(UUID uniqueId) {
+        // TODO Auto-generated method stub
+        throw new UnsupportedOperationException("Unimplemented method 'playerEscaped'");
     }
 
     // --- Need methods to get/set player unbanked scores (requires PlayerData) ---

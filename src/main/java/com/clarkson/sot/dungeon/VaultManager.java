@@ -2,8 +2,8 @@ package com.clarkson.sot.dungeon; // Or your chosen package
 
 import com.clarkson.sot.main.GameManager; // Assuming GameManager is in .main package
 import com.clarkson.sot.main.SoT; // Assuming SoT is in .main package
-import com.clarkson.sot.dungeon.PlacedSegment; // Assuming PlacedSegment is in .segment package
-import com.clarkson.sot.dungeon.Segment; // Assuming Segment is in .segment package
+import com.clarkson.sot.dungeon.segment.PlacedSegment;
+import com.clarkson.sot.dungeon.segment.Segment;
 
 import org.bukkit.ChatColor;
 import org.bukkit.Location;

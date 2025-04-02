@@ -1,20 +1,20 @@
-package com.clarkson.sot.utils; // Or your chosen package
-
-import org.bukkit.Bukkit; // For BukkitTask
-import org.bukkit.entity.Player;
-import org.bukkit.plugin.Plugin; // Needed to schedule tasks
-import org.bukkit.scheduler.BukkitTask; // For the timer task
+package com.clarkson.sot.utils;
 
 import com.clarkson.sot.main.GameManager;
+import com.clarkson.sot.visuals.VisualSandTimerDisplay;
 
+import org.bukkit.Bukkit;
+import org.bukkit.Location;
+import org.bukkit.entity.Player;
+import org.bukkit.plugin.Plugin;
+import org.bukkit.scheduler.BukkitTask;
+
+import java.util.Collections;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.logging.Level;
 
-/**
- * Represents a team playing the Sands of Time game.
- * Now includes its own independent timer state and controls.
- */
 public class SoTTeam {
     // --- General Team Info ---
     private final UUID teamId;
@@ -25,130 +25,204 @@ public class SoTTeam {
     // --- Sands of Time Specific State ---
     private int teamSandCount;
     private int bankedScore;
-    private int remainingSeconds; // Each team has its own timer!
-    private transient BukkitTask timerTask; // The task ticking this team's timer
-    private transient Plugin plugin; // Reference to the main plugin for scheduling
-    private transient GameManager gameManager; // Reference to notify on timer end
+    private int remainingSeconds;
+
+    // --- Timer Control ---
+    private transient BukkitTask logicTimerTask;
+    private transient Plugin plugin;
+    private transient GameManager gameManager;
+
+    // --- Visual Timer Link ---
+    private transient VisualSandTimerDisplay visualTimerDisplay;
 
     // Constants for timer
-    private static final int MAX_TIMER_SECONDS = 150; // 2.5 minutes (example)
-    private static final int DEFAULT_START_SECONDS = 150; // 2.5 minutes (example)
+    private static final int MAX_TIMER_SECONDS = 150;
+    private static final int DEFAULT_START_SECONDS = 150;
 
-
-    public SoTTeam(UUID teamId, String teamName, String teamColor, Plugin plugin, GameManager gameManager) {
-        // General Info
+    public SoTTeam(UUID teamId, String teamName, String teamColor, Plugin plugin, GameManager gameManager, Location visualBottom, Location visualTop) {
         this.teamId = teamId;
         this.teamName = teamName;
         this.teamColor = teamColor;
         this.memberUUIDs = ConcurrentHashMap.newKeySet();
 
-        // SoT Specific State
-        this.teamSandCount = 0;
-        this.bankedScore = 0;
-        this.remainingSeconds = DEFAULT_START_SECONDS; // Start with default time
-
-        // Dependencies for timer task
         this.plugin = plugin;
         this.gameManager = gameManager;
+
+        if (visualBottom != null && visualTop != null && plugin != null) {
+            this.visualTimerDisplay = new VisualSandTimerDisplay(plugin, this, visualBottom, visualTop);
+        } else {
+            if (plugin != null) {
+                plugin.getLogger().log(Level.WARNING, "Visual timer locations/plugin not provided correctly for team " + teamName + ". Visual timer disabled.");
+            }
+            this.visualTimerDisplay = null;
+        }
+
+        resetForNewGame();
     }
 
     // --- Timer Control Methods ---
-
-    /**
-     * Starts the timer countdown for this specific team.
-     */
     public void startTimer() {
-        if (timerTask != null && !timerTask.isCancelled()) {
-            return; // Timer already running
+        if (logicTimerTask != null && !logicTimerTask.isCancelled()) {
+            plugin.getLogger().log(Level.INFO, "Logical timer already running for team: " + teamName);
+            return;
         }
         if (plugin == null || gameManager == null) {
-             System.err.println("Error: Cannot start timer for team " + teamName + ". Plugin or GameManager reference missing.");
-             return;
+            plugin.getLogger().log(Level.SEVERE, "Cannot start timer for team " + teamName + ". Plugin or GameManager reference missing.");
+            return;
         }
 
-        this.timerTask = Bukkit.getScheduler().runTaskTimer(plugin, this::tickTimer, 0L, 20L); // Tick every second (20 ticks)
-        // You might want an initial delay based on game rules
+        plugin.getLogger().log(Level.INFO, "Starting logical timer for team: " + teamName + " with " + remainingSeconds + "s");
+        this.logicTimerTask = Bukkit.getScheduler().runTaskTimer(plugin, this::tickLogicTimer, 20L, 20L);
+
+        if (visualTimerDisplay != null) {
+            visualTimerDisplay.startVisualUpdates();
+        }
     }
 
-    /**
-     * Stops the timer countdown for this team.
-     */
     public void stopTimer() {
-        if (timerTask != null) {
-            timerTask.cancel();
-            timerTask = null;
+        if (logicTimerTask != null && !logicTimerTask.isCancelled()) {
+            logicTimerTask.cancel();
+            plugin.getLogger().log(Level.INFO, "Stopped logical timer for team: " + teamName);
+        }
+        logicTimerTask = null;
+
+        if (visualTimerDisplay != null) {
+            visualTimerDisplay.stopVisualUpdates();
         }
     }
 
-    /**
-     * Called every second by the BukkitTask to decrement the timer.
-     */
-    private void tickTimer() {
+    private void tickLogicTimer() {
         if (remainingSeconds > 0) {
             remainingSeconds--;
-            // Optional: Update team scoreboard/display with remaining time
         }
 
         if (remainingSeconds <= 0) {
-            stopTimer(); // Stop the task
-            // Notify the GameManager that this specific team's timer has ended
+            stopTimer();
+            plugin.getLogger().log(Level.WARNING, "Logical timer expired for team: " + teamName);
             gameManager.handleTeamTimerEnd(this);
         }
     }
 
-    /**
-     * Adds seconds to this team's timer, capped at the maximum.
-     * @param secondsToAdd The number of seconds to add.
-     */
     public void addSeconds(int secondsToAdd) {
-        if (secondsToAdd <= 0) return;
-        this.remainingSeconds = Math.min(this.remainingSeconds + secondsToAdd, MAX_TIMER_SECONDS);
-        // Optional: Update display immediately
+        if (secondsToAdd <= 0) {
+            plugin.getLogger().log(Level.WARNING, "Attempted to add invalid seconds: " + secondsToAdd + " to team: " + teamName);
+            return;
+        }
+        if (remainingSeconds >= MAX_TIMER_SECONDS) {
+            plugin.getLogger().log(Level.INFO, "Timer is already at maximum for team: " + teamName);
+            return;
+        }
+
+        int oldSeconds = this.remainingSeconds;
+        this.remainingSeconds = Math.min(oldSeconds + secondsToAdd, MAX_TIMER_SECONDS);
+        int actualSecondsAdded = this.remainingSeconds - oldSeconds;
+
+        if (actualSecondsAdded > 0 && visualTimerDisplay != null) {
+            visualTimerDisplay.syncVisualState();
+        }
+
+        plugin.getLogger().log(Level.INFO, "Added " + actualSecondsAdded + "s to team " + teamName + " timer. New time: " + this.remainingSeconds + "s");
     }
 
-    /**
-     * Gets the remaining seconds on this team's timer.
-     * @return Remaining seconds.
-     */
     public int getRemainingSeconds() {
         return remainingSeconds;
     }
 
+    public void resetForNewGame() {
+        stopTimer();
+        this.teamSandCount = 0;
+        this.bankedScore = 0;
+        this.remainingSeconds = DEFAULT_START_SECONDS;
+
+        if (visualTimerDisplay != null) {
+            Bukkit.getScheduler().runTask(plugin, visualTimerDisplay::syncVisualState);
+        }
+        plugin.getLogger().log(Level.INFO, "Reset game state for team: " + teamName);
+    }
+
     // --- Getters for General Info ---
-    public UUID getTeamId() { return teamId; }
-    public String getTeamName() { return teamName; }
-    public String getTeamColor() { return teamColor; }
-    public Set<UUID> getMemberUUIDs() { return memberUUIDs; }
+    public UUID getTeamId() {
+        return teamId;
+    }
+
+    public String getTeamName() {
+        return teamName;
+    }
+
+    public String getTeamColor() {
+        return teamColor;
+    }
+
+    public Set<UUID> getMemberUUIDs() {
+        return Collections.unmodifiableSet(memberUUIDs);
+    }
 
     // --- Methods for Team Members ---
-    public void addMember(Player player) { memberUUIDs.add(player.getUniqueId()); }
-    public void removeMember(Player player) { memberUUIDs.remove(player.getUniqueId()); }
+    public void addMember(Player player) {
+        if (player == null) {
+            plugin.getLogger().log(Level.WARNING, "Attempted to add a null player to team: " + teamName);
+            return;
+        }
+        if (!memberUUIDs.add(player.getUniqueId())) {
+            plugin.getLogger().log(Level.WARNING, "Player " + player.getName() + " is already a member of team: " + teamName);
+        }
+    }
+
+    public void removeMember(Player player) {
+        if (player == null) {
+            plugin.getLogger().log(Level.WARNING, "Attempted to remove a null player from team: " + teamName);
+            return;
+        }
+        if (!memberUUIDs.remove(player.getUniqueId())) {
+            plugin.getLogger().log(Level.WARNING, "Player " + player.getName() + " is not a member of team: " + teamName);
+        }
+    }
 
     // --- Methods for SoT Sand Management ---
-    public int getSandCount() { return teamSandCount; }
-    public void addSand(int amount) { if (amount > 0) this.teamSandCount += amount; }
+    public int getSandCount() {
+        return teamSandCount;
+    }
+
+    public void addSand(int amount) {
+        if (amount > 0) {
+            this.teamSandCount += amount;
+        } else {
+            plugin.getLogger().log(Level.WARNING, "Attempted to add invalid sand amount: " + amount + " to team: " + teamName);
+        }
+    }
+
     public boolean tryUseSand(int amount) {
         if (amount > 0 && this.teamSandCount >= amount) {
             this.teamSandCount -= amount;
             return true;
         }
+        plugin.getLogger().log(Level.WARNING, "Failed to use sand. Requested: " + amount + ", Available: " + teamSandCount + " for team: " + teamName);
         return false;
     }
 
     // --- Methods for SoT Score Management ---
-    public int getBankedScore() { return bankedScore; }
-    public void addBankedScore(int score) { if (score > 0) this.bankedScore += score; }
+    public int getBankedScore() {
+        return bankedScore;
+    }
 
-    /**
-     * Resets the game-specific state for a new Sands of Time game.
-     */
-     public void resetForNewGame() {
-         stopTimer(); // Make sure the old timer task is cancelled
-         this.teamSandCount = 0;
-         this.bankedScore = 0;
-         this.remainingSeconds = DEFAULT_START_SECONDS; // Reset timer duration
-         // Should plugin/gameManager references be cleared or reused? Depends on lifecycle.
-     }
+    public void addBankedScore(int score) {
+        if (score > 0) {
+            this.bankedScore += score;
+        } else {
+            plugin.getLogger().log(Level.WARNING, "Attempted to add invalid score: " + score + " to team: " + teamName);
+        }
+    }
 
-    // toString method...
+    @Override
+    public String toString() {
+        return "SoTTeam{" +
+                "teamId=" + teamId +
+                ", teamName='" + teamName + '\'' +
+                ", teamColor='" + teamColor + '\'' +
+                ", members=" + memberUUIDs.size() +
+                ", sand=" + teamSandCount +
+                ", score=" + bankedScore +
+                ", secondsLeft=" + remainingSeconds +
+                '}';
+    }
 }

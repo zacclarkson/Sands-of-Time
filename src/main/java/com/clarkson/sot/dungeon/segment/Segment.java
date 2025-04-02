@@ -1,5 +1,7 @@
-package com.clarkson.sot.dungeon;
+package com.clarkson.sot.dungeon.segment;
 
+import com.clarkson.sot.dungeon.DungeonManager;
+import com.clarkson.sot.dungeon.SegmentType;
 import com.clarkson.sot.dungeon.DungeonManager.VaultType;
 import com.clarkson.sot.utils.Direction; // Assuming your Direction enum/class
 // import com.clarkson.sot.utils.EntryPoint; // We might need a modified EntryPoint, see below

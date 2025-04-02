@@ -15,7 +15,7 @@ public class SandManager {
 
     // Constants for game balance
     private static final int SECONDS_PER_SAND = 10;
-    private static final int REVIVE_COST = 1;
+    public static final int REVIVE_COST = 1;
 
     public SandManager(GameManager gameManager) {
         // Validate GameManager isn't null if necessary

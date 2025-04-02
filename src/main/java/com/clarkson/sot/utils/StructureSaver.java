@@ -1,11 +1,8 @@
 package com.clarkson.sot.utils;
 
-// Class representing the placed segment
-import com.clarkson.sot.dungeon.PlacedSegment;
-// Template class (referenced by PlacedSegment)
-import com.clarkson.sot.dungeon.Segment;
-import com.clarkson.sot.dungeon.Segment.RelativeEntryPoint; // Needed for serialization helper
-
+import com.clarkson.sot.dungeon.segment.PlacedSegment;
+import com.clarkson.sot.dungeon.segment.Segment;
+import com.clarkson.sot.dungeon.segment.Segment.RelativeEntryPoint;
 // WorldEdit imports
 import com.sk89q.worldedit.EditSession;
 import com.sk89q.worldedit.WorldEdit;

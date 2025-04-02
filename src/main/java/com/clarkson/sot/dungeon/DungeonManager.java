@@ -1,5 +1,7 @@
 package com.clarkson.sot.dungeon;
 
+import com.clarkson.sot.dungeon.segment.PlacedSegment;
+import com.clarkson.sot.dungeon.segment.Segment;
 // Local project imports
 import com.clarkson.sot.utils.Direction; // Ensure this has getBlockVector() and getOpposite()
 import com.clarkson.sot.utils.EntryPoint; // Absolute location EntryPoint

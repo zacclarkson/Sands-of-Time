@@ -1,5 +1,7 @@
-package com.clarkson.sot.dungeon;
+package com.clarkson.sot.dungeon.segment;
 
+import com.clarkson.sot.dungeon.SegmentType;
+import com.clarkson.sot.dungeon.segment.Segment.RelativeEntryPoint;
 import com.clarkson.sot.entities.Area;
 import com.clarkson.sot.utils.EntryPoint; // Original EntryPoint with absolute Location
 

@@ -1,15 +1,13 @@
 package com.clarkson.sot.utils;
 
-// Imports for the REFFACTORED Segment template
-import com.clarkson.sot.dungeon.Segment; // Assuming this is the refactored one
-import com.clarkson.sot.dungeon.Segment.RelativeEntryPoint; // Assuming inner class or separate file
-
 // WorldEdit imports (only for BlockVector3)
 import com.sk89q.worldedit.math.BlockVector3;
 
 // Bukkit imports (only for Plugin)
 import org.bukkit.plugin.Plugin;
 
+import com.clarkson.sot.dungeon.segment.Segment;
+import com.clarkson.sot.dungeon.segment.Segment.RelativeEntryPoint;
 // Gson imports
 import com.google.gson.*;
 

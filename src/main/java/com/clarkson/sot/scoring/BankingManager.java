@@ -1,11 +1,9 @@
-package com.clarkson.sot.dungeon;
+package com.clarkson.sot.scoring;
 
 import org.bukkit.Location;
 import org.bukkit.entity.Player;
 import org.bukkit.event.Listener;
 import org.bukkit.event.player.PlayerInteractEntityEvent;
-
-import com.clarkson.sot.utils.ScoreManager;
 
 public class BankingManager implements Listener {
     private final ScoreManager scoreManager; // To add banked score
