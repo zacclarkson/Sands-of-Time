@@ -1,5 +1,6 @@
 package com.clarkson.sot.dungeon;
 
+import com.clarkson.sot.dungeon.DungeonManager.VaultType;
 import com.clarkson.sot.utils.Direction; // Assuming your Direction enum/class
 // import com.clarkson.sot.utils.EntryPoint; // We might need a modified EntryPoint, see below
 import com.sk89q.worldedit.math.BlockVector3;
@@ -258,5 +259,20 @@ public class Segment {
         public int hashCode() {
             return Objects.hash(relativePosition, direction);
         }
+    }
+
+    public VaultType getVaultType() {
+        // TODO Auto-generated method stub
+        throw new UnsupportedOperationException("Unimplemented method 'getVaultType'");
+    }
+
+    public VaultType getKeyForVault() {
+        // TODO Auto-generated method stub
+        throw new UnsupportedOperationException("Unimplemented method 'getKeyForVault'");
+    }
+
+    public boolean isPuzzleRoom() {
+        // TODO Auto-generated method stub
+        throw new UnsupportedOperationException("Unimplemented method 'isPuzzleRoom'");
     }
 }
