@@ -275,4 +275,19 @@ public class Segment {
         // TODO Auto-generated method stub
         throw new UnsupportedOperationException("Unimplemented method 'isPuzzleRoom'");
     }
+
+    public Object getContainedVault() {
+        // TODO Auto-generated method stub
+        throw new UnsupportedOperationException("Unimplemented method 'getContainedVault'");
+    }
+
+    public Object isLavaParkour() {
+        // TODO Auto-generated method stub
+        throw new UnsupportedOperationException("Unimplemented method 'isLavaParkour'");
+    }
+
+    public Object isHub() {
+        // TODO Auto-generated method stub
+        throw new UnsupportedOperationException("Unimplemented method 'isHub'");
+    }
 }

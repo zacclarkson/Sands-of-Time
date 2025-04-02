@@ -124,4 +124,14 @@ public class GameManager {
     public GameState getCurrentState() { return currentState; }
     public int getRemainingSeconds() { return remainingSeconds; }
     public Location getDungeonHubLocation() { return dungeonHubLocation; }
+
+    public void addSecondsToTimer(int timeBonusSeconds) {
+        // TODO Auto-generated method stub
+        throw new UnsupportedOperationException("Unimplemented method 'addSecondsToTimer'");
+    }
+
+    public void handleTeamTimerEnd(SoTTeam soTTeam) {
+        // TODO Auto-generated method stub
+        throw new UnsupportedOperationException("Unimplemented method 'handleTeamTimerEnd'");
+    }
 }

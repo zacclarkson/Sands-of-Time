@@ -41,7 +41,7 @@ public class TeamManager {
             UUID teamId = createTeamUUID(Integer.parseInt(teamData[0]));
             String teamName = teamData[1];
             String teamColor = teamData[2];
-            addTeam(new SoTTeam(teamId, teamName, teamColor));
+            addTeam(new SoTTeam(teamId, teamName, teamColor, null, null));
         }
     }
 
