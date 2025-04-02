@@ -7,6 +7,7 @@ import org.bukkit.scheduler.BukkitTask; // For the timer task
 
 import com.clarkson.sot.main.GameManager;
 
+import java.util.logging.Level;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
@@ -26,84 +27,89 @@ public class SoTTeam {
     private int teamSandCount;
     private int bankedScore;
     private int remainingSeconds; // Each team has its own timer!
-    private transient BukkitTask timerTask; // The task ticking this team's timer
+    // transient: BukkitTask is not serializable and specific to a runtime instance
+    private transient BukkitTask timerTask;
     private transient Plugin plugin; // Reference to the main plugin for scheduling
     private transient GameManager gameManager; // Reference to notify on timer end
 
     // Constants for timer
-    private static final int MAX_TIMER_SECONDS = 150; // 2.5 minutes (example)
-    private static final int DEFAULT_START_SECONDS = 150; // 2.5 minutes (example)
-
+    private static final int MAX_TIMER_SECONDS = 150; // 2.5 minutes (example, can be configurable)
+    private static final int DEFAULT_START_SECONDS = 150; // Example start time
 
     public SoTTeam(UUID teamId, String teamName, String teamColor, Plugin plugin, GameManager gameManager) {
-        // General Info
         this.teamId = teamId;
         this.teamName = teamName;
         this.teamColor = teamColor;
         this.memberUUIDs = ConcurrentHashMap.newKeySet();
-
-        // SoT Specific State
-        this.teamSandCount = 0;
-        this.bankedScore = 0;
-        this.remainingSeconds = DEFAULT_START_SECONDS; // Start with default time
-
-        // Dependencies for timer task
         this.plugin = plugin;
         this.gameManager = gameManager;
+        resetForNewGame(); // Initialize state
     }
 
     // --- Timer Control Methods ---
 
     /**
      * Starts the timer countdown for this specific team.
+     * Ensures plugin and gameManager references are available.
      */
     public void startTimer() {
+        // Prevent starting if already running or dependencies are missing
         if (timerTask != null && !timerTask.isCancelled()) {
-            return; // Timer already running
+            plugin.getLogger().log(Level.INFO, "Timer already running for team: " + teamName);
+            return;
         }
         if (plugin == null || gameManager == null) {
-             System.err.println("Error: Cannot start timer for team " + teamName + ". Plugin or GameManager reference missing.");
+             plugin.getLogger().log(Level.SEVERE, "Cannot start timer for team " + teamName + ". Plugin or GameManager reference missing.");
              return;
         }
 
-        this.timerTask = Bukkit.getScheduler().runTaskTimer(plugin, this::tickTimer, 0L, 20L); // Tick every second (20 ticks)
-        // You might want an initial delay based on game rules
+        plugin.getLogger().log(Level.INFO, "Starting timer for team: " + teamName + " with " + remainingSeconds + "s");
+        // Schedule a task to run every second (20 ticks)
+        this.timerTask = Bukkit.getScheduler().runTaskTimer(plugin, this::tickTimer, 20L, 20L); // Start after 1s, repeat every 1s
     }
 
     /**
-     * Stops the timer countdown for this team.
+     * Stops the timer countdown for this team if it's running.
      */
     public void stopTimer() {
-        if (timerTask != null) {
+        if (timerTask != null && !timerTask.isCancelled()) {
             timerTask.cancel();
-            timerTask = null;
+            plugin.getLogger().log(Level.INFO, "Stopped timer for team: " + teamName);
         }
+        timerTask = null; // Clear the task reference
     }
 
     /**
      * Called every second by the BukkitTask to decrement the timer.
+     * Notifies GameManager when the timer reaches zero.
      */
     private void tickTimer() {
         if (remainingSeconds > 0) {
             remainingSeconds--;
-            // Optional: Update team scoreboard/display with remaining time
+            // TODO: Update team scoreboard/display with remaining time if applicable
+            // Example: gameManager.getScoreboardManager().updateTeamTime(teamId, remainingSeconds);
         }
 
+        // Check if timer has run out
         if (remainingSeconds <= 0) {
-            stopTimer(); // Stop the task
-            // Notify the GameManager that this specific team's timer has ended
+            stopTimer(); // Stop this task
+            plugin.getLogger().log(Level.INFO, "Timer expired for team: " + teamName);
+            // Notify the GameManager to handle consequences
             gameManager.handleTeamTimerEnd(this);
         }
     }
 
     /**
-     * Adds seconds to this team's timer, capped at the maximum.
-     * @param secondsToAdd The number of seconds to add.
+     * Adds seconds to this team's timer, capped at the maximum allowed time.
+     * @param secondsToAdd The number of seconds to add (must be positive).
      */
     public void addSeconds(int secondsToAdd) {
         if (secondsToAdd <= 0) return;
-        this.remainingSeconds = Math.min(this.remainingSeconds + secondsToAdd, MAX_TIMER_SECONDS);
-        // Optional: Update display immediately
+        int oldSeconds = this.remainingSeconds;
+        // Calculate new time, ensuring it doesn't exceed the maximum
+        this.remainingSeconds = Math.min(oldSeconds + secondsToAdd, MAX_TIMER_SECONDS);
+        plugin.getLogger().log(Level.INFO, "Added " + (this.remainingSeconds - oldSeconds) + "s to team " + teamName + " timer. New time: " + this.remainingSeconds + "s");
+        // TODO: Update display immediately if needed
     }
 
     /**
@@ -114,17 +120,21 @@ public class SoTTeam {
         return remainingSeconds;
     }
 
-    // --- Getters for General Info ---
+    /**
+     * Resets the game-specific state for a new Sands of Time game.
+     * Stops any existing timer task.
+     */
+     public void resetForNewGame() {
+         stopTimer(); // Ensure the old timer task is cancelled
+         this.teamSandCount = 0;
+         this.bankedScore = 0;
+         this.remainingSeconds = DEFAULT_START_SECONDS; // Reset timer duration
+     }
+
+    // --- Other SoTTeam methods (Getters, Sand/Score management) ---
     public UUID getTeamId() { return teamId; }
     public String getTeamName() { return teamName; }
-    public String getTeamColor() { return teamColor; }
-    public Set<UUID> getMemberUUIDs() { return memberUUIDs; }
-
-    // --- Methods for Team Members ---
-    public void addMember(Player player) { memberUUIDs.add(player.getUniqueId()); }
-    public void removeMember(Player player) { memberUUIDs.remove(player.getUniqueId()); }
-
-    // --- Methods for SoT Sand Management ---
+    // ... other getters ...
     public int getSandCount() { return teamSandCount; }
     public void addSand(int amount) { if (amount > 0) this.teamSandCount += amount; }
     public boolean tryUseSand(int amount) {
@@ -134,21 +144,18 @@ public class SoTTeam {
         }
         return false;
     }
-
-    // --- Methods for SoT Score Management ---
     public int getBankedScore() { return bankedScore; }
     public void addBankedScore(int score) { if (score > 0) this.bankedScore += score; }
+    // ... addMember, removeMember etc ...
 
-    /**
-     * Resets the game-specific state for a new Sands of Time game.
-     */
-     public void resetForNewGame() {
-         stopTimer(); // Make sure the old timer task is cancelled
-         this.teamSandCount = 0;
-         this.bankedScore = 0;
-         this.remainingSeconds = DEFAULT_START_SECONDS; // Reset timer duration
-         // Should plugin/gameManager references be cleared or reused? Depends on lifecycle.
-     }
+    public Set<UUID> getMemberUUIDs() {
+        // TODO Auto-generated method stub
+        throw new UnsupportedOperationException("Unimplemented method 'getMemberUUIDs'");
+    }
 
-    // toString method...
+    public void removeMember(Player player) {
+        // TODO Auto-generated method stub
+        throw new UnsupportedOperationException("Unimplemented method 'removeMember'");
+    }
+
 }

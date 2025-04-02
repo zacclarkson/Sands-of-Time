@@ -110,7 +110,7 @@ public class TeamManager {
 
         // Add player to the new team
         playerTeamMap.put(player.getUniqueId(), teamId);
-        newTeam.addMember(player);
+        newTeam.removeMember(player);
         logger.info("Assigned player " + player.getName() + " to team " + newTeam.getTeamName());
     }
 

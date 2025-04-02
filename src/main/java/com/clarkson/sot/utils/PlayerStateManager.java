@@ -10,16 +10,6 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap; // Thread-safe option
 import java.util.stream.Collectors;
-
-// Define the PlayerStatus enum needed by the manager
-enum PlayerStatus {
-    ALIVE_IN_DUNGEON,
-    DEAD_AWAITING_REVIVE,
-    ESCAPED_SAFE,
-    TRAPPED_TIMER_OUT,
-    NOT_IN_GAME // Default or for players not participating
-}
-
 /**
  * Tracks the state of individual players within the Sands of Time game.
  */
