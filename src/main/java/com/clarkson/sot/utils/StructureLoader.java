@@ -1,10 +1,8 @@
 package com.clarkson.sot.utils;
 
-// Imports for the refactored Segment and its inner class
-import com.clarkson.sot.dungeon.Segment;
-import com.clarkson.sot.dungeon.Segment.RelativeEntryPoint; // Assuming inner class or separate file
 import com.clarkson.sot.dungeon.SegmentType; // Assuming SegmentType enum location
-
+import com.clarkson.sot.dungeon.segment.Segment;
+import com.clarkson.sot.dungeon.segment.Segment.RelativeEntryPoint;
 // WorldEdit Vector class for relative positions and size
 import com.sk89q.worldedit.math.BlockVector3;
 
