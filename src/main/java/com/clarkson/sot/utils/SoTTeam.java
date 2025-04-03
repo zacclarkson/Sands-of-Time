@@ -15,12 +15,9 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.logging.Level;
 
-public class SoTTeam {
+public class SoTTeam extends Team {
     // --- General Team Info ---
-    private final UUID teamId;
-    private final String teamName;
-    private final String teamColor;
-    private final Set<UUID> memberUUIDs;
+    
 
     // --- Sands of Time Specific State ---
     private int teamSandCount;
@@ -35,11 +32,7 @@ public class SoTTeam {
     // --- Visual Timer Link ---
     private transient VisualSandTimerDisplay visualTimerDisplay;
 
-    // Constants for timer
-    private static final int MAX_TIMER_SECONDS = 150;
-    private static final int DEFAULT_START_SECONDS = 150;
-
-    public SoTTeam(UUID teamId, String teamName, String teamColor, Plugin plugin, GameManager gameManager, Location visualBottom, Location visualTop) {
+    public SoTTeam() {
         this.teamId = teamId;
         this.teamName = teamName;
         this.teamColor = teamColor;
@@ -56,8 +49,6 @@ public class SoTTeam {
             }
             this.visualTimerDisplay = null;
         }
-
-        resetForNewGame();
     }
 
     // --- Timer Control Methods ---
@@ -79,66 +70,8 @@ public class SoTTeam {
         }
     }
 
-    public void stopTimer() {
-        if (logicTimerTask != null && !logicTimerTask.isCancelled()) {
-            logicTimerTask.cancel();
-            plugin.getLogger().log(Level.INFO, "Stopped logical timer for team: " + teamName);
-        }
-        logicTimerTask = null;
 
-        if (visualTimerDisplay != null) {
-            visualTimerDisplay.stopVisualUpdates();
-        }
-    }
-
-    private void tickLogicTimer() {
-        if (remainingSeconds > 0) {
-            remainingSeconds--;
-        }
-
-        if (remainingSeconds <= 0) {
-            stopTimer();
-            plugin.getLogger().log(Level.WARNING, "Logical timer expired for team: " + teamName);
-            gameManager.handleTeamTimerEnd(this);
-        }
-    }
-
-    public void addSeconds(int secondsToAdd) {
-        if (secondsToAdd <= 0) {
-            plugin.getLogger().log(Level.WARNING, "Attempted to add invalid seconds: " + secondsToAdd + " to team: " + teamName);
-            return;
-        }
-        if (remainingSeconds >= MAX_TIMER_SECONDS) {
-            plugin.getLogger().log(Level.INFO, "Timer is already at maximum for team: " + teamName);
-            return;
-        }
-
-        int oldSeconds = this.remainingSeconds;
-        this.remainingSeconds = Math.min(oldSeconds + secondsToAdd, MAX_TIMER_SECONDS);
-        int actualSecondsAdded = this.remainingSeconds - oldSeconds;
-
-        if (actualSecondsAdded > 0 && visualTimerDisplay != null) {
-            visualTimerDisplay.syncVisualState();
-        }
-
-        plugin.getLogger().log(Level.INFO, "Added " + actualSecondsAdded + "s to team " + teamName + " timer. New time: " + this.remainingSeconds + "s");
-    }
-
-    public int getRemainingSeconds() {
-        return remainingSeconds;
-    }
-
-    public void resetForNewGame() {
-        stopTimer();
-        this.teamSandCount = 0;
-        this.bankedScore = 0;
-        this.remainingSeconds = DEFAULT_START_SECONDS;
-
-        if (visualTimerDisplay != null) {
-            Bukkit.getScheduler().runTask(plugin, visualTimerDisplay::syncVisualState);
-        }
-        plugin.getLogger().log(Level.INFO, "Reset game state for team: " + teamName);
-    }
+    
 
     // --- Getters for General Info ---
     public UUID getTeamId() {

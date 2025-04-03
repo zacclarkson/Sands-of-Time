@@ -81,128 +81,9 @@ public class DungeonManager {
      * @return true if initialization was generally successful, false otherwise.
      */
     public boolean initializeInstance() {
-        try {
-            plugin.getLogger().info("Initializing dungeon instance for team " + teamId + " at " + dungeonOrigin.toVector());
-            placedSegments.clear(); // Ensure clear before starting
+        return false; // Placeholder for actual implementation
 
-            // --- 1. Create Absolute Dungeon Data & PlacedSegment Instances ---
-            if (!createAbsoluteInstanceData()) {
-                plugin.getLogger().severe("Failed to create absolute instance data for team " + teamId);
-                return false;
-            }
-            // Now this.dungeonData and this.placedSegments are populated with absolute locations
-
-            // --- 2. Paste Segments ---
-            plugin.getLogger().info("Pasting segments for team " + teamId + "...");
-            boolean pastingOk = true;
-            for (PlacedSegment instanceSegment : this.placedSegments) {
-                if (!dungeonGenerator.pasteSegmentInstance(instanceSegment)) {
-                    plugin.getLogger().severe("CRITICAL: Failed to paste segment " + instanceSegment.getName() + " for team " + teamId + ". Dungeon may be incomplete.");
-                    pastingOk = false; // Mark failure
-                }
-            }
-            if (!pastingOk) {
-                plugin.getLogger().severe("Dungeon instance for team " + teamId + " may be incomplete due to pasting errors.");
-                // return false; // Decide if this is fatal
-            }
-
-            // --- 3. Populate Features (using absolute locations from dungeonData) ---
-            plugin.getLogger().info("Populating features for team " + teamId + "...");
-            populateFeaturesFromData();
-
-            // --- 4. Place Vaults & Keys (using absolute locations from dungeonData) ---
-            plugin.getLogger().info("Placing vaults and keys for team " + teamId + "...");
-            // VaultManager now uses the Dungeon object containing absolute locations
-            if (!vaultManager.placeVaultMarkersAndKeyItems(this.teamId, this.dungeonData)) {
-                plugin.getLogger().warning("Failed to place some vaults/keys for team " + teamId);
-            }
-
-            plugin.getLogger().info("Dungeon instance initialization complete for team " + teamId);
-            return true;
-
-        } catch (Exception e) {
-            plugin.getLogger().log(Level.SEVERE, "Unexpected error during dungeon instance initialization for team " + teamId, e);
-            return false;
-        }
     }
-
-    /**
-     * Creates the `Dungeon` data object (with absolute locations) and the
-     * list of `PlacedSegment` instances (with absolute origins) from the blueprint data.
-     * Populates `this.dungeonData` and `this.placedSegments`.
-     * @return true if successful, false otherwise.
-     */
-    private boolean createAbsoluteInstanceData() {
-        this.placedSegments.clear();
-        Map<VaultColor, Location> vaultMarkerLocs = new HashMap<>();
-        Map<VaultColor, Location> keySpawnLocs = new HashMap<>();
-        List<Location> sandSpawnLocs = new ArrayList<>();
-        List<Location> coinSpawnLocs = new ArrayList<>();
-        List<Location> itemSpawnLocs = new ArrayList<>();
-        Location foundHubLocation = null;
-
-        // Create PlacedSegment instances with absolute origins
-        for (PlacedSegment relativeSegment : blueprintData.getRelativeSegments()) {
-            Location relativeOrigin = relativeSegment.getWorldOrigin(); // Origin relative to blueprint 0,0,0
-            Location absoluteOrigin = dungeonOrigin.clone().add(relativeOrigin.toVector());
-            absoluteOrigin.setWorld(world);
-            this.placedSegments.add(new PlacedSegment(relativeSegment.getSegmentTemplate(), absoluteOrigin));
-        }
-
-        // Translate relative blueprint locations to absolute world locations
-        Vector originVec = dungeonOrigin.toVector(); // Vector representation of the absolute origin
-
-        // Hub Location
-        if (blueprintData.getHubRelativeLocation() != null) {
-            foundHubLocation = blueprintData.getHubRelativeLocation().toLocation(world).add(originVec);
-        } else {
-             plugin.getLogger().warning("Hub relative location missing in blueprint for team " + teamId);
-             // Attempt to find hub segment origin as fallback
-             for(PlacedSegment ps : this.placedSegments) {
-                 if(ps.getSegmentTemplate().isHub()) {
-                     foundHubLocation = ps.getWorldOrigin();
-                     break;
-                 }
-             }
-             if(foundHubLocation == null) plugin.getLogger().severe("Could not determine Hub location for team " + teamId);
-        }
-
-
-        // Vault Markers
-        blueprintData.getVaultMarkerRelativeLocations().forEach((color, relVec) -> {
-            vaultMarkerLocs.put(color, relVec.toLocation(world).add(originVec));
-        });
-
-        // Key Spawns
-        blueprintData.getKeySpawnRelativeLocations().forEach((color, relVec) -> {
-            keySpawnLocs.put(color, relVec.toLocation(world).add(originVec));
-        });
-
-        // Sand Spawns
-        blueprintData.getSandSpawnRelativeLocations().forEach(relVec -> {
-            sandSpawnLocs.add(relVec.toLocation(world).add(originVec));
-        });
-
-        // Coin Spawns
-        blueprintData.getCoinSpawnRelativeLocations().forEach(relVec -> {
-            coinSpawnLocs.add(relVec.toLocation(world).add(originVec));
-        });
-
-        // Item Spawns
-        blueprintData.getItemSpawnRelativeLocations().forEach(relVec -> {
-            itemSpawnLocs.add(relVec.toLocation(world).add(originVec));
-        });
-
-        // Create the Dungeon data object
-        this.dungeonData = new Dungeon(
-                teamId, dungeonOrigin, world, placedSegments,
-                foundHubLocation, vaultMarkerLocs, keySpawnLocs,
-                sandSpawnLocs, coinSpawnLocs, itemSpawnLocs
-        );
-
-        return true; // Assume success for now
-    }
-
 
     /**
      * Helper method to spawn dynamic elements using the pre-calculated absolute locations
@@ -257,20 +138,6 @@ public class DungeonManager {
      */
     public World getWorld() {
         return world;
-    }
-
-    /**
-     * Finds which specific PlacedSegment instance within this dungeon contains the
-     * given absolute world location.
-     */
-    public PlacedSegment getSegmentAtLocation(Location location) {
-        if (this.dungeonData != null) {
-            return this.dungeonData.getSegmentAt(location); // Assumes Dungeon.getSegmentAt implemented
-        } else {
-            // Fallback if called too early (shouldn't happen in normal flow)
-             plugin.getLogger().warning("getSegmentAtLocation called before dungeonData was initialized for team " + teamId);
-             return null;
-        }
     }
 
     /**
