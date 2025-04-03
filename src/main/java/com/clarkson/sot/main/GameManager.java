@@ -74,7 +74,7 @@ public class GameManager {
         this.deathCageLocation = deathCage;   // TODO: Load from config or command
 
         // Initialize managers
-        this.teamManager = new TeamManager();
+        this.teamManager = new TeamManager(this);
         this.playerStateManager = new PlayerStateManager();
         this.scoreManager = new ScoreManager(teamManager, this, plugin);
         this.bankingManager = new BankingManager(scoreManager);
