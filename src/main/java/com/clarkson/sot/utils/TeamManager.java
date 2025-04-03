@@ -1,6 +1,9 @@
 package com.clarkson.sot.utils;
 
 import com.clarkson.sot.main.GameManager; // Import GameManager
+
+import net.kyori.adventure.text.format.NamedTextColor;
+
 import org.bukkit.entity.Player;
 
 import java.util.*;
@@ -180,5 +183,10 @@ public class TeamManager {
      public void clearAssignments() {
          playerTeamMap.clear();
          System.out.println("Cleared all player team assignments.");
+     }
+
+     public NamedTextColor getPlayerTeamColor(Player player) {
+        // TODO Auto-generated method stub
+        throw new UnsupportedOperationException("Unimplemented method 'getPlayerTeamColor'");
      }
 }

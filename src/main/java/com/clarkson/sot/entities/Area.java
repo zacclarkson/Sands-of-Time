@@ -64,6 +64,12 @@ public class Area {
         throw new UnsupportedOperationException("Unimplemented method 'intersects'");
     }
 
+
+    public boolean contains(Location location) {
+        // TODO Auto-generated method stub
+        throw new UnsupportedOperationException("Unimplemented method 'contains'");
+    }
+
     // Getters, setters, and other methods...
 }
 

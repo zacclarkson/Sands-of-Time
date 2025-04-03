@@ -1,647 +1,309 @@
 package com.clarkson.sot.dungeon;
 
+// Local project imports
 import com.clarkson.sot.dungeon.segment.PlacedSegment;
 import com.clarkson.sot.dungeon.segment.Segment;
-// Local project imports
-import com.clarkson.sot.utils.Direction; // Ensure this has getBlockVector() and getOpposite()
-import com.clarkson.sot.utils.EntryPoint; // Absolute location EntryPoint
-import com.clarkson.sot.utils.StructureLoader;
+import com.clarkson.sot.entities.Area; // Assuming Area class exists
+import com.clarkson.sot.main.GameManager;
+import com.clarkson.sot.main.SoT; // Or just Plugin
 
-// WorldEdit imports (as before)
-import com.sk89q.worldedit.WorldEdit;
-import com.sk89q.worldedit.WorldEditException;
-import com.sk89q.worldedit.bukkit.BukkitAdapter;
-import com.sk89q.worldedit.extent.clipboard.Clipboard;
-import com.sk89q.worldedit.extent.clipboard.io.ClipboardFormat;
-import com.sk89q.worldedit.extent.clipboard.io.ClipboardFormats;
-import com.sk89q.worldedit.extent.clipboard.io.ClipboardReader;
-import com.sk89q.worldedit.function.operation.Operation;
-import com.sk89q.worldedit.function.operation.Operations;
-import com.sk89q.worldedit.math.BlockVector3;
-import com.sk89q.worldedit.session.ClipboardHolder;
-import com.sk89q.worldedit.EditSession;
-import com.sk89q.worldedit.world.World; // WorldEdit World
-
-// Bukkit imports
+// Bukkit/WorldEdit imports
 import org.bukkit.Location;
 import org.bukkit.Material;
+import org.bukkit.World;
 import org.bukkit.block.Block;
-import org.bukkit.block.Chest; // For item spawning example
-import org.bukkit.inventory.Inventory; // For item spawning example
-import org.bukkit.inventory.ItemStack; // For item spawning example
 import org.bukkit.plugin.Plugin;
+import org.bukkit.util.Vector;
+import com.sk89q.worldedit.math.BlockVector3;
 
 // Java imports
-import java.io.File;
-import java.io.FileInputStream;
-import java.io.IOException;
 import java.util.*;
 import java.util.logging.Level;
 import java.util.stream.Collectors;
 
 /**
- * Manages dungeon generation using DFS with colored pathways, vaults, keys, and depth rules.
+ * Manages a specific, live instance of a dungeon for a single team.
+ * Takes a DungeonBlueprint, translates it to absolute coordinates,
+ * builds the instance in the world, and holds the final Dungeon data object.
  */
 public class DungeonManager {
 
-    // --- Enums ---
-    // Ensure this enum exists and matches the values used (GOLD, RED, GREEN, BLUE, NONE)
-    public enum VaultType { GOLD, RED, GREEN, BLUE, NONE }
-
-    // --- Dependencies & State ---
+    // --- Dependencies ---
     private final Plugin plugin;
-    private final StructureLoader structureLoader;
-    // Stores loaded templates by name. Ensure Segment class has getVaultType(), getKeyForVault(), isPuzzleRoom() getters.
-    private final Map<String, Segment> segmentTemplates = new HashMap<>();
-    private final Random random;
-    private final long seed;
+    private final GameManager gameManager;
+    private final DungeonGenerator dungeonGenerator; // Still needed for pasting utility
+    private final VaultManager vaultManager;
 
-    // --- Generation State (reset per generation) ---
-    private final Set<VaultType> vaultsPlaced = EnumSet.noneOf(VaultType.class);
-    private final Set<VaultType> keysPlaced = EnumSet.noneOf(VaultType.class);
-    private final List<PlacedSegment> placedSegments = new ArrayList<>();
-    private final Stack<DfsState> expansionStack = new Stack<>(); // DFS stack
+    // --- Instance State ---
+    private final UUID teamId;
+    private final Location dungeonOrigin; // Absolute world origin for this instance
+    private final World world;
+    private final DungeonBlueprint blueprintData; // The relative blueprint
+    private final List<PlacedSegment> placedSegments; // Actual instances in the world for this team
 
-    // --- Generation Parameters ---
-    // IMPORTANT: Ensure a template named "start_room_1" exists and is loaded.
-    private static final String START_ROOM_NAME = "start_room_1";
-    private static final int MAX_TRIES_PER_ENTRANCE = 5;
-    private static final int MAX_DISTANCE_FROM_START = 200;
-    private static final int MAX_SEGMENTS = 50;
-    private static final String SCHEMATICS_SUBDIR = "schematics";
+    // The consolidated data object with ABSOLUTE locations for this instance
+    private Dungeon dungeonData;
 
-    // Depth Rules
-    private static final Map<VaultType, Integer> MAX_DEPTH_MAP = Map.of(
-        VaultType.NONE, 2,
-        VaultType.GREEN, 3,
-        VaultType.BLUE, 7,
-        VaultType.RED, 10,
-        VaultType.GOLD, 13
-    );
-     private static final Map<VaultType, Integer> MIN_DEPTH_VAULT_MAP = Map.of(
-         VaultType.GREEN, 3,
-         VaultType.BLUE, 5,
-         VaultType.RED, 7,
-         VaultType.GOLD, 10
-     );
+    /**
+     * Constructor for a team's specific DungeonManager instance.
+     *
+     * @param plugin           The main plugin instance.
+     * @param gameManager      The main GameManager.
+     * @param dungeonGenerator The DungeonGenerator utility (for pasting).
+     * @param vaultManager     The VaultManager.
+     * @param teamId           The UUID of the team this dungeon belongs to.
+     * @param dungeonOrigin    The absolute world location for the origin (0,0,0 point) of this dungeon instance.
+     * @param blueprintData    The relative layout blueprint generated by DungeonGenerator.
+     */
+    public DungeonManager(Plugin plugin, GameManager gameManager, DungeonGenerator dungeonGenerator,
+                          VaultManager vaultManager, UUID teamId, Location dungeonOrigin, DungeonBlueprint blueprintData) {
 
-
-    // Internal state for DFS steps
-    private static class DfsState {
-        private final EntryPoint exitPoint;
-        private final int depth;
-        private final VaultType pathColor;
-
-        public DfsState(EntryPoint exitPoint, int depth, VaultType pathColor) {
-            this.exitPoint = exitPoint;
-            this.depth = depth;
-            this.pathColor = pathColor;
-        }
-
-        public EntryPoint getExitPoint() {
-            return exitPoint;
-        }
-
-        public int getDepth() {
-            return depth;
-        }
-
-        public VaultType getPathColor() {
-            return pathColor;
-        }
-    }
-
-    // Constructor and Loader
-    public DungeonManager(Plugin plugin, long seed) {
         this.plugin = Objects.requireNonNull(plugin, "Plugin cannot be null");
-        this.structureLoader = new StructureLoader(plugin); // Assumes StructureLoader is correctly implemented
-        this.seed = seed;
-        this.random = new Random(seed);
-        plugin.getLogger().info("DungeonManager initialized with seed: " + seed);
-    }
-     public DungeonManager(Plugin plugin) { this(plugin, System.currentTimeMillis()); }
+        this.gameManager = Objects.requireNonNull(gameManager, "GameManager cannot be null");
+        this.dungeonGenerator = Objects.requireNonNull(dungeonGenerator, "DungeonGenerator cannot be null");
+        this.vaultManager = Objects.requireNonNull(vaultManager, "VaultManager cannot be null");
+        this.teamId = Objects.requireNonNull(teamId, "Team ID cannot be null");
+        this.dungeonOrigin = Objects.requireNonNull(dungeonOrigin, "Dungeon origin cannot be null");
+        this.world = Objects.requireNonNull(dungeonOrigin.getWorld(), "Dungeon origin must have a valid world");
+        this.blueprintData = Objects.requireNonNull(blueprintData, "Dungeon blueprint cannot be null");
 
-     /**
-      * Loads segment templates. Ensure StructureLoader loads vaultType, keyForVault, isPuzzleRoom fields.
-      */
-     public boolean loadSegmentTemplates(File dataDir) {
-        plugin.getLogger().info("Loading segment templates from: " + dataDir.getAbsolutePath());
-        segmentTemplates.clear();
-        List<Segment> loadedList = structureLoader.loadSegmentTemplates(dataDir); // Assumes loader is correct
-        if (loadedList.isEmpty()) {
-            plugin.getLogger().severe("No segment templates loaded. Dungeon generation will fail.");
+        this.placedSegments = new ArrayList<>(); // Populated during initialization
+        this.dungeonData = null; // Created during initialization
+    }
+
+    /**
+     * Initializes the dungeon instance in the world.
+     * 1. Creates the absolute Dungeon data object from the blueprint.
+     * 2. Pastes segments based on the absolute locations.
+     * 3. Populates features based on the absolute locations.
+     * 4. Places vaults/keys based on the absolute locations.
+     *
+     * @return true if initialization was generally successful, false otherwise.
+     */
+    public boolean initializeInstance() {
+        try {
+            plugin.getLogger().info("Initializing dungeon instance for team " + teamId + " at " + dungeonOrigin.toVector());
+            placedSegments.clear(); // Ensure clear before starting
+
+            // --- 1. Create Absolute Dungeon Data & PlacedSegment Instances ---
+            if (!createAbsoluteInstanceData()) {
+                plugin.getLogger().severe("Failed to create absolute instance data for team " + teamId);
+                return false;
+            }
+            // Now this.dungeonData and this.placedSegments are populated with absolute locations
+
+            // --- 2. Paste Segments ---
+            plugin.getLogger().info("Pasting segments for team " + teamId + "...");
+            boolean pastingOk = true;
+            for (PlacedSegment instanceSegment : this.placedSegments) {
+                if (!dungeonGenerator.pasteSegmentInstance(instanceSegment)) {
+                    plugin.getLogger().severe("CRITICAL: Failed to paste segment " + instanceSegment.getName() + " for team " + teamId + ". Dungeon may be incomplete.");
+                    pastingOk = false; // Mark failure
+                }
+            }
+            if (!pastingOk) {
+                plugin.getLogger().severe("Dungeon instance for team " + teamId + " may be incomplete due to pasting errors.");
+                // return false; // Decide if this is fatal
+            }
+
+            // --- 3. Populate Features (using absolute locations from dungeonData) ---
+            plugin.getLogger().info("Populating features for team " + teamId + "...");
+            populateFeaturesFromData();
+
+            // --- 4. Place Vaults & Keys (using absolute locations from dungeonData) ---
+            plugin.getLogger().info("Placing vaults and keys for team " + teamId + "...");
+            // VaultManager now uses the Dungeon object containing absolute locations
+            if (!vaultManager.placeVaultMarkersAndKeyItems(this.teamId, this.dungeonData)) {
+                plugin.getLogger().warning("Failed to place some vaults/keys for team " + teamId);
+            }
+
+            plugin.getLogger().info("Dungeon instance initialization complete for team " + teamId);
+            return true;
+
+        } catch (Exception e) {
+            plugin.getLogger().log(Level.SEVERE, "Unexpected error during dungeon instance initialization for team " + teamId, e);
             return false;
         }
-        loadedList.forEach(template -> segmentTemplates.put(template.getName(), template));
-        plugin.getLogger().info("Successfully loaded " + segmentTemplates.size() + " segment templates.");
-        // IMPORTANT: Verify that loaded templates include necessary metadata (vault, key, puzzle flags)
-        // Example check (optional):
-        // if (!segmentTemplates.containsKey(START_ROOM_NAME)) {
-        //     plugin.getLogger().severe("CRITICAL: Start room template '" + START_ROOM_NAME + "' is missing!");
-        // }
-        return !segmentTemplates.isEmpty();
     }
-     public long getSeed() { return seed; }
+
+    /**
+     * Creates the `Dungeon` data object (with absolute locations) and the
+     * list of `PlacedSegment` instances (with absolute origins) from the blueprint data.
+     * Populates `this.dungeonData` and `this.placedSegments`.
+     * @return true if successful, false otherwise.
+     */
+    private boolean createAbsoluteInstanceData() {
+        this.placedSegments.clear();
+        Map<VaultColor, Location> vaultMarkerLocs = new HashMap<>();
+        Map<VaultColor, Location> keySpawnLocs = new HashMap<>();
+        List<Location> sandSpawnLocs = new ArrayList<>();
+        List<Location> coinSpawnLocs = new ArrayList<>();
+        List<Location> itemSpawnLocs = new ArrayList<>();
+        Location foundHubLocation = null;
+
+        // Create PlacedSegment instances with absolute origins
+        for (PlacedSegment relativeSegment : blueprintData.getRelativeSegments()) {
+            Location relativeOrigin = relativeSegment.getWorldOrigin(); // Origin relative to blueprint 0,0,0
+            Location absoluteOrigin = dungeonOrigin.clone().add(relativeOrigin.toVector());
+            absoluteOrigin.setWorld(world);
+            this.placedSegments.add(new PlacedSegment(relativeSegment.getSegmentTemplate(), absoluteOrigin));
+        }
+
+        // Translate relative blueprint locations to absolute world locations
+        Vector originVec = dungeonOrigin.toVector(); // Vector representation of the absolute origin
+
+        // Hub Location
+        if (blueprintData.getHubRelativeLocation() != null) {
+            foundHubLocation = blueprintData.getHubRelativeLocation().toLocation(world).add(originVec);
+        } else {
+             plugin.getLogger().warning("Hub relative location missing in blueprint for team " + teamId);
+             // Attempt to find hub segment origin as fallback
+             for(PlacedSegment ps : this.placedSegments) {
+                 if(ps.getSegmentTemplate().isHub()) {
+                     foundHubLocation = ps.getWorldOrigin();
+                     break;
+                 }
+             }
+             if(foundHubLocation == null) plugin.getLogger().severe("Could not determine Hub location for team " + teamId);
+        }
+
+
+        // Vault Markers
+        blueprintData.getVaultMarkerRelativeLocations().forEach((color, relVec) -> {
+            vaultMarkerLocs.put(color, relVec.toLocation(world).add(originVec));
+        });
+
+        // Key Spawns
+        blueprintData.getKeySpawnRelativeLocations().forEach((color, relVec) -> {
+            keySpawnLocs.put(color, relVec.toLocation(world).add(originVec));
+        });
+
+        // Sand Spawns
+        blueprintData.getSandSpawnRelativeLocations().forEach(relVec -> {
+            sandSpawnLocs.add(relVec.toLocation(world).add(originVec));
+        });
+
+        // Coin Spawns
+        blueprintData.getCoinSpawnRelativeLocations().forEach(relVec -> {
+            coinSpawnLocs.add(relVec.toLocation(world).add(originVec));
+        });
+
+        // Item Spawns
+        blueprintData.getItemSpawnRelativeLocations().forEach(relVec -> {
+            itemSpawnLocs.add(relVec.toLocation(world).add(originVec));
+        });
+
+        // Create the Dungeon data object
+        this.dungeonData = new Dungeon(
+                teamId, dungeonOrigin, world, placedSegments,
+                foundHubLocation, vaultMarkerLocs, keySpawnLocs,
+                sandSpawnLocs, coinSpawnLocs, itemSpawnLocs
+        );
+
+        return true; // Assume success for now
+    }
 
 
     /**
-     * Generates a dungeon with colored pathways, vaults, and keys.
+     * Helper method to spawn dynamic elements using the pre-calculated absolute locations
+     * stored in the `dungeonData` object. Called by `initializeInstance`.
      */
-    public void generateDungeon(Location startRoomOrigin) {
-        // --- Reset State ---
-        vaultsPlaced.clear();
-        keysPlaced.clear();
+    private void populateFeaturesFromData() {
+        if (dungeonData == null) {
+            plugin.getLogger().severe("Cannot populate features: Dungeon data object is null for team " + teamId);
+            return;
+        }
+
+        // Populate Sand
+        for (Location absLoc : dungeonData.getSandSpawnLocations()) {
+            try {
+                Block block = absLoc.getBlock();
+                if (block.isPassable() || block.getType().isAir() || block.isLiquid()) {
+                    block.setType(Material.SAND, false);
+                }
+            } catch (Exception e) {
+                plugin.getLogger().log(Level.WARNING, "Error placing sand at " + absLoc.toVector() + " for team " + teamId, e);
+            }
+        }
+
+        // Populate Coins
+        // TODO: Implement actual coin spawning using FloorItemManager or similar
+        for (Location absLoc : dungeonData.getCoinSpawnLocations()) {
+            // Example: Spawn placeholder item
+            // ItemStack coin = new ItemStack(Material.GOLD_NUGGET);
+            // world.dropItemNaturally(absLoc.clone().add(0.5, 0.5, 0.5), coin);
+        }
+
+        // Populate Items
+        // TODO: Implement actual item spawning (loot tables etc.)
+        for (Location absLoc : dungeonData.getItemSpawnLocations()) {
+             // Example: Spawn placeholder item
+             // ItemStack item = new ItemStack(Material.DIAMOND);
+             // world.dropItemNaturally(absLoc.clone().add(0.5, 0.5, 0.5), item);
+        }
+         plugin.getLogger().fine("Populated features from data for team " + teamId);
+    }
+
+
+    /**
+     * Returns the absolute world location of this dungeon instance's origin (0,0,0 point).
+     */
+    public Location getDungeonOrigin() {
+        return dungeonOrigin;
+    }
+
+    /**
+     * Returns the Bukkit World object where this dungeon instance exists.
+     */
+    public World getWorld() {
+        return world;
+    }
+
+    /**
+     * Finds which specific PlacedSegment instance within this dungeon contains the
+     * given absolute world location.
+     */
+    public PlacedSegment getSegmentAtLocation(Location location) {
+        if (this.dungeonData != null) {
+            return this.dungeonData.getSegmentAt(location); // Assumes Dungeon.getSegmentAt implemented
+        } else {
+            // Fallback if called too early (shouldn't happen in normal flow)
+             plugin.getLogger().warning("getSegmentAtLocation called before dungeonData was initialized for team " + teamId);
+             return null;
+        }
+    }
+
+    /**
+     * Returns the UUID of the team that owns this dungeon instance.
+     */
+    public UUID getTeamId() {
+        return teamId;
+    }
+
+    /**
+     * Returns the consolidated Dungeon data object containing pre-calculated locations
+     * for this instance. Returns null if initializeInstance hasn't completed.
+     */
+    public Dungeon getDungeonData() {
+        return dungeonData;
+    }
+
+    /**
+     * Returns an unmodifiable list of the actual PlacedSegment instances that make up
+     * this dungeon instance in the world.
+     */
+    public List<PlacedSegment> getPlacedSegments() {
+        return Collections.unmodifiableList(this.placedSegments);
+    }
+
+    /**
+     * Removes the blocks and entities associated with this dungeon instance. (Optional)
+     */
+    public void cleanupInstance() {
+        plugin.getLogger().info("Attempting cleanup for dungeon instance of team " + teamId);
+        // TODO: Implement cleanup logic (e.g., WorldEdit //set air)
         placedSegments.clear();
-        expansionStack.clear();
-        random.setSeed(seed);
-
-        // --- Validate ---
-        if (segmentTemplates.isEmpty()) {
-            plugin.getLogger().severe("Cannot generate dungeon: No segment templates loaded.");
-            return;
-        }
-        if (startRoomOrigin == null || startRoomOrigin.getWorld() == null) {
-             plugin.getLogger().severe("Cannot generate dungeon: Start room location or its world is null.");
-             return;
-        }
-
-        // --- Setup Start Room ---
-        Segment startTemplate = segmentTemplates.get(START_ROOM_NAME);
-        if (startTemplate == null) {
-             plugin.getLogger().severe("Cannot generate dungeon: Start room template '" + START_ROOM_NAME + "' not found.");
-             return;
-        }
-
-        PlacedSegment startPlacedSegment = new PlacedSegment(startTemplate, startRoomOrigin);
-        if (!pasteSegment(startPlacedSegment)) {
-            plugin.getLogger().severe("Failed to place starting room schematic. Aborting dungeon generation.");
-            return;
-        }
-        placedSegments.add(startPlacedSegment);
-        // Populate features for start room too, if any
-        populateSegmentFeatures(startPlacedSegment);
-        plugin.getLogger().info("Placed start room: " + startTemplate.getName());
-
-        // --- Designate Initial Paths & Populate Stack ---
-        List<EntryPoint> startExits = startPlacedSegment.getAbsoluteEntryPoints();
-        Collections.shuffle(startExits, random);
-        // Ensure enough colors for available exits, or handle fewer exits gracefully
-        List<VaultType> colorsToAssign = new ArrayList<>(List.of(VaultType.GOLD, VaultType.RED, VaultType.BLUE, VaultType.GREEN));
-
-        for (EntryPoint exit : startExits) {
-            VaultType assignedColor = VaultType.NONE;
-            if (!colorsToAssign.isEmpty()) {
-                assignedColor = colorsToAssign.remove(0);
-                plugin.getLogger().info("Designating path from exit " + exit.getLocation().toVector() + " as " + assignedColor);
-            }
-            expansionStack.push(new DfsState(exit, 1, assignedColor));
-        }
-        Collections.shuffle(expansionStack, random);
-
-        // --- Main DFS Loop ---
-        int segmentsPlacedCount = 1;
-        while (!expansionStack.isEmpty() && segmentsPlacedCount < MAX_SEGMENTS) {
-            DfsState currentState = expansionStack.pop();
-            EntryPoint currentExit = currentState.getExitPoint();
-            int currentDepth = currentState.getDepth();
-            VaultType currentPathColor = currentState.getPathColor();
-
-            // --- Check Depth Limit ---
-            int maxDepth = MAX_DEPTH_MAP.getOrDefault(currentPathColor, 2);
-            if (currentDepth >= maxDepth) {
-                closeUnusedEntrance(currentExit);
-                continue;
-            }
-
-            // --- Find and Prioritize Candidate Templates ---
-            Direction requiredDir = currentExit.getDirection().getOpposite();
-            List<Segment> potentialTemplates = findMatchingTemplates(requiredDir);
-            // Ensure Segment class has the methods getVaultType(), getKeyForVault(), isPuzzleRoom()
-            List<Segment> orderedCandidates = prioritizeCandidates(potentialTemplates, currentPathColor, currentDepth);
-
-            // --- Attempt Placement ---
-            boolean connected = false;
-            int tries = 0;
-            while (!connected && tries < MAX_TRIES_PER_ENTRANCE && !orderedCandidates.isEmpty()) {
-                tries++;
-                Segment candidateTemplate = orderedCandidates.remove(0);
-
-                Segment.RelativeEntryPoint candidateEntryPoint = candidateTemplate.findEntryPointByDirection(requiredDir);
-                if (candidateEntryPoint == null) continue;
-
-                Location candidateOrigin = calculatePlacementOrigin(currentExit, candidateEntryPoint);
-                if (candidateOrigin == null) continue;
-
-                PlacedSegment candidatePlaced = new PlacedSegment(candidateTemplate, candidateOrigin);
-
-                // --- Validate Placement ---
-                if (!doesOverlap(candidatePlaced, placedSegments) &&
-                    isWithinDistance(startRoomOrigin, candidateOrigin, MAX_DISTANCE_FROM_START))
-                {
-                    // --- Place Valid Segment ---
-                    if (pasteSegment(candidatePlaced)) {
-                        placedSegments.add(candidatePlaced);
-                        segmentsPlacedCount++;
-                        connected = true;
-
-                        // Update placed vaults/keys state
-                        VaultType placedVault = candidateTemplate.getType();
-                        VaultType placedKey = candidateTemplate.getKeyForVault();
-                        if (placedVault != VaultType.NONE) {
-                            vaultsPlaced.add(placedVault);
-                            plugin.getLogger().info("Placed VAULT: " + placedVault);
-                        }
-                        if (placedKey != VaultType.NONE) {
-                            keysPlaced.add(placedKey);
-                             plugin.getLogger().info("Placed KEY for: " + placedKey);
-                        }
-
-                        // Populate features (sand, items)
-                        populateSegmentFeatures(candidatePlaced);
-
-                        // --- Add New Exits to Stack (Apply Pruning) ---
-                        List<EntryPoint> newExits = new ArrayList<>();
-                        for (EntryPoint newEp : candidatePlaced.getAbsoluteEntryPoints()) {
-                            if (!areConnectingEntryPoints(newEp, currentExit)) {
-                                newExits.add(newEp);
-                            }
-                        }
-
-                        // ** Branch Pruning **
-                        if (currentPathColor == VaultType.NONE && !newExits.isEmpty()) {
-                            // Pruning for Normal Paths
-                             if (candidateTemplate.isPuzzleRoom() || currentDepth >= 1) {
-                                 plugin.getLogger().fine("Pruning branches from normal path segment: " + candidateTemplate.getName());
-                                 // Close these exits immediately instead of adding to stack
-                                 newExits.forEach(this::closeUnusedEntrance);
-                             } else {
-                                 // Allow only one random branch from the first normal segment
-                                 Collections.shuffle(newExits, random);
-                                 expansionStack.push(new DfsState(newExits.get(0), currentDepth + 1, VaultType.NONE));
-                                 // Close the other exits from this segment
-                                 for (int i = 1; i < newExits.size(); i++) {
-                                     closeUnusedEntrance(newExits.get(i));
-                                 }
-                             }
-                        } else if (!newExits.isEmpty()) {
-                            // Colored paths: Add all exits, maintaining color
-                            Collections.shuffle(newExits, random);
-                            for (EntryPoint newExit : newExits) {
-                                // Only push if the vault for this color hasn't been placed yet,
-                                // or if this segment IS the vault (allowing exits from vault room?)
-                                if (!vaultsPlaced.contains(currentPathColor) || candidateTemplate.getType() == currentPathColor) {
-                                    expansionStack.push(new DfsState(newExit, currentDepth + 1, currentPathColor));
-                                } else {
-                                    // Vault already placed on this path, close further exits
-                                    closeUnusedEntrance(newExit);
-                                }
-                            }
-                        }
-                        // Shuffle stack after potential adds
-                        Collections.shuffle(expansionStack, random);
-
-                        plugin.getLogger().info("Placed segment #" + segmentsPlacedCount + ": " + candidateTemplate.getName() + " (Path: " + currentPathColor + ", Depth: " + (currentDepth+1) + ")");
-
-                    } else {
-                        plugin.getLogger().warning("Placement validation passed for " + candidateTemplate.getName() + ", but schematic pasting failed.");
-                    }
-                } else {
-                     plugin.getLogger().fine("Skipped placing " + candidateTemplate.getName() + ": Overlap=" + doesOverlap(candidatePlaced, placedSegments) + ", TooFar=" + !isWithinDistance(startRoomOrigin, candidateOrigin, MAX_DISTANCE_FROM_START));
-                }
-            } // End attempts loop
-
-            if (!connected) {
-                closeUnusedEntrance(currentExit);
-            }
-        } // End DFS loop
-
-        // Final cleanup
-        while (!expansionStack.isEmpty()) { closeUnusedEntrance(expansionStack.pop()); }
-        plugin.getLogger().info("Dungeon generation finished. Total segments placed: " + placedSegments.size());
-        // Log missing vaults/keys
-        for (VaultType vt : VaultType.values()) {
-            if (vt != VaultType.NONE) {
-                if (!vaultsPlaced.contains(vt)) plugin.getLogger().warning("Vault NOT placed: " + vt);
-                if (!keysPlaced.contains(vt)) plugin.getLogger().warning("Key NOT placed for: " + vt);
-            }
-        }
+        dungeonData = null;
+        plugin.getLogger().info("Cleanup logic finished for team " + teamId);
     }
-
-    private void closeUnusedEntrance(DfsState state) {
-        if (state == null || state.getExitPoint() == null || state.getExitPoint().getLocation() == null || state.getExitPoint().getDirection() == null) {
-            plugin.getLogger().warning("Invalid state or exit point provided for closing unused entrance.");
-            return;
-        }
-
-        EntryPoint unusedEnd = state.getExitPoint();
-        plugin.getLogger().info("[Dungeon] Closing off unused entrance at " + unusedEnd.getLocation().toVector() + " facing " + unusedEnd.getDirection());
-
-        try {
-            // Place block one step IN the direction the entrance faces (inside the segment)
-            Location blockLoc = unusedEnd.getLocation().clone().add(unusedEnd.getDirection().getBlockVector());
-            blockLoc.getBlock().setType(Material.STONE_BRICKS); // Example closing material
-        } catch (Exception e) {
-            plugin.getLogger().log(Level.WARNING, "Failed to place closing block for unused entrance.", e);
-        }
-    }
-    /**
-     * Orders candidate templates based on current path color, depth, and game rules.
-     */
-    private List<Segment> prioritizeCandidates(List<Segment> candidates, VaultType pathColor, int currentDepth) {
-        List<Segment> priorityVault = new ArrayList<>();
-        List<Segment> priorityKey = new ArrayList<>();
-        List<Segment> priorityPath = new ArrayList<>(); // Segments specifically for colored paths?
-        List<Segment> priorityPuzzle = new ArrayList<>();
-        List<Segment> normal = new ArrayList<>();
-
-        int nextDepth = currentDepth + 1;
-
-        for (Segment template : candidates) {
-            VaultType templateVault = template.getType();
-            VaultType templateKey = template.getKeyForVault();
-
-            // --- Vault Placement ---
-            if (templateVault != VaultType.NONE) {
-                if (templateVault == pathColor && // Must match path color
-                    nextDepth >= MIN_DEPTH_VAULT_MAP.getOrDefault(pathColor, Integer.MAX_VALUE) && // Must meet min depth
-                    !vaultsPlaced.contains(templateVault)) // Must not be placed yet
-                {
-                    priorityVault.add(template); continue;
-                } else {
-                    continue; // Don't place wrong vault, duplicate, or too early
-                }
-            }
-
-            // --- Key Placement ---
-             if (templateKey != VaultType.NONE) {
-                 if (!keysPlaced.contains(templateKey)) { // Must not be placed yet
-                     priorityKey.add(template); continue; // Keys can go anywhere not yet placed
-                 } else {
-                     continue; // Don't place duplicate keys
-                 }
-             }
-
-            // --- Pathway/Puzzle/Normal ---
-            // TODO: Refine pathway segment identification. Assuming non-special for now.
-            // Maybe add a SegmentType.PATHWAY_COLOR or check name pattern?
-            if (pathColor != VaultType.NONE) {
-                 priorityPath.add(template); // On colored path, prefer pathway segments first
-            } else {
-                // On normal path, prefer puzzle rooms
-                if (template.isPuzzleRoom()) {
-                    priorityPuzzle.add(template);
-                } else {
-                    normal.add(template);
-                }
-            }
-        }
-
-        // Shuffle within priorities and combine
-        Collections.shuffle(priorityVault, random);
-        Collections.shuffle(priorityKey, random);
-        Collections.shuffle(priorityPath, random);
-        Collections.shuffle(priorityPuzzle, random);
-        Collections.shuffle(normal, random);
-
-        List<Segment> ordered = new ArrayList<>();
-        ordered.addAll(priorityVault); // Vault for this path is highest priority if conditions met
-        ordered.addAll(priorityKey);   // Keys are next highest
-        if (pathColor != VaultType.NONE) { // On colored path
-            ordered.addAll(priorityPath); // Then pathway segments
-            ordered.addAll(priorityPuzzle); // Then puzzles (less common on main path?)
-            ordered.addAll(normal);        // Then normal filler
-        } else { // On normal path
-             ordered.addAll(priorityPuzzle); // Puzzles first
-             ordered.addAll(normal);        // Then normal filler
-        }
-
-        return ordered;
-    }
-
-    /**
-     * Populates features like sand and items after a segment is pasted.
-     */
-    private void populateSegmentFeatures(PlacedSegment placedSegment) {
-        Segment template = placedSegment.getSegmentTemplate();
-
-        // --- Sand Spawning (for Vaults) ---
-        if (template.getType() != VaultType.NONE) {
-            List<BlockVector3> relativeSandSpawns = template.getSandSpawnLocations();
-            if (relativeSandSpawns != null && !relativeSandSpawns.isEmpty()) {
-                int sandPlaced = 0;
-                int maxSand = 5; // Max sand blocks for this vault room
-                List<BlockVector3> shuffledSpawns = new ArrayList<>(relativeSandSpawns);
-                Collections.shuffle(shuffledSpawns, random);
-
-                plugin.getLogger().info("Attempting to place sand in vault: " + template.getName());
-                for (BlockVector3 relPos : shuffledSpawns) {
-                    if (sandPlaced >= maxSand) break;
-                    try {
-                        Location absLoc = placedSegment.getAbsoluteLocation(relPos);
-                        Block block = absLoc.getBlock();
-                        // Only place sand if the spot is empty (air) or liquid
-                        if (block.getType().isAir() || block.isLiquid()) {
-                             block.setType(Material.SAND); // Consider SAND or SOUL_SAND?
-                             sandPlaced++;
-                             plugin.getLogger().fine("Placed sand at " + absLoc.toVector());
-                        } else {
-                            plugin.getLogger().fine("Skipped placing sand at " + absLoc.toVector() + ", block not replaceable: " + block.getType());
-                        }
-                    } catch (Exception e) {
-                        plugin.getLogger().log(Level.WARNING, "Error placing sand at relative pos " + relPos + " for segment " + template.getName(), e);
-                    }
-                }
-                 plugin.getLogger().info("Placed " + sandPlaced + "/" + maxSand + " sand blocks in vault: " + template.getName());
-            } else {
-                 plugin.getLogger().warning("Vault segment " + template.getName() + " has no sand spawn locations defined.");
-            }
-        }
-
-        // --- Item Spawning ---
-        List<BlockVector3> relativeItemSpawns = template.getItemSpawnLocations();
-        if (relativeItemSpawns != null && !relativeItemSpawns.isEmpty()) {
-             plugin.getLogger().info("Processing " + relativeItemSpawns.size() + " item spawn locations for " + template.getName());
-             for (BlockVector3 relPos : relativeItemSpawns) {
-                 Location absLoc = placedSegment.getAbsoluteLocation(relPos);
-                 plugin.getLogger().fine("Attempting item spawn at " + absLoc.toVector() + " for " + template.getName());
-
-                 // --- START: Item Spawning Logic Implementation ---
-                 try {
-                     // Example: Place a chest with a placeholder item (diamond)
-                     Block block = absLoc.getBlock();
-                     if (block.getType().isAir() || !block.getType().isSolid()) { // Check if replaceable
-                         block.setType(Material.CHEST);
-                         if (block.getState() instanceof Chest) {
-                             Chest chest = (Chest) block.getState();
-                             Inventory inv = chest.getBlockInventory();
-
-                             // TODO: Determine actual loot based on rules (path color, depth, room type, key/vault status etc.)
-                             // This requires a loot table system or hardcoded logic.
-                             ItemStack lootItem;
-                             VaultType keyType = template.getKeyForVault();
-                             if (keyType != VaultType.NONE) {
-                                 // This is a key room, place the corresponding key
-                                 lootItem = createKeyItem(keyType); // Need createKeyItem helper method
-                             } else {
-                                 // Placeholder loot (e.g., a diamond)
-                                 lootItem = new ItemStack(Material.DIAMOND, 1);
-                                 // Add more complex loot table logic here based on context
-                             }
-
-                             if (lootItem != null) {
-                                 // Place item in a random slot (or specific slots)
-                                 inv.setItem(random.nextInt(inv.getSize()), lootItem);
-                                 plugin.getLogger().fine("Placed chest with item " + lootItem.getType() + " at " + absLoc.toVector());
-                             } else {
-                                 plugin.getLogger().warning("Loot item was null for spawn at " + absLoc.toVector());
-                             }
-                         } else {
-                              plugin.getLogger().warning("Placed CHEST material, but block state is not a Chest at " + absLoc.toVector());
-                         }
-                     } else {
-                          plugin.getLogger().warning("Skipped placing chest at " + absLoc.toVector() + ", block not replaceable: " + block.getType());
-                     }
-                 } catch (Exception e) {
-                      plugin.getLogger().log(Level.WARNING, "Error during item spawning at " + absLoc.toVector(), e);
-                 }
-                 // --- END: Item Spawning Logic Implementation ---
-             }
-        }
-    }
-
-    /**
-     * Helper method to create a placeholder key item.
-     * TODO: Customize appearance, lore, NBT tags as needed.
-     */
-    private ItemStack createKeyItem(VaultType vaultType) {
-        Material material;
-        String name;
-        switch (vaultType) {
-            case GOLD: material = Material.GOLD_NUGGET; name = "§6Gold Vault Key"; break; // Example
-            case RED: material = Material.REDSTONE; name = "§cRed Vault Key"; break;
-            case GREEN: material = Material.EMERALD; name = "§aGreen Vault Key"; break;
-            case BLUE: material = Material.LAPIS_LAZULI; name = "§9Blue Vault Key"; break;
-            default: return null; // No key for NONE
-        }
-        ItemStack key = new ItemStack(material, 1);
-        // TODO: Add custom model data, lore, NBT tags to make keys unique/functional
-        // ItemMeta meta = key.getItemMeta();
-        // if (meta != null) {
-        //    meta.setDisplayName(name);
-        //    meta.setLore(List.of("Unlocks the " + vaultType + " Vault"));
-        //    // meta.setCustomModelData(12345); // Example
-        //    key.setItemMeta(meta);
-        // }
-        return key;
-    }
-
-
-    // --- Helper methods ---
-    // [Implementations for calculatePlacementOrigin, pasteSegment, doesOverlap, findMatchingTemplates, areConnectingEntryPoints, isWithinDistance, closeUnusedEntrance]
-    // (Copied from previous version - verify they are still correct)
-
-    private Location calculatePlacementOrigin(EntryPoint currentExitPoint, Segment.RelativeEntryPoint candidateEntryPoint) {
-        try {
-            Location exitLoc = currentExitPoint.getLocation();
-            Direction exitDir = currentExitPoint.getDirection();
-            Location targetEntryPointLoc = exitLoc.clone().add(exitDir.getBlockVector()); // Use Direction's vector method
-            BlockVector3 candidateEntryRelPos = candidateEntryPoint.getRelativePosition();
-            Location candidateOrigin = targetEntryPointLoc.clone().subtract(
-                candidateEntryRelPos.x(), candidateEntryRelPos.y(), candidateEntryRelPos.z()
-            );
-            if (!candidateOrigin.getWorld().equals(exitLoc.getWorld())) {
-                plugin.getLogger().severe("World mismatch during origin calculation!"); return null;
-            }
-            return candidateOrigin;
-        } catch (Exception e) {
-             plugin.getLogger().log(Level.SEVERE, "Error calculating placement origin", e); return null;
-        }
-    }
-
-    private boolean pasteSegment(PlacedSegment placedSegment) {
-        Segment template = placedSegment.getSegmentTemplate();
-        Location origin = placedSegment.getWorldOrigin();
-        File schematicFile = template.getSchematicFile(plugin.getDataFolder(), SCHEMATICS_SUBDIR);
-        if (schematicFile == null || !schematicFile.exists() || !schematicFile.isFile()) {
-            plugin.getLogger().severe("Schematic file not found: " + (schematicFile != null ? schematicFile.getPath() : "null") + " for template " + template.getName()); return false;
-        }
-        Clipboard clipboard;
-        ClipboardFormat format = ClipboardFormats.findByFile(schematicFile);
-        if (format == null) {
-             plugin.getLogger().severe("Unknown schematic format: " + schematicFile.getName()); return false;
-        }
-        try (FileInputStream fis = new FileInputStream(schematicFile); ClipboardReader reader = format.getReader(fis)) {
-            clipboard = reader.read();
-        } catch (IOException e) {
-            plugin.getLogger().log(Level.SEVERE, "IOException reading schematic: " + schematicFile.getName(), e); return false;
-        } catch (Exception e) {
-             plugin.getLogger().log(Level.SEVERE, "Error loading clipboard: " + schematicFile.getName(), e); return false;
-        }
-        if (clipboard == null) {
-             plugin.getLogger().severe("Loaded null clipboard: " + schematicFile.getName()); return false;
-        }
-        try {
-            World weWorld = BukkitAdapter.adapt(origin.getWorld());
-            try (EditSession editSession = WorldEdit.getInstance().newEditSessionBuilder().world(weWorld).build()) {
-                Operation operation = new ClipboardHolder(clipboard)
-                        .createPaste(editSession)
-                        .to(BukkitAdapter.asBlockVector(origin))
-                        .ignoreAirBlocks(false) // Usually false for dungeons
-                        .build();
-                Operations.complete(operation);
-                return true;
-            }
-        } catch (WorldEditException e) {
-            plugin.getLogger().log(Level.SEVERE, "WorldEditException pasting: " + template.getName() + " at " + origin.toVector(), e); return false;
-        } catch (Exception e) {
-             plugin.getLogger().log(Level.SEVERE, "Unexpected error pasting: " + template.getName() + " at " + origin.toVector(), e); return false;
-        }
-    }
-
-    private boolean doesOverlap(PlacedSegment newSegment, List<PlacedSegment> activeSegments) {
-        for (PlacedSegment placed : activeSegments) {
-            if (!newSegment.getWorld().equals(placed.getWorld())) continue;
-            // IMPORTANT: Ensure your Area class has a working intersects(Area other) method for AABB check
-            if (newSegment.getWorldBounds().intersects(placed.getWorldBounds())) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    private List<Segment> findMatchingTemplates(Direction requiredDirection) {
-        // Ensure Segment has hasEntryPointInDirection(Direction)
-        return segmentTemplates.values().stream()
-                .filter(template -> template.hasEntryPointInDirection(requiredDirection))
-                .collect(Collectors.toList());
-    }
-
-    private boolean areConnectingEntryPoints(EntryPoint ep1, EntryPoint ep2) {
-        // Ensure Direction has getOpposite() and getBlockVector()
-        if (ep1 == null || ep2 == null || ep1.getLocation() == null || ep2.getLocation() == null || ep1.getDirection() == null || ep2.getDirection() == null) return false;
-        if (!ep1.getDirection().equals(ep2.getDirection().getOpposite())) return false;
-        Location expectedLoc2 = ep1.getLocation().clone().add(ep1.getDirection().getBlockVector());
-        // Compare block coordinates
-        return expectedLoc2.getBlockX() == ep2.getLocation().getBlockX() &&
-               expectedLoc2.getBlockY() == ep2.getLocation().getBlockY() &&
-               expectedLoc2.getBlockZ() == ep2.getLocation().getBlockZ();
-    }
-
-    private boolean isWithinDistance(Location startOrigin, Location segmentOrigin, int maxDistance) {
-        if (!startOrigin.getWorld().equals(segmentOrigin.getWorld())) return false;
-        return startOrigin.distanceSquared(segmentOrigin) <= (double) maxDistance * maxDistance;
-    }
-
-    private void closeUnusedEntrance(EntryPoint unusedEnd) {
-         if (unusedEnd == null || unusedEnd.getLocation() == null || unusedEnd.getDirection() == null) return;
-         plugin.getLogger().info("[Dungeon] Closing off unused entrance at " + unusedEnd.getLocation().toVector() + " facing " + unusedEnd.getDirection());
-         try {
-              // Place block one step IN the direction the entrance faces (inside the segment)
-              Location blockLoc = unusedEnd.getLocation(); //.clone().add(unusedEnd.getDirection().getBlockVector()); // Place *at* the entrance marker? Or one block out? Let's try *at*.
-              blockLoc.getBlock().setType(Material.STONE_BRICKS); // Example closing material
-         } catch (Exception e) {
-             plugin.getLogger().log(Level.WARNING,"Failed to place closing block for unused entrance.", e);
-         }
-     }
-
 }

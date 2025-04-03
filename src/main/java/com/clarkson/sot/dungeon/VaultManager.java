@@ -372,6 +372,11 @@ public class VaultManager implements Listener {
          switch (color) { case BLUE: return Material.BLUE_CONCRETE; case RED: return Material.RED_CONCRETE; case GREEN: return Material.GREEN_CONCRETE; case GOLD: return Material.GOLD_BLOCK; default: return Material.STONE; }
      }
 
+    public boolean placeVaultMarkersAndKeyItems(UUID teamId, Dungeon dungeonData) {
+        // TODO Auto-generated method stub
+        throw new UnsupportedOperationException("Unimplemented method 'placeVaultMarkersAndKeyItems'");
+    }
+
      // --- Added methods assumed to exist on Segment ---
      // These need to be added to your Segment class definition
      /*
