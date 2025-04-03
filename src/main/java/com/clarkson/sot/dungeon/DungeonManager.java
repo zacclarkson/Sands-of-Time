@@ -245,7 +245,7 @@ public class DungeonManager {
                         connected = true;
 
                         // Update placed vaults/keys state
-                        VaultType placedVault = candidateTemplate.getVaultType();
+                        VaultType placedVault = candidateTemplate.getType();
                         VaultType placedKey = candidateTemplate.getKeyForVault();
                         if (placedVault != VaultType.NONE) {
                             vaultsPlaced.add(placedVault);
@@ -289,7 +289,7 @@ public class DungeonManager {
                             for (EntryPoint newExit : newExits) {
                                 // Only push if the vault for this color hasn't been placed yet,
                                 // or if this segment IS the vault (allowing exits from vault room?)
-                                if (!vaultsPlaced.contains(currentPathColor) || candidateTemplate.getVaultType() == currentPathColor) {
+                                if (!vaultsPlaced.contains(currentPathColor) || candidateTemplate.getType() == currentPathColor) {
                                     expansionStack.push(new DfsState(newExit, currentDepth + 1, currentPathColor));
                                 } else {
                                     // Vault already placed on this path, close further exits
@@ -357,7 +357,7 @@ public class DungeonManager {
         int nextDepth = currentDepth + 1;
 
         for (Segment template : candidates) {
-            VaultType templateVault = template.getVaultType();
+            VaultType templateVault = template.getType();
             VaultType templateKey = template.getKeyForVault();
 
             // --- Vault Placement ---
@@ -425,7 +425,7 @@ public class DungeonManager {
         Segment template = placedSegment.getSegmentTemplate();
 
         // --- Sand Spawning (for Vaults) ---
-        if (template.getVaultType() != VaultType.NONE) {
+        if (template.getType() != VaultType.NONE) {
             List<BlockVector3> relativeSandSpawns = template.getSandSpawnLocations();
             if (relativeSandSpawns != null && !relativeSandSpawns.isEmpty()) {
                 int sandPlaced = 0;

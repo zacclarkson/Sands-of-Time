@@ -16,6 +16,7 @@ import com.clarkson.sot.utils.TeamManager;
 // Import Bukkit API classes
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
+import org.bukkit.NamespacedKey;
 import org.bukkit.entity.Player;
 import org.bukkit.plugin.Plugin;
 
@@ -29,6 +30,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.logging.Level;
@@ -74,7 +76,7 @@ public class GameManager {
         // Initialize managers
         this.teamManager = new TeamManager();
         this.playerStateManager = new PlayerStateManager();
-        this.scoreManager = new ScoreManager(teamManager);
+        this.scoreManager = new ScoreManager(teamManager, this, plugin);
         this.bankingManager = new BankingManager(scoreManager);
         this.sandManager = new SandManager(this);
         // Ensure SoT constructor exists or cast plugin appropriately
@@ -415,5 +417,15 @@ public class GameManager {
      public void addSecondsToTimer(int timeBonusSeconds) {
         // TODO Auto-generated method stub
         throw new UnsupportedOperationException("Unimplemented method 'addSecondsToTimer'");
+     }
+
+     public NamespacedKey getSegmentIdKey() {
+        // TODO Auto-generated method stub
+        throw new UnsupportedOperationException("Unimplemented method 'getSegmentIdKey'");
+     }
+
+     public Optional<PlacedSegment> getPlacedSegmentById(UUID segmentId) {
+        // TODO Auto-generated method stub
+        throw new UnsupportedOperationException("Unimplemented method 'getPlacedSegmentById'");
      }
 }
