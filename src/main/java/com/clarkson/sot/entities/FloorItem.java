@@ -77,7 +77,4 @@ public interface FloorItem {
      */
     void removeRepresentation();
 
-    
-    void spawnRepresentation( Location location); // Optional: If items can be spawned at different locations
-
 }
