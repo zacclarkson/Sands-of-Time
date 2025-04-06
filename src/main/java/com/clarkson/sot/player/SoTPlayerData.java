@@ -11,6 +11,7 @@ public class SoTPlayerData {
 
     private final UUID playerUUID;
     private final String playerName; // Store name for convenience (UUID is primary key)
+    private final Player player; // Reference to the Bukkit Player object
 
     // --- Game Specific Stats ---
     private int unbankedCoins;
@@ -33,8 +34,10 @@ public class SoTPlayerData {
      * @param player The Bukkit Player object.
      */
     public SoTPlayerData(Player player) {
+
         this.playerUUID = player.getUniqueId();
         this.playerName = player.getName();
+        this.player = player; // Store the reference to the player object
         resetStats(); // Initialize stats to default values
     }
 
@@ -67,6 +70,8 @@ public class SoTPlayerData {
     public int getMonstersKilled() { return monstersKilled; }
     public int getSandUsedForTimer() {return sandUsedForTimer;}
     public int getRevivesPerformed() { return revivesPerformed;}
+    public Player getPlayer() { return player; } // Return the Bukkit Player object
+
 
 
 
