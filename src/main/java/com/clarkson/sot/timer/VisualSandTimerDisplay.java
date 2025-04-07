@@ -63,6 +63,9 @@ public class VisualSandTimerDisplay {
              this.bottomLocation = bottomLocation.clone();
              this.topLocation = topLocation.clone();
         }
+        if (bottomLocation.getBlockX() != topLocation.getBlockX() || bottomLocation.getBlockZ() != topLocation.getBlockZ()) {
+            throw new IllegalArgumentException("Top location must be directly above the bottom location (same X and Z coordinates).");
+        }
 
         // Calculate total possible height (number of blocks in the column)
         this.totalHeight = this.topLocation.getBlockY() - this.bottomLocation.getBlockY();

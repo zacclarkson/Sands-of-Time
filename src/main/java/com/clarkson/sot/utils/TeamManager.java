@@ -4,10 +4,8 @@ import com.clarkson.sot.main.GameManager; // Import GameManager
 import net.kyori.adventure.text.format.NamedTextColor; // For team colors
 import org.bukkit.Bukkit; // Needed for logging potentially
 import org.bukkit.entity.Player;
-import org.bukkit.plugin.Plugin; // Keep import if createTeamUUID needs it (though it doesn't currently)
 
 import java.util.*;
-import java.util.logging.Level;
 import java.util.stream.Collectors;
 
 /**
@@ -26,16 +24,16 @@ public class TeamManager {
 
     // Static data for standard MCC teams (Restored)
     private static final TeamDefinition[] STANDARD_TEAMS_DATA = {
-            new TeamDefinition(createTeamUUID(1), "Red Rabbits", "RED"),
-            new TeamDefinition(createTeamUUID(2), "Orange Ocelots", "ORANGE"),
-            new TeamDefinition(createTeamUUID(3), "Yellow Yaks", "YELLOW"),
-            new TeamDefinition(createTeamUUID(4), "Lime Llamas", "LIME"),
-            new TeamDefinition(createTeamUUID(5), "Green Geckos", "GREEN"),
-            new TeamDefinition(createTeamUUID(6), "Cyan Coyotes", "CYAN"),
-            new TeamDefinition(createTeamUUID(7), "Aqua Axolotls", "AQUA"),
-            new TeamDefinition(createTeamUUID(8), "Blue Bats", "BLUE"),
-            new TeamDefinition(createTeamUUID(9), "Purple Pandas", "PURPLE"),
-            new TeamDefinition(createTeamUUID(10), "Pink Parrots", "PINK")
+            new TeamDefinition(createTeamUUID(1), "Red Rabbits", "red"),
+            new TeamDefinition(createTeamUUID(2), "Orange Ocelots", "orange"),
+            new TeamDefinition(createTeamUUID(3), "Yellow Yaks", "yellow"),
+            new TeamDefinition(createTeamUUID(4), "Lime Llamas", "lime"),
+            new TeamDefinition(createTeamUUID(5), "Green Geckos", "green"),
+            new TeamDefinition(createTeamUUID(6), "Cyan Coyotes", "cyan"),
+            new TeamDefinition(createTeamUUID(7), "Aqua Axolotls", "aqua"),
+            new TeamDefinition(createTeamUUID(8), "Blue Bats", "blue"),
+            new TeamDefinition(createTeamUUID(9), "Purple Pandas", "purple"),
+            new TeamDefinition(createTeamUUID(10), "Pink Parrots", "pink")
     };
 
     /**
