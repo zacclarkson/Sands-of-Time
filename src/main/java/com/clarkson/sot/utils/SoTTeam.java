@@ -69,7 +69,7 @@ public class SoTTeam {
         this.teamTimer = new TeamTimer(
                 plugin,
                 // Lambda callback: When timer expires, call GameManager's handler
-                () -> this.gameManager.handleTeamTimerEnd(this, true),
+                () -> this.gameManager.handleTeamTimerEnd(this),
                 this.visualTimerDisplay, // Pass the visual display (can be null)
                 DEFAULT_START_SECONDS, // Use SoTTeam's constant for starting time
                 TeamTimer.DEFAULT_MAX_TIMER_SECONDS, // Use TeamTimer's constant
