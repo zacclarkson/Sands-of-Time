@@ -13,6 +13,17 @@ public class SoTTeam {
 
         
     }
+    public void addMember(UUID memberUUID) {
+        memberUUIDs.add(memberUUID);
+    }
+
+    public void removeMember(UUID memberUUID) {
+        memberUUIDs.remove(memberUUID);
+    }
+
+    public Set<UUID> getMembers() {
+        return Collections.unmodifiableSet(memberUUIDs);
+    }
 
     public TeamDefinition getTeam() {
         return team;
