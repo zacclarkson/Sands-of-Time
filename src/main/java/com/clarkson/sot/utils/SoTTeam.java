@@ -11,7 +11,6 @@ import org.bukkit.plugin.Plugin;
 
 import java.util.*;
 import java.util.logging.Level;
-import java.util.stream.Collectors;
 
 /**
  * Represents an active team participating in a Sands of Time game instance.

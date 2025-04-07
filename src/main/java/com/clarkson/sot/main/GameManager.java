@@ -1,10 +1,10 @@
 package com.clarkson.sot.main;
 
 // Required Imports (ensure all needed imports are present)
+import com.clarkson.sot.dungeon.Dungeon; // Needed for getting instance locations
 import com.clarkson.sot.dungeon.DungeonGenerator;
 import com.clarkson.sot.dungeon.DungeonManager;
 import com.clarkson.sot.dungeon.VaultManager;
-// Assuming DungeonBlueprint is used now based on prior context
 import com.clarkson.sot.dungeon.DungeonBlueprint;
 import com.clarkson.sot.dungeon.segment.PlacedSegment;
 import com.clarkson.sot.scoring.BankingManager;
@@ -23,10 +23,11 @@ import net.kyori.adventure.text.format.NamedTextColor;
 import net.kyori.adventure.text.format.TextDecoration;
 
 import java.util.*;
-import java.util.logging.Level;
+import java.util.logging.Level; // Added for logging
 
 /**
  * Manages the overall state, lifecycle, and coordination of a Sands of Time game instance.
+ * Hub, Safe Exit, and Death Cage locations are now instance-specific.
  * The game ends automatically when the last team's timer expires.
  */
 public class GameManager {
@@ -44,200 +45,229 @@ public class GameManager {
     private final Map<UUID, DungeonManager> teamDungeonManagers;
     private final Map<UUID, SoTTeam> activeTeamsInGame;
     private DungeonBlueprint dungeonLayoutBlueprint; // Use DungeonBlueprint
-    private final Location configHubLocation;
-    private final Location configSafeExitLocation;
-    private final List<Location> configDeathCageLocations;
-    private final Location configTrappedLocation;
+
+    // --- Refactored Locations ---
+    private final Location lobbyLocation; // Main world anchor (e.g., for visual timers)
+    private final Location configTrappedLocation; // Universal location for trapped players
+
+    // --- Constants ---
     private static final Vector DUNGEON_BASE_OFFSET = new Vector(10000, 100, 10000);
     private static final Vector TEAM_DUNGEON_SPACING = new Vector(5000, 0, 0);
 
     /**
-     * Constructor for GameManager.
-     * Initializes managers and loads configuration.
+     * Constructor for GameManager (Refactored).
+     * Initializes managers and loads configuration. Takes lobby and trapped locations.
+     *
+     * @param plugin            The main plugin instance.
+     * @param lobbyLocation     A central location in the main world (e.g., lobby) used as an anchor.
+     * @param trappedLocation   The universal location where players are sent when trapped by the timer.
      */
-    public GameManager(Plugin plugin, Location hubLocation, Location safeExit, List<Location> deathCageLocations, Location trappedLocation) {
-        // --- Constructor Implementation (from GameManager_Refactored_Final_20250403) ---
+    public GameManager(Plugin plugin, Location lobbyLocation, Location trappedLocation) {
         this.plugin = Objects.requireNonNull(plugin, "Plugin cannot be null");
-        this.configHubLocation = Objects.requireNonNull(hubLocation, "Hub location cannot be null");
-        this.configSafeExitLocation = Objects.requireNonNull(safeExit, "Safe exit location cannot be null");
-        this.configDeathCageLocations = Objects.requireNonNull(deathCageLocations, "Death cage locations cannot be null");
+        this.lobbyLocation = Objects.requireNonNull(lobbyLocation, "Lobby location cannot be null");
         this.configTrappedLocation = Objects.requireNonNull(trappedLocation, "Trapped location cannot be null");
-        if (deathCageLocations.isEmpty()) {
-            plugin.getLogger().warning("Death cage locations list is empty!");
-        }
 
         // Initialize managers
         this.playerStateManager = new PlayerStateManager();
-        this.teamManager = new TeamManager(this);
+        this.teamManager = new TeamManager(this); // Pass self
         this.scoreManager = new ScoreManager(teamManager, this, plugin);
         this.bankingManager = new BankingManager(scoreManager);
-        this.sandManager = new SandManager(this);
+        this.sandManager = new SandManager(this); // Pass self
 
+        // Initialize VaultManager (check if plugin is SoT instance)
         if (plugin instanceof SoT) {
-             this.vaultManager = new VaultManager((SoT) plugin, this);
+            this.vaultManager = new VaultManager((SoT) plugin, this);
         } else {
-             plugin.getLogger().severe("Plugin instance is not of type SoT! VaultManager may not function correctly.");
-             this.vaultManager = null;
+            plugin.getLogger().severe("Plugin instance is not of type SoT! VaultManager may not function correctly.");
+            this.vaultManager = null; // Or throw an error
         }
 
         this.dungeonGenerator = new DungeonGenerator(plugin);
 
+        // Initialize maps
         this.activeTeamsInGame = new HashMap<>();
         this.teamDungeonManagers = new HashMap<>();
 
+        // Set initial state
         this.currentState = GameState.SETUP;
 
+        // Load dungeon segment templates
         if (this.dungeonGenerator != null) {
-            // Assuming loadSegmentTemplates is still relevant for the generator
             if (!this.dungeonGenerator.loadSegmentTemplates(plugin.getDataFolder())) {
                 plugin.getLogger().severe("Failed to load dungeon segments into DungeonGenerator. Game cannot start.");
+                // Consider setting state to ENDED or throwing an exception
                 this.currentState = GameState.ENDED;
             }
         } else {
             plugin.getLogger().severe("DungeonGenerator failed to initialize.");
-            this.currentState = GameState.ENDED;
+            this.currentState = GameState.ENDED; // Prevent starting
         }
-         plugin.getLogger().info("GameManager initialized.");
-         // --- End Constructor Implementation ---
+
+        plugin.getLogger().info("GameManager initialized.");
     }
 
     /**
      * Sets up the participating teams for the current game instance.
      * Creates SoTTeam objects and stores them.
+     * Uses lobbyLocation to determine visual timer placement.
+     *
+     * @param participatingTeamIds List of UUIDs for teams participating.
+     * @param allPlayersInGame     List of all players involved in the game.
      */
     public void setupGame(List<UUID> participatingTeamIds, List<Player> allPlayersInGame) {
-        // --- setupGame Implementation (from GameManager_Refactored_Final_20250403) ---
-         if (currentState != GameState.SETUP) {
-             plugin.getLogger().warning("Cannot setup game, current state is " + currentState);
+        if (currentState != GameState.SETUP) {
+            plugin.getLogger().warning("Cannot setup game, current state is " + currentState);
+            return;
+        }
+        if (participatingTeamIds == null || participatingTeamIds.isEmpty()) {
+             plugin.getLogger().warning("Cannot setup game: No participating team IDs provided.");
              return;
-         }
-         if (participatingTeamIds == null || participatingTeamIds.isEmpty()) {
-              plugin.getLogger().warning("Cannot setup game: No participating team IDs provided.");
-              return;
-         }
-         plugin.getLogger().info("Setting up game with " + participatingTeamIds.size() + " teams.");
+        }
+        plugin.getLogger().info("Setting up game with " + participatingTeamIds.size() + " teams.");
 
-         activeTeamsInGame.clear();
-         teamDungeonManagers.clear();
-         playerStateManager.clearAllStates();
-         scoreManager.clearAllUnbankedScores();
-         // vaultManager might need a clear method too: vaultManager.clearTeamStates();
-         dungeonLayoutBlueprint = null;
+        // Clear state from previous games
+        activeTeamsInGame.clear();
+        teamDungeonManagers.clear();
+        playerStateManager.clearAllStates();
+        scoreManager.clearAllUnbankedScores();
+        // vaultManager might need a clear method too: vaultManager.clearTeamStates();
+        dungeonLayoutBlueprint = null;
 
-         // Validate player assignments
-         if (allPlayersInGame != null) {
-             for (Player p : allPlayersInGame) {
-                 UUID teamId = teamManager.getPlayerTeamId(p);
-                 if (teamId == null || !participatingTeamIds.contains(teamId)) {
-                     plugin.getLogger().warning("Player " + p.getName() + " is not assigned to a participating team!");
-                 }
-             }
-         }
+        // Validate player assignments (ensure players are on a participating team)
+        if (allPlayersInGame != null) {
+            for (Player p : allPlayersInGame) {
+                UUID teamId = teamManager.getPlayerTeamId(p);
+                if (teamId == null || !participatingTeamIds.contains(teamId)) {
+                    plugin.getLogger().warning("Player " + p.getName() + " is not assigned to a participating team!");
+                    // Decide whether to proceed or abort setup
+                }
+            }
+        }
 
-         // Create SoTTeam instances
-         for (UUID teamId : participatingTeamIds) {
-             TeamDefinition definition = teamManager.getTeamDefinition(teamId);
-             if (definition == null) {
-                 plugin.getLogger().warning("Cannot setup team: Definition not found for ID " + teamId + ". Skipping team.");
-                 continue;
-             }
+        // Create SoTTeam instances for each participating team
+        for (UUID teamId : participatingTeamIds) {
+            TeamDefinition definition = teamManager.getTeamDefinition(teamId);
+            if (definition == null) {
+                plugin.getLogger().warning("Cannot setup team: Definition not found for ID " + teamId + ". Skipping team.");
+                continue;
+            }
 
-             Location visualTimerBottom = determineVisualTimerBottomLocation(definition, configHubLocation);
-             Location visualTimerTop = determineVisualTimerTopLocation(definition, configHubLocation);
+            // Determine visual timer locations based on the main world lobbyLocation
+            Location visualTimerBottom = determineVisualTimerBottomLocation(definition, this.lobbyLocation);
+            Location visualTimerTop = determineVisualTimerTopLocation(definition, this.lobbyLocation);
 
-             // Use the SoTTeam constructor that takes dependencies and creates TeamTimer internally
-             SoTTeam activeTeam = new SoTTeam(
-                     definition, plugin, this, visualTimerBottom, visualTimerTop
-             );
-             activeTeamsInGame.put(teamId, activeTeam);
-             plugin.getLogger().info("Initialized SoTTeam for: " + definition.getName());
+            // Create the active team instance (SoTTeam handles its own timer)
+            SoTTeam activeTeam = new SoTTeam(
+                    definition, plugin, this, visualTimerBottom, visualTimerTop
+            );
+            activeTeamsInGame.put(teamId, activeTeam);
+            plugin.getLogger().info("Initialized SoTTeam for: " + definition.getName());
 
-             // Add members
-             Set<UUID> memberUUIDs = teamManager.getTeamMemberUUIDs(teamId);
-             for (UUID memberId : memberUUIDs) {
-                 Player p = Bukkit.getPlayer(memberId);
-                 if (p != null && p.isOnline()) {
-                     activeTeam.addMember(p);
-                     playerStateManager.initializePlayer(p);
-                 } else {
-                     plugin.getLogger().warning("Player " + memberId + " assigned to team " + definition.getName() + " is offline or not found during setup.");
-                 }
-             }
-         }
-         plugin.getLogger().info("Game setup complete. " + activeTeamsInGame.size() + " active teams created. Ready to start.");
-         // --- End setupGame Implementation ---
+            // Add assigned members to the SoTTeam instance and initialize their state
+            Set<UUID> memberUUIDs = teamManager.getTeamMemberUUIDs(teamId);
+            for (UUID memberId : memberUUIDs) {
+                Player p = Bukkit.getPlayer(memberId);
+                if (p != null && p.isOnline()) {
+                    activeTeam.addMember(p);
+                    playerStateManager.initializePlayer(p); // Set initial status (e.g., ALIVE_IN_DUNGEON)
+                } else {
+                    plugin.getLogger().warning("Player " + memberId + " assigned to team " + definition.getName() + " is offline or not found during setup.");
+                }
+            }
+        }
+        plugin.getLogger().info("Game setup complete. " + activeTeamsInGame.size() + " active teams created. Ready to start.");
     }
 
     /**
      * Starts the actual game: generates layout, creates dungeon instances,
-     * teleports players, and starts timers.
+     * teleports players to their instance-specific hubs, and starts timers.
      */
     public void startGame() {
-        // --- startGame Implementation (from GameManager_Refactored_Final_20250403, using DungeonBlueprint) ---
-        if (currentState != GameState.SETUP) { /* ... log error ... */ return; }
-        if (activeTeamsInGame.isEmpty()) { /* ... log error ... */ return; }
-        if (dungeonGenerator == null || vaultManager == null) { /* ... log error ... */ return; }
+        if (currentState != GameState.SETUP) {
+            plugin.getLogger().severe("Cannot start game, current state is " + currentState);
+            return;
+        }
+        if (activeTeamsInGame.isEmpty()) {
+            plugin.getLogger().severe("Cannot start game: No active teams were set up.");
+            return;
+        }
+        if (dungeonGenerator == null || vaultManager == null) {
+             plugin.getLogger().severe("Cannot start game: Core components (DungeonGenerator/VaultManager) missing.");
+             return;
+        }
         plugin.getLogger().info("Starting Sands of Time game generation...");
 
-        // 1. Generate Dungeon Layout Blueprint
-        this.dungeonLayoutBlueprint = dungeonGenerator.generateDungeonLayout(); // Assume returns DungeonBlueprint
-        if (this.dungeonLayoutBlueprint == null /* || this.dungeonLayoutBlueprint.getRelativeSegments().isEmpty() */) { // Adapt check
+        // 1. Generate Dungeon Layout Blueprint (Relative Structure)
+        this.dungeonLayoutBlueprint = dungeonGenerator.generateDungeonLayout();
+        if (this.dungeonLayoutBlueprint == null || this.dungeonLayoutBlueprint.getRelativeSegments().isEmpty()) {
             plugin.getLogger().severe("Failed to generate dungeon layout blueprint. Aborting game start.");
+            currentState = GameState.ENDED; // Prevent further actions
+            return;
+        }
+
+        // Determine the world for dungeon instances (using lobbyLocation's world as reference)
+        World gameWorld = lobbyLocation.getWorld();
+        if (gameWorld == null) {
+            plugin.getLogger().severe("Cannot determine game world from lobby location. Aborting game start.");
             currentState = GameState.ENDED;
             return;
         }
 
-        World gameWorld = configHubLocation.getWorld();
-        if (gameWorld == null) { /* ... log error ... */ currentState = GameState.ENDED; return; }
-
-        // 2. Create and Initialize Instance for Each Team
+        // 2. Create and Initialize Dungeon Instance for Each Team
         int teamIndex = 0;
+        // Calculate base offset from world spawn or a fixed point
         Location currentDungeonBase = gameWorld.getSpawnLocation().clone().add(DUNGEON_BASE_OFFSET);
-        teamDungeonManagers.clear();
+        teamDungeonManagers.clear(); // Ensure clean map
 
         for (SoTTeam team : activeTeamsInGame.values()) {
             UUID teamId = team.getTeamId();
+            // Calculate the absolute origin for this team's dungeon instance
             Location teamOrigin = currentDungeonBase.clone().add(TEAM_DUNGEON_SPACING.clone().multiply(teamIndex));
             plugin.getLogger().info("Creating dungeon instance for team " + team.getTeamName() + " at " + teamOrigin.toVector());
 
-            // Create DungeonManager instance, passing the blueprint
-            DungeonManager teamDungeon = new DungeonManager(plugin, this, dungeonGenerator, vaultManager, teamId, teamOrigin, dungeonLayoutBlueprint); // Pass blueprint
+            // Create the manager for this specific team's instance, passing the blueprint
+            DungeonManager teamDungeon = new DungeonManager(plugin, this, dungeonGenerator, vaultManager, teamId, teamOrigin, dungeonLayoutBlueprint);
 
+            // Initialize the instance (pastes segments, populates features, creates Dungeon data object)
             if (!teamDungeon.initializeInstance()) {
-                plugin.getLogger().severe("Failed to initialize dungeon instance for team " + team.getTeamName());
+                plugin.getLogger().severe("Failed to initialize dungeon instance for team " + team.getTeamName() + ". This team may not be playable.");
+                // Decide how to handle failure: skip team, abort game?
             }
-            teamDungeonManagers.put(teamId, teamDungeon);
+            teamDungeonManagers.put(teamId, teamDungeon); // Store the manager
 
-            // 3. Teleport Team Members
-            Location teamHubLocation = getTeamHubLocation(teamId);
+            // 3. Teleport Team Members to their specific Hub
+            Location teamHubLocation = getTeamHubLocation(teamId); // Get instance-specific hub
             if (teamHubLocation != null) {
                 for (UUID memberId : team.getMemberUUIDs()) {
                     Player player = Bukkit.getPlayer(memberId);
                     if (player != null && player.isOnline()) {
-                        final Location teleportTarget = teamHubLocation.clone().add(0.5, 0.1, 0.5);
-                        teleportTarget.setYaw(player.getLocation().getYaw());
-                        teleportTarget.setPitch(0);
+                        // Prepare safe teleport location within the hub
+                        final Location teleportTarget = teamHubLocation.clone().add(0.5, 0.1, 0.5); // Center on block, slightly above floor
+                        teleportTarget.setYaw(player.getLocation().getYaw()); // Keep player's facing direction
+                        teleportTarget.setPitch(0); // Level pitch
+                        // Schedule teleport task for safety
                         Bukkit.getScheduler().runTask(plugin, () -> {
-                            if (player.isValid()) player.teleport(teleportTarget);
+                            if (player.isValid()) { // Check if player is still valid before teleporting
+                                player.teleport(teleportTarget);
+                            }
                         });
                     }
                 }
             } else {
-                plugin.getLogger().warning("Could not determine hub location for team " + team.getTeamName() + " for teleport.");
+                plugin.getLogger().warning("Could not determine hub location for team " + team.getTeamName() + " for teleport. Players not teleported to hub.");
             }
-            teamIndex++;
+            teamIndex++; // Increment for next team's spacing
         }
 
-        // 4. Start Timers
+        // 4. Start All Team Timers
         for (SoTTeam team : activeTeamsInGame.values()) {
             team.startTimer();
         }
 
-        // 5. Set State & Announce
+        // 5. Set Game State & Announce
         this.currentState = GameState.RUNNING;
         Bukkit.getServer().broadcast(Component.text("Sands of Time has begun!", NamedTextColor.GOLD, TextDecoration.BOLD));
         plugin.getLogger().info("Sands of Time game started with per-team dungeons.");
-         // --- End startGame Implementation ---
     }
 
     /**
@@ -265,7 +295,6 @@ public class GameManager {
     /**
      * Handles the consequences when a specific team's timer expires.
      * Traps remaining players and checks if the overall game should end.
-     * (Removed boolean parameter)
      *
      * @param team The team whose timer expired.
      */
@@ -277,35 +306,36 @@ public class GameManager {
         // Ensure game is actually running to process timer expiry consequences
         if (currentState != GameState.RUNNING) {
             plugin.getLogger().warning("Timer expired for team " + team.getTeamName() + " but game state was " + currentState + ". Not trapping players.");
-            // Still check if game should end, in case this was the last one in a paused state? Unlikely.
-            checkGameEndCondition();
+            checkGameEndCondition(); // Still check if game should end
             return;
         }
 
         plugin.getLogger().warning("Timer has run out for team: " + team.getTeamName() + "!");
 
         Set<UUID> memberUUIDs = team.getMemberUUIDs();
-        boolean teamWiped = true; // Assume wiped
+        boolean teamWiped = true; // Assume wiped unless someone escaped
 
         for (UUID memberUUID : memberUUIDs) {
             PlayerStatus currentStatus = playerStateManager.getStatus(memberUUID);
 
             // Skip players who already finished (escaped or previously trapped)
             if (currentStatus == PlayerStatus.ESCAPED_SAFE) {
-                teamWiped = false;
+                teamWiped = false; // Someone escaped, not a full wipe
                 continue;
             }
             if (currentStatus == PlayerStatus.TRAPPED_TIMER_OUT) {
-                continue;
+                continue; // Already trapped
             }
 
-            // Process players who were actively inside (alive or dead)
+            // Process players who were actively inside (alive or dead awaiting revive)
             if (currentStatus == PlayerStatus.ALIVE_IN_DUNGEON || currentStatus == PlayerStatus.DEAD_AWAITING_REVIVE) {
                 plugin.getLogger().info("Player " + memberUUID + " from team " + team.getTeamName() + " is trapped due to timer expiry!");
 
+                // Update state and apply penalties
                 playerStateManager.updateStatus(memberUUID, PlayerStatus.TRAPPED_TIMER_OUT);
                 scoreManager.applyTimerEndPenalty(memberUUID); // Lose unbanked coins
 
+                // Teleport online players to the universal trapped location
                 Player onlinePlayer = Bukkit.getPlayer(memberUUID);
                 if (onlinePlayer != null && onlinePlayer.isOnline()) {
                     if (configTrappedLocation != null) {
@@ -317,16 +347,17 @@ public class GameManager {
                             }
                         });
                         // Broadcast trap message
-                        NamedTextColor teamColor = teamManager.getPlayerTeamColor(onlinePlayer);
+                        NamedTextColor teamColor = teamManager.getPlayerTeamColor(onlinePlayer); // Get team color
                         Component broadcastMessage = Component.text(onlinePlayer.getName(), teamColor)
                                 .append(Component.text(" has been trapped!", NamedTextColor.RED));
                         Bukkit.getServer().broadcast(broadcastMessage);
                     } else {
-                        plugin.getLogger().severe("Trap location (configTrappedLocation) is not set!");
+                        plugin.getLogger().severe("Trap location (configTrappedLocation) is not set! Cannot teleport trapped player " + onlinePlayer.getName());
                     }
                 }
             } else {
-                 // Only ESCAPED_SAFE prevents teamWiped status.
+                // Player was in another state (e.g., NOT_IN_GAME), ignore for trapping but check for wipe status
+                // Only ESCAPED_SAFE prevents teamWiped status.
             }
         }
 
@@ -392,9 +423,12 @@ public class GameManager {
         plugin.getLogger().info("Calculating final scores...");
         // Example: Map<UUID, Integer> finalScores = calculateFinalScores(); displayLeaderboard(finalScores);
 
-        // TODO: Teleport all remaining players out (e.g., back to lobby/safeExitLocation)
+        // TODO: Teleport all remaining players out (e.g., back to lobbyLocation)
         plugin.getLogger().info("Teleporting remaining players...");
-        // Example: for (Player p : Bukkit.getOnlinePlayers()) { if (isPlayerInGame(p)) p.teleport(configSafeExitLocation); }
+        // Example: for (Player p : Bukkit.getOnlinePlayers()) { if (isPlayerInGame(p)) p.teleport(lobbyLocation); }
+
+        // TODO: Consider dungeon cleanup (WorldEdit //set air or similar) - potentially intensive
+        // for (DungeonManager dm : teamDungeonManagers.values()) { dm.cleanupInstance(); }
 
         // Clear game state maps and references
         activeTeamsInGame.clear();
@@ -409,87 +443,286 @@ public class GameManager {
     }
 
 
-    // --- Player Action Handlers (Implementations from GameManager_Refactored_Final_20250403) ---
+    // --- Player Action Handlers ---
+
+    /**
+     * Handles player death: applies penalties, updates status, teleports to instance-specific death cage.
+     * @param player The player who died.
+     */
     public void handlePlayerDeath(Player player) {
          if (currentState != GameState.RUNNING) return;
          SoTTeam team = getActiveTeamForPlayer(player);
-         if (team == null) return;
+         if (team == null) return; // Player not on an active team
+
          plugin.getLogger().info("Handling death for player " + player.getName() + " on team " + team.getTeamName());
+
+         // Apply penalties and update status
          scoreManager.applyDeathPenalty(player.getUniqueId());
          playerStateManager.updateStatus(player, PlayerStatus.DEAD_AWAITING_REVIVE);
-         if (configDeathCageLocations != null && !configDeathCageLocations.isEmpty()) {
-             Location cageLocation = configDeathCageLocations.get(new Random().nextInt(configDeathCageLocations.size()));
+
+         // Get instance-specific death cage location
+         Location cageLocation = getTeamDeathCageLocation(team.getTeamId());
+
+         if (cageLocation != null) {
              final Component deathMessage = Component.text("You died! A teammate must use ", NamedTextColor.RED)
-                     .append(Component.text(SandManager.REVIVE_COST, NamedTextColor.WHITE))
+                     .append(Component.text(SandManager.REVIVE_COST, NamedTextColor.WHITE)) // Assuming REVIVE_COST is accessible
                      .append(Component.text(" sand to revive you.", NamedTextColor.RED));
+             // Schedule teleport task
              Bukkit.getScheduler().runTask(plugin, () -> {
-                 if (player.isValid()) { player.teleport(cageLocation); player.sendMessage(deathMessage); }
+                 if (player.isValid()) {
+                     player.teleport(cageLocation);
+                     player.sendMessage(deathMessage);
+                 }
              });
          } else {
-             plugin.getLogger().severe("Death cage location(s) not set or empty!");
+             plugin.getLogger().severe("Could not determine Death Cage location for team " + team.getTeamName() + "! Cannot teleport player " + player.getName());
+             // Consider teleporting to lobby or trapped location as a fallback?
+             // player.teleport(configTrappedLocation);
          }
     }
 
+    /**
+     * Handles player revival: checks conditions, attempts revive via SandManager, teleports to instance-specific hub.
+     * @param deadPlayer The player being revived.
+     * @param reviver    The player performing the revive.
+     */
     public void handlePlayerRevive(Player deadPlayer, Player reviver) {
          if (currentState != GameState.RUNNING) return;
-         if (playerStateManager.getStatus(deadPlayer) != PlayerStatus.DEAD_AWAITING_REVIVE) { /* ... send msg ... */ return; }
+
+         // Basic validation
+         if (playerStateManager.getStatus(deadPlayer) != PlayerStatus.DEAD_AWAITING_REVIVE) {
+             reviver.sendMessage(Component.text(deadPlayer.getName() + " does not need reviving.", NamedTextColor.YELLOW));
+             return;
+         }
          SoTTeam deadPlayerTeam = getActiveTeamForPlayer(deadPlayer);
          SoTTeam reviverTeam = getActiveTeamForPlayer(reviver);
-         if (deadPlayerTeam == null || reviverTeam == null || !deadPlayerTeam.getTeamId().equals(reviverTeam.getTeamId())) { /* ... send msg ... */ return; }
-         if (sandManager.attemptRevive(reviver)) {
+         if (deadPlayerTeam == null || reviverTeam == null || !deadPlayerTeam.getTeamId().equals(reviverTeam.getTeamId())) {
+             reviver.sendMessage(Component.text("You can only revive players on your own team!", NamedTextColor.RED));
+             return;
+         }
+
+         // Attempt revive via SandManager (checks sand cost)
+         if (sandManager.attemptRevive(reviver)) { // Assumes SandManager handles cost deduction
              plugin.getLogger().info(reviver.getName() + " revived " + deadPlayer.getName());
+
+             // Update status and teleport to instance-specific hub
              playerStateManager.updateStatus(deadPlayer, PlayerStatus.ALIVE_IN_DUNGEON);
-             Location teamHub = getTeamHubLocation(deadPlayerTeam.getTeamId());
+             Location teamHub = getTeamHubLocation(deadPlayerTeam.getTeamId()); // Get instance-specific hub
+
              if (teamHub != null) {
+                 // Prepare safe teleport location
                  final Location targetHub = teamHub.clone().add(0.5, 0.1, 0.5);
-                 targetHub.setYaw(deadPlayer.getLocation().getYaw()); targetHub.setPitch(0);
-                 Bukkit.getScheduler().runTask(plugin, () -> { if(deadPlayer.isValid()) deadPlayer.teleport(targetHub); });
+                 targetHub.setYaw(deadPlayer.getLocation().getYaw()); // Keep direction
+                 targetHub.setPitch(0);
+                 // Schedule teleport task
+                 Bukkit.getScheduler().runTask(plugin, () -> {
+                     if(deadPlayer.isValid()) deadPlayer.teleport(targetHub);
+                 });
+                 // Send confirmation messages
                  deadPlayer.sendMessage(Component.text("You have been revived!", NamedTextColor.GREEN));
                  reviver.sendMessage(Component.text("You revived " + deadPlayer.getName() + "!", NamedTextColor.GREEN));
-             } else { /* ... log warning ... */ }
-         } else { /* ... send no sand msg ... */ }
+             } else {
+                 plugin.getLogger().warning("Could not determine Hub location for team " + deadPlayerTeam.getTeamName() + " during revive. Player status updated but not teleported.");
+                 // Consider fallback teleport?
+             }
+         } else {
+             // SandManager.attemptRevive failed (likely insufficient sand)
+             reviver.sendMessage(Component.text("Not enough sand to revive!", NamedTextColor.RED));
+             // SandManager should ideally provide specific feedback if possible
+         }
     }
 
+    /**
+     * Handles player leaving the dungeon safely: finalizes score, updates status, teleports to instance-specific safe exit.
+     * @param player The player leaving.
+     */
     public void handlePlayerLeave(Player player) {
          if (currentState != GameState.RUNNING) return;
+
          PlayerStatus status = playerStateManager.getStatus(player);
+         SoTTeam team = getActiveTeamForPlayer(player);
+
+         if (team == null) return; // Not in game
+
+         // Only allow leaving if alive in dungeon
          if (status == PlayerStatus.ALIVE_IN_DUNGEON) {
-             plugin.getLogger().info("Player " + player.getName() + " is leaving the dungeon.");
-             scoreManager.playerEscaped(player.getUniqueId());
+             plugin.getLogger().info("Player " + player.getName() + " is leaving the dungeon safely.");
+
+             // Finalize score and update status
+             scoreManager.playerEscaped(player.getUniqueId()); // Adds unbanked score to team total
              playerStateManager.updateStatus(player, PlayerStatus.ESCAPED_SAFE);
-             if (configSafeExitLocation != null) {
+
+             // Get instance-specific safe exit location
+             Location safeExitLocation = getTeamSafeExitLocation(team.getTeamId());
+
+             if (safeExitLocation != null) {
+                 // Schedule teleport task
                  Bukkit.getScheduler().runTask(plugin, () -> {
-                     if (player.isValid()) { player.teleport(configSafeExitLocation); player.sendMessage(Component.text("You escaped the dungeon safely!", NamedTextColor.GREEN)); }
+                     if (player.isValid()) {
+                         player.teleport(safeExitLocation);
+                         player.sendMessage(Component.text("You escaped the dungeon safely!", NamedTextColor.GREEN));
+                     }
                  });
-             } else { /* ... log error ... */ }
-         } else { /* ... send cannot leave msg ... */ }
+             } else {
+                 plugin.getLogger().severe("Could not determine Safe Exit location for team " + team.getTeamName() + "! Cannot teleport player " + player.getName());
+                 // Fallback: teleport to lobby?
+                 // Bukkit.getScheduler().runTask(plugin, () -> player.teleport(lobbyLocation));
+             }
+         } else {
+             // Player is not in a state where they can leave (dead, already escaped, trapped)
+             player.sendMessage(Component.text("You cannot leave the dungeon right now.", NamedTextColor.RED));
+         }
     }
 
-    // --- Utility Methods & Getters (Implementations from GameManager_Refactored_Final_20250403) ---
-    public SoTTeam getActiveTeamForPlayer(Player player) { /* ... */ if (player == null) return null; UUID teamId = teamManager.getPlayerTeamId(player); return (teamId != null) ? activeTeamsInGame.get(teamId) : null; }
-    public Map<UUID, SoTTeam> getActiveTeams() { return Collections.unmodifiableMap(activeTeamsInGame); }
+    // --- Utility Methods & Getters ---
+
+    /** Gets the active SoTTeam instance for a given player, or null if not found/assigned. */
+    public SoTTeam getActiveTeamForPlayer(Player player) {
+        if (player == null) return null;
+        UUID teamId = teamManager.getPlayerTeamId(player);
+        return (teamId != null) ? activeTeamsInGame.get(teamId) : null;
+    }
+
+    /** Returns an unmodifiable view of the active teams map. */
+    public Map<UUID, SoTTeam> getActiveTeams() {
+        return Collections.unmodifiableMap(activeTeamsInGame);
+    }
+
+    /**
+     * Gets the absolute world location of the Hub for a specific team's instance.
+     * Calculates it based on the blueprint and the instance's origin.
+     *
+     * @param teamId The UUID of the team.
+     * @return The absolute Location of the hub, or null if not found or instance doesn't exist.
+     */
     public Location getTeamHubLocation(UUID teamId) {
-        DungeonManager teamDungeon = teamDungeonManagers.get(teamId);
-        if (teamDungeon == null || dungeonLayoutBlueprint == null) {
+        DungeonManager teamDungeonManager = teamDungeonManagers.get(teamId);
+        // Check if the blueprint and the specific team's manager exist
+        if (teamDungeonManager == null || dungeonLayoutBlueprint == null) {
+            plugin.getLogger().log(Level.FINE, "Cannot get hub location: Team dungeon manager or blueprint is null for team " + teamId);
             return null;
         }
 
-        Location teamOrigin = teamDungeon.getDungeonOrigin();
-        List<PlacedSegment> segmentsToCheck = dungeonLayoutBlueprint.getRelativeSegments(); // Correctly retrieve the segments
+        // TODO: Optimization: Ideally, retrieve the pre-calculated absolute hub location
+        // directly from the Dungeon object once DungeonManager.initializeInstance fully populates it.
+        // Dungeon teamDungeonData = teamDungeonManager.getDungeonData();
+        // if (teamDungeonData != null && teamDungeonData.getHubLocation() != null) {
+        //     return teamDungeonData.getHubLocation();
+        // }
+        // plugin.getLogger().log(Level.FINE, "Falling back to calculating hub location from blueprint for team " + teamId);
+
+        // Fallback: Calculate from blueprint (as per current structure)
+        Location teamOrigin = teamDungeonManager.getDungeonOrigin();
+        List<PlacedSegment> segmentsToCheck = dungeonLayoutBlueprint.getRelativeSegments();
 
         for (PlacedSegment blueprintSegment : segmentsToCheck) {
+            // Check the template referenced by the PlacedSegment
             if (blueprintSegment.getSegmentTemplate().isHub()) {
-                Location relativeHubOrigin = blueprintSegment.getWorldOrigin();
+                // The PlacedSegment's origin IS the relative origin in the blueprint
+                Location relativeHubOrigin = blueprintSegment.getWorldOrigin(); // This is RELATIVE here
+                // Calculate absolute location by adding relative origin to team's absolute origin
                 return teamOrigin.clone().add(relativeHubOrigin.toVector());
             }
         }
 
-        return null;
+        plugin.getLogger().warning("Hub segment not found in blueprint for team " + teamId);
+        return null; // Hub segment not found in the blueprint
     }
-    public UUID getTeamIdForLocation(Location location) { /* ... */ if (location == null || location.getWorld() == null) return null; for (DungeonManager dm : teamDungeonManagers.values()) { if (!dm.getWorld().equals(location.getWorld())) continue; if (dm.getSegmentAtLocation(location) != null) { return dm.getTeamId(); } } return null; }
-    public DungeonManager getTeamDungeonManager(UUID teamId) { return teamDungeonManagers.get(teamId); }
-    private Location determineVisualTimerBottomLocation(TeamDefinition teamDef, Location hubCenter) { /* ... placeholder ... */ if (hubCenter == null) return null; int offset = Math.abs(teamDef.getId().hashCode() % 10); return hubCenter.clone().add(offset * 5, 0, 0); }
-    private Location determineVisualTimerTopLocation(TeamDefinition teamDef, Location hubCenter) { /* ... placeholder ... */ Location bottom = determineVisualTimerBottomLocation(teamDef, hubCenter); if (bottom == null) return null; return bottom.clone().add(0, 15, 0); }
+
+    /**
+     * Placeholder method to get the instance-specific Safe Exit location.
+     * Needs implementation in DungeonManager/Dungeon.
+     *
+     * @param teamId The UUID of the team.
+     * @return The absolute Location of the safe exit, or null if not found.
+     */
+    private Location getTeamSafeExitLocation(UUID teamId) {
+        DungeonManager teamDungeonManager = teamDungeonManagers.get(teamId);
+        if (teamDungeonManager == null) return null;
+        Dungeon teamDungeonData = teamDungeonManager.getDungeonData();
+        if (teamDungeonData == null) {
+            plugin.getLogger().warning("Dungeon data not available for team " + teamId + " when getting safe exit location.");
+            return null;
+        }
+        // TODO: Implement logic in Dungeon.java to store/retrieve the absolute safe exit location.
+        // Example: return teamDungeonData.getSafeExitLocation();
+        plugin.getLogger().warning("getTeamSafeExitLocation: Needs implementation in Dungeon.java");
+        return null; // Placeholder
+    }
+
+    /**
+     * Placeholder method to get the instance-specific Death Cage location.
+     * Needs implementation in DungeonManager/Dungeon.
+     * Allows for multiple cages, returning one randomly.
+     *
+     * @param teamId The UUID of the team.
+     * @return An absolute Location for a death cage, or null if none found.
+     */
+    private Location getTeamDeathCageLocation(UUID teamId) {
+        DungeonManager teamDungeonManager = teamDungeonManagers.get(teamId);
+        if (teamDungeonManager == null) {
+            plugin.getLogger().warning("No DungeonManager found for team ID: " + teamId);
+            return null;
+        }
+    
+        Dungeon teamDungeonData = teamDungeonManager.getDungeonData();
+        if (teamDungeonData == null) {
+            plugin.getLogger().warning("Dungeon data not available for team " + teamId + " when getting death cage location.");
+            return null;
+        }
+    
+        // Retrieve the list of death cage locations
+        List<Location> cages = teamDungeonData.getDeathCageLocations();
+        if (cages == null || cages.isEmpty()) {
+            plugin.getLogger().warning("No death cage locations defined in Dungeon data for team " + teamId);
+            return null;
+        }
+    
+        // Return a random cage if multiple exist
+        return cages.get(new Random().nextInt(cages.size()));
+    }
+
+
+    /** Finds the team ID associated with a given world location by checking dungeon bounds. */
+    public UUID getTeamIdForLocation(Location location) {
+        if (location == null || location.getWorld() == null) return null;
+        // Iterate through the managers of active dungeon instances
+        for (DungeonManager dm : teamDungeonManagers.values()) {
+            // Quick world check
+            if (!dm.getWorld().equals(location.getWorld())) continue;
+            // Check if the location is within the bounds of any segment in this instance
+            // This relies on DungeonManager having a way to check segment bounds efficiently
+            if (dm.getSegmentAtLocation(location) != null) { // Assumes getSegmentAtLocation exists
+                return dm.getTeamId();
+            }
+        }
+        return null; // Location doesn't belong to any known active dungeon instance
+    }
+
+    /** Gets the DungeonManager instance for a specific team. */
+    public DungeonManager getTeamDungeonManager(UUID teamId) {
+        return teamDungeonManagers.get(teamId);
+    }
+
+    /** Determines the bottom location for a team's visual timer based on the lobby anchor. */
+    private Location determineVisualTimerBottomLocation(TeamDefinition teamDef, Location anchorLocation) {
+        // TODO: Implement robust logic for placing timers around the lobbyLocation.
+        // This is a placeholder. Needs actual calculation based on team ID/index.
+        if (anchorLocation == null) return null;
+        int offset = Math.abs(teamDef.getId().hashCode() % 10); // Simple placeholder offset
+        return anchorLocation.clone().add(offset * 5, 0, 0); // Example: Spread along X axis
+    }
+
+    /** Determines the top location for a team's visual timer. */
+    private Location determineVisualTimerTopLocation(TeamDefinition teamDef, Location anchorLocation) {
+        // TODO: Implement robust logic.
+        Location bottom = determineVisualTimerBottomLocation(teamDef, anchorLocation);
+        if (bottom == null) return null;
+        // Example: 15 blocks high
+        return bottom.clone().add(0, 15, 0); // Adjust height as needed
+    }
+
+    // --- Standard Getters ---
     public GameState getCurrentState() { return currentState; }
     public Plugin getPlugin() { return plugin; }
     public TeamManager getTeamManager() { return teamManager; }
@@ -499,8 +732,7 @@ public class GameManager {
     public BankingManager getBankingManager() { return bankingManager; }
     public VaultManager getVaultManager() { return vaultManager; }
     public DungeonGenerator getDungeonGenerator() { return dungeonGenerator; }
-    public Location getSafeExitLocation() { return configSafeExitLocation; }
-    public List<Location> getDeathCageLocations() { return Collections.unmodifiableList(configDeathCageLocations); }
     public Location getTrappedLocation() { return configTrappedLocation; }
+    public Location getLobbyLocation() { return lobbyLocation; } // Getter for the new location
 
 }

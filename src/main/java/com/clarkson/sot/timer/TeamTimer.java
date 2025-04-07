@@ -1,6 +1,5 @@
 package com.clarkson.sot.timer;
 
-import com.clarkson.sot.timer.VisualSandTimerDisplay; // Assuming this path is correct
 import org.bukkit.Bukkit;
 import org.bukkit.plugin.Plugin;
 import org.bukkit.scheduler.BukkitTask;

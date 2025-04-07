@@ -119,4 +119,9 @@ public class Dungeon {
         return null;
     }
 
+    public List<Location> getDeathCageLocations() {
+        // TODO Auto-generated method stub
+        throw new UnsupportedOperationException("Unimplemented method 'getDeathCageLocations'");
+    }
+
 }
