@@ -30,6 +30,7 @@ import org.bukkit.block.Chest; // For item spawning example
 import org.bukkit.inventory.Inventory; // For item spawning example
 import org.bukkit.inventory.ItemStack; // For item spawning example
 import org.bukkit.plugin.Plugin;
+import org.jetbrains.annotations.NotNull;
 
 // Java imports
 import java.io.File;
@@ -43,6 +44,20 @@ import java.util.stream.Collectors;
  * Manages dungeon generation using DFS with colored pathways, vaults, keys, and depth rules.
  */
 public class DungeonGenerator {
+
+    public DungeonGenerator(Plugin plugin) {
+        //TODO Auto-generated constructor stub
+    }
+
+    public boolean loadSegmentTemplates(File dataFolder) {
+        // TODO Auto-generated method stub
+        throw new UnsupportedOperationException("Unimplemented method 'loadSegmentTemplates'");
+    }
+
+    public DungeonBlueprint generateDungeonLayout() {
+        // TODO Auto-generated method stub
+        throw new UnsupportedOperationException("Unimplemented method 'generateDungeonLayout'");
+    }
     
 
 

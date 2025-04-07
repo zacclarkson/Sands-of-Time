@@ -173,4 +173,9 @@ public class DungeonManager {
         dungeonData = null;
         plugin.getLogger().info("Cleanup logic finished for team " + teamId);
     }
+
+    public Object getSegmentAtLocation(Location location) {
+        // TODO Auto-generated method stub
+        throw new UnsupportedOperationException("Unimplemented method 'getSegmentAtLocation'");
+    }
 }
