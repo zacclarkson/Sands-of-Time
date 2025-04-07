@@ -1,4 +1,4 @@
-package com.clarkson.sot.utils;
+package com.clarkson.sot.dungeon.segment;
 
 import org.bukkit.Location;
 

@@ -1,9 +1,9 @@
 package com.clarkson.sot.utils;
 
-// Local project imports
-import com.clarkson.sot.dungeon.SegmentType;
 import com.clarkson.sot.dungeon.VaultColor; // Added import
+import com.clarkson.sot.dungeon.segment.Direction;
 import com.clarkson.sot.dungeon.segment.Segment;
+import com.clarkson.sot.dungeon.segment.SegmentType;
 import com.clarkson.sot.dungeon.segment.Segment.RelativeEntryPoint;
 
 // WorldEdit imports

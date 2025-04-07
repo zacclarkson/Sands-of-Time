@@ -2,8 +2,6 @@ package com.clarkson.sot.dungeon.segment; // Assuming this package
 
 // Assuming VaultColor is in dungeon package
 import com.clarkson.sot.dungeon.VaultColor;
-import com.clarkson.sot.dungeon.SegmentType;
-import com.clarkson.sot.utils.Direction;
 import com.sk89q.worldedit.math.BlockVector3; // Make sure this is imported
 
 import org.jetbrains.annotations.NotNull;
@@ -38,10 +36,6 @@ public class Segment {
 
     // --- Gameplay Metadata ---
     private final int totalCoins; // Base number of coins expected (approximate)
-    private final double coinMultiplier; // Multiplier affecting value of coins spawned here (>= 1.0)
-    private final boolean isHub; // Is this the central starting/hub segment?
-    private final boolean isPuzzleRoom; // Does this segment contain a puzzle (e.g., for Red Key)?
-    private final boolean isLavaParkour; // Does this segment contain lava parkour (e.g., for Gold Key)?
     private final VaultColor containedVault; // Which vault entrance is in this segment (null if none)
     private final VaultColor containedVaultKey; // Which vault key is in this segment (null if none)
     // --- Added: Relative offsets for contained vault/key ---
@@ -123,10 +117,6 @@ public class Segment {
         this.totalCoins = totalCoins;
 
         // Assign Metadata Fields
-        this.coinMultiplier = Math.max(1.0, coinMultiplier);
-        this.isHub = isHub;
-        this.isPuzzleRoom = isPuzzleRoom;
-        this.isLavaParkour = isLavaParkour;
         this.containedVault = containedVault;
         this.containedVaultKey = containedVaultKey;
         // Assign Offset Fields
@@ -148,10 +138,6 @@ public class Segment {
 
     // --- Getters for Gameplay Metadata ---
     public int getTotalCoins() { return totalCoins; }
-    public double getCoinMultiplier() { return coinMultiplier; }
-    public boolean isHub() { return isHub; }
-    public boolean isPuzzleRoom() { return isPuzzleRoom; }
-    public boolean isLavaParkour() { return isLavaParkour; }
     @Nullable public VaultColor getContainedVault() { return containedVault; }
     @Nullable public VaultColor getContainedVaultKey() { return containedVaultKey; }
 
@@ -220,10 +206,6 @@ public class Segment {
                 ", schematic='" + schematicFileName + '\'' +
                 ", size=" + size +
                 ", entryPoints=" + entryPoints.size() +
-                ", coinMult=" + coinMultiplier +
-                ", isHub=" + isHub +
-                ", isPuzzle=" + isPuzzleRoom +
-                ", isLava=" + isLavaParkour +
                 ", vault=" + containedVault + (vaultLocationOffset != null ? "@" + vaultLocationOffset : "") +
                 ", key=" + containedVaultKey + (keyLocationOffset != null ? "@" + keyLocationOffset : "") +
                 '}';

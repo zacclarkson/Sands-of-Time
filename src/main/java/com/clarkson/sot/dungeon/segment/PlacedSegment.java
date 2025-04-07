@@ -1,9 +1,7 @@
 package com.clarkson.sot.dungeon.segment;
 
-import com.clarkson.sot.dungeon.SegmentType;
-import com.clarkson.sot.dungeon.segment.Segment.RelativeEntryPoint;
+// Import necessary classes
 import com.clarkson.sot.entities.Area;
-import com.clarkson.sot.utils.EntryPoint; // Original EntryPoint with absolute Location
 
 import com.sk89q.worldedit.math.BlockVector3;
 import org.bukkit.Location;
@@ -17,29 +15,36 @@ import java.util.Objects;
 import java.util.stream.Collectors;
 
 /**
- * Represents an instance of a Segment template placed at a specific location in the world.
- * It holds a reference to the template and the world origin (minimum corner) location.
+ * Represents an instance of a Segment template placed at a specific location.
+ * It holds a reference to the template, the world origin (minimum corner) location,
+ * and the depth of the segment relative to the dungeon hub.
  * Provides methods to get absolute world coordinates for features.
  */
 public class PlacedSegment {
 
     private final Segment segmentTemplate; // The world-independent template
-    private final Location worldOrigin;    // The absolute world location of the template's min corner (origin)
-    private final Area worldBounds;        // The calculated absolute world bounds
+    private final Location worldOrigin;    // The absolute world location OR relative blueprint origin
+    private final Area worldBounds;        // The calculated absolute world bounds OR relative blueprint bounds
+    private final int depth;               // Depth from the hub (Hub = 0)
 
     /**
      * Creates an instance representing a placed segment template.
      *
      * @param segmentTemplate The world-independent Segment template.
-     * @param worldOrigin     The absolute world location where the template's origin (minimum corner) should be placed.
+     * @param worldOrigin     The absolute world location OR relative blueprint origin (min corner) where the template is placed.
+     * @param depth           The depth of this segment from the dungeon hub (Hub is depth 0).
      */
-    public PlacedSegment(@NotNull Segment segmentTemplate, @NotNull Location worldOrigin) {
+    public PlacedSegment(@NotNull Segment segmentTemplate, @NotNull Location worldOrigin, int depth) {
         this.segmentTemplate = Objects.requireNonNull(segmentTemplate, "Segment template cannot be null");
         this.worldOrigin = Objects.requireNonNull(worldOrigin, "World origin location cannot be null");
-        Objects.requireNonNull(worldOrigin.getWorld(), "World origin location must have a valid world");
+        // World can be null for blueprint placement, so remove the null check on worldOrigin.getWorld() for blueprint stage.
+        // Objects.requireNonNull(worldOrigin.getWorld(), "World origin location must have a valid world for absolute placement");
 
-        // Calculate the absolute world bounds based on origin and template size
+        this.depth = depth; // Assign depth
+
+        // Calculate the bounds based on origin and template size
         BlockVector3 size = segmentTemplate.getSize();
+        // Use clone() defensively. Subtract 1 because size includes the origin block.
         Location maxPoint = worldOrigin.clone().add(size.x() - 1, size.y() - 1, size.z() - 1);
         this.worldBounds = new Area(worldOrigin, maxPoint); // Assumes Area constructor takes min, max
     }
@@ -48,8 +53,9 @@ public class PlacedSegment {
 
     @NotNull public Segment getSegmentTemplate() { return segmentTemplate; }
     @NotNull public Location getWorldOrigin() { return worldOrigin; }
-    @NotNull public Area getWorldBounds() { return worldBounds; } // Provides absolute min/max Locations
-    @NotNull public World getWorld() { return worldOrigin.getWorld(); } // Convenience getter
+    @NotNull public Area getWorldBounds() { return worldBounds; }
+    @Nullable public World getWorld() { return worldOrigin.getWorld(); } // Can be null in blueprint stage
+    public int getDepth() { return depth; } // Getter for depth
 
     // --- Delegated Getters (from template) ---
 
@@ -63,12 +69,18 @@ public class PlacedSegment {
 
     /**
      * Calculates the absolute world location corresponding to a relative position within the template.
+     * Requires that this PlacedSegment represents an actual world placement (worldOrigin has a valid world).
+     *
      * @param relativePosition The BlockVector3 position relative to the template's origin.
      * @return The corresponding absolute Location in the world.
+     * @throws IllegalStateException if the worldOrigin does not have a valid world set.
      */
     @NotNull
     public Location getAbsoluteLocation(@NotNull BlockVector3 relativePosition) {
         Objects.requireNonNull(relativePosition, "Relative position cannot be null");
+        if (worldOrigin.getWorld() == null) {
+            throw new IllegalStateException("Cannot calculate absolute location when worldOrigin's world is null (likely blueprint stage).");
+        }
         // Note: Uses BlockVector3's integer coords for addition
         return worldOrigin.clone().add(
             relativePosition.x(),
@@ -80,10 +92,16 @@ public class PlacedSegment {
     /**
      * Calculates the absolute world locations for all entry points defined in the template.
      * Returns EntryPoint objects with absolute Locations.
+     * Requires that this PlacedSegment represents an actual world placement.
+     *
      * @return A new list of EntryPoint objects with absolute world locations.
+     * @throws IllegalStateException if the worldOrigin does not have a valid world set.
      */
     @NotNull
     public List<EntryPoint> getAbsoluteEntryPoints() {
+         if (worldOrigin.getWorld() == null) {
+             throw new IllegalStateException("Cannot calculate absolute entry points when worldOrigin's world is null.");
+         }
         List<EntryPoint> absoluteEntryPoints = new ArrayList<>();
         for (Segment.RelativeEntryPoint relEp : segmentTemplate.getEntryPoints()) {
             Location absLoc = getAbsoluteLocation(relEp.getRelativePosition());
@@ -95,17 +113,24 @@ public class PlacedSegment {
 
      /**
       * Calculates the absolute world locations for a list of relative spawn points.
+      * Requires that this PlacedSegment represents an actual world placement.
+      *
       * @param relativeSpawnPoints List of BlockVector3 relative positions from the template.
       * @return A new list of absolute world Locations.
+      * @throws IllegalStateException if the worldOrigin does not have a valid world set.
       */
      @NotNull
      private List<Location> getAbsoluteSpawnLocations(@NotNull List<BlockVector3> relativeSpawnPoints) {
+         if (worldOrigin.getWorld() == null) {
+             throw new IllegalStateException("Cannot calculate absolute spawn locations when worldOrigin's world is null.");
+         }
         return relativeSpawnPoints.stream()
                                   .map(this::getAbsoluteLocation) // Convert each relative vec to absolute loc
                                   .collect(Collectors.toList());
      }
 
      // Specific getters using the helper method
+     // These will throw an IllegalStateException if called during the blueprint stage
      @NotNull public List<Location> getAbsoluteSandSpawnLocations() { return getAbsoluteSpawnLocations(segmentTemplate.getSandSpawnLocations()); }
      @NotNull public List<Location> getAbsoluteItemSpawnLocations() { return getAbsoluteSpawnLocations(segmentTemplate.getItemSpawnLocations()); }
      @NotNull public List<Location> getAbsoluteCoinSpawnLocations() { return getAbsoluteSpawnLocations(segmentTemplate.getCoinSpawnLocations()); }
@@ -115,9 +140,12 @@ public class PlacedSegment {
     public String toString() {
         return "PlacedSegment{" +
                 "name=" + getName() +
-                ", template=" + segmentTemplate.getName() + // Avoid full template toString recursion
-                ", worldOrigin=" + worldOrigin +
-                ", worldBounds=" + worldBounds +
+                ", template=" + segmentTemplate.getName() +
+                ", origin=" + worldOrigin.toVector() + // Use vector for concise representation
+                (worldOrigin.getWorld() != null ? " (World: " + worldOrigin.getWorld().getName() + ")" : " (Relative)") +
+                ", depth=" + depth + // Added depth
+                ", boundsMin=" + worldBounds.getMinPoint().toVector() + // Use vector
+                ", boundsMax=" + worldBounds.getMaxPoint().toVector() + // Use vector
                 '}';
     }
 }
