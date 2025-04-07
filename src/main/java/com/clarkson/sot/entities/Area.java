@@ -59,17 +59,21 @@ public class Area {
     }
 
 
-    public boolean intersects(Area worldBounds) {
-        // TODO Auto-generated method stub
-        throw new UnsupportedOperationException("Unimplemented method 'intersects'");
+    public boolean intersects(Area other) {
+    return this.minPoint.getX() <= other.maxPoint.getX() &&
+            this.maxPoint.getX() >= other.minPoint.getX() &&
+            this.minPoint.getY() <= other.maxPoint.getY() &&
+            this.maxPoint.getY() >= other.minPoint.getY() &&
+            this.minPoint.getZ() <= other.maxPoint.getZ() &&
+            this.maxPoint.getZ() >= other.minPoint.getZ();
     }
 
 
     public boolean contains(Location location) {
-        // TODO Auto-generated method stub
-        throw new UnsupportedOperationException("Unimplemented method 'contains'");
+    return location.getX() >= minPoint.getX() && location.getX() <= maxPoint.getX() &&
+            location.getY() >= minPoint.getY() && location.getY() <= maxPoint.getY() &&
+            location.getZ() >= minPoint.getZ() && location.getZ() <= maxPoint.getZ();
+    
     }
-
-    // Getters, setters, and other methods...
 }
 
