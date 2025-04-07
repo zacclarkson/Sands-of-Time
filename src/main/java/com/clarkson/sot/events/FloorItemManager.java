@@ -31,24 +31,6 @@ public class FloorItemManager implements Listener {
 
     @EventHandler
     public void onPlayerMove(PlayerMoveEvent event) {
-        Player player = event.getPlayer();
-        Location playerLocation = player.getLocation();
-
-        for (FloorItem floorItem : floorItems.values()) {
-            if (floorItem.isPickedUp()) continue;
-
-            ItemDisplay itemDisplay = floorItem.getItemDisplay();
-            if (itemDisplay == null) continue;
-
-            double distance = playerLocation.distance(itemDisplay.getLocation());
-            if (distance <= 1.5) {
-                // Delegate the pickup behavior to the FloorItem instance
-                floorItem.handlePickup(player);
-
-                // Remove the item from the manager
-                removeFloorItem(floorItem.getUniqueId());
-                break; // Exit the loop since the player can only pick up one item at a time
-            }
-        }
+        
     }
 }

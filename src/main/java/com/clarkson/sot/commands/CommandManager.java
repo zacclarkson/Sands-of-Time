@@ -24,17 +24,7 @@ public class CommandManager implements CommandExecutor {
 
         Player player = (Player) sender;
 
-        if (command.getName().equalsIgnoreCase("generatedungeon")) {
-            try {
-                dungeonManager.generateDungeon(player.getLocation());
-                player.sendMessage("Dungeon generated successfully!");
-            } catch (Exception e) {
-                player.sendMessage("An error occurred while generating the dungeon.");
-                e.printStackTrace();
-            }
-            return true;
-        }
-
+    
 
         return false; // Return false if no known commands were executed
     }
