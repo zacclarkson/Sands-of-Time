@@ -1,7 +1,8 @@
 name: SoT
 version: '${project.version}'
-main: com.clarkson.sot.SoT
-api-version: '1.20'
+main: com.clarkson.sot.main.SoT
+api-version: '1.20' # Or your target version
+depend: [WorldEdit] # Add WorldEdit dependency
 author: ZacClarkson
 description: A minecraft game based on MCC
 commands:
@@ -11,3 +12,11 @@ commands:
   cloneDoor:
     description: Clones the door to the player's location
     usage: /<command>
+  sotsavesegment: # Add the new command
+    description: Saves the selected WorldEdit region as a new SoT segment template.
+    usage: /<command> <name> <type> <schematic_filename> [totalCoins]
+    permission: sot.admin.savesegment # Optional: Add a permission
+permissions: # Optional
+  sot.admin.savesegment:
+    description: Allows saving new SoT segments.
+    default: op
