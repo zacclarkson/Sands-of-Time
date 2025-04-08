@@ -1,7 +1,8 @@
 package com.clarkson.sot.dungeon.segment; // Assuming this package
 
-// Assuming VaultColor is in dungeon package
+// Assuming VaultColor and SegmentType are in dungeon package
 import com.clarkson.sot.dungeon.VaultColor;
+
 import com.sk89q.worldedit.math.BlockVector3; // Make sure this is imported
 
 import org.jetbrains.annotations.NotNull;
@@ -15,16 +16,17 @@ import java.util.Objects;
 
 /**
  * Represents a world-independent template or blueprint for a dungeon segment.
- * Stores metadata (including type, vault/key info, difficulty), relative locations
+ * Stores metadata (including type, vault/key info), relative locations
  * of features (entry points, spawns, vault/key offsets), dimensions, and a link
  * to the schematic file. All positions are relative to the segment's conceptual
  * origin (usually its minimum corner).
+ * Segment characteristics like Hub, Puzzle Room, Lava Parkour are now determined by SegmentType.
  */
 public class Segment {
 
     // --- Core Identification & Structure ---
     private final String name;
-    private final SegmentType type; // General category (e.g., ROOM, CORRIDOR)
+    private final SegmentType type; // General category (e.g., HUB, PUZZLE_ROOM, LAVA_PARKOUR, CORRIDOR)
     private final String schematicFileName;
     private final BlockVector3 size; // Width(X), Height(Y), Length(Z)
     private final List<RelativeEntryPoint> entryPoints;
@@ -36,9 +38,10 @@ public class Segment {
 
     // --- Gameplay Metadata ---
     private final int totalCoins; // Base number of coins expected (approximate)
+    // Removed: coinMultiplier - Coin scaling might now depend on PlacedSegment.depth
+    // Removed: isHub, isPuzzleRoom, isLavaParkour - Now inferred from 'type' field
     private final VaultColor containedVault; // Which vault entrance is in this segment (null if none)
     private final VaultColor containedVaultKey; // Which vault key is in this segment (null if none)
-    // --- Added: Relative offsets for contained vault/key ---
     @Nullable private final BlockVector3 vaultLocationOffset; // Relative position of the vault marker block, if containedVault is not null
     @Nullable private final BlockVector3 keyLocationOffset;   // Relative position of the key spawn, if containedVaultKey is not null
 
@@ -48,7 +51,7 @@ public class Segment {
      * Values are typically loaded from JSON metadata.
      *
      * @param name                Unique name of the segment template.
-     * @param type                General category of the segment.
+     * @param type                General category/type of the segment (e.g., HUB, PUZZLE_ROOM).
      * @param schematicFileName   Filename of the associated schematic (e.g., "my_segment.schem").
      * @param size                Dimensions (width, height, length) of the segment.
      * @param entryPoints         List of entry points with relative positions and directions.
@@ -56,10 +59,6 @@ public class Segment {
      * @param itemSpawnLocations  List of relative spawn locations for items.
      * @param coinSpawnLocations  List of relative spawn locations for coins.
      * @param totalCoins          Approximate total base coin value in the segment.
-     * @param coinMultiplier      Multiplier for coins spawned in this segment (default 1.0).
-     * @param isHub               True if this is the central hub segment.
-     * @param isPuzzleRoom        True if this segment is designated as a puzzle room.
-     * @param isLavaParkour       True if this segment is designated as lava parkour.
      * @param containedVault      The color of the vault entrance within this segment, or null.
      * @param containedVaultKey   The color of the vault key found within this segment, or null.
      * @param vaultLocationOffset Relative offset (from segment origin) of the vault marker block, if containedVault is not null.
@@ -67,7 +66,7 @@ public class Segment {
      */
     public Segment(
             @NotNull String name,
-            @Nullable SegmentType type,
+            @Nullable SegmentType type, // Type is now crucial
             @NotNull String schematicFileName,
             @NotNull BlockVector3 size,
             @NotNull List<RelativeEntryPoint> entryPoints,
@@ -75,39 +74,34 @@ public class Segment {
             @NotNull List<BlockVector3> itemSpawnLocations,
             @NotNull List<BlockVector3> coinSpawnLocations,
             int totalCoins,
-            // Added metadata parameters
-            double coinMultiplier,
-            boolean isHub,
-            boolean isPuzzleRoom,
-            boolean isLavaParkour,
             @Nullable VaultColor containedVault,
             @Nullable VaultColor containedVaultKey,
-            // Added offset parameters
             @Nullable BlockVector3 vaultLocationOffset,
             @Nullable BlockVector3 keyLocationOffset
     ) {
         // --- Basic Validation ---
         Objects.requireNonNull(name, "Segment name cannot be null");
         Objects.requireNonNull(schematicFileName, "Schematic filename cannot be null");
+        // Removed null checks for booleans
         // ... other null checks ...
         if (name.trim().isEmpty()) throw new IllegalArgumentException("Segment name cannot be empty");
         // ... other validation ...
         if (size.x() <= 0 || size.y() <= 0 || size.z() <= 0) throw new IllegalArgumentException("Segment dimensions must be positive");
+
         // Validation: Offset should only be present if the corresponding item is present
         if (containedVault == null && vaultLocationOffset != null) {
             System.err.println("Warning: Segment '" + name + "' has vaultLocationOffset but containedVault is null.");
-            // Optionally throw exception or just nullify the offset
-            // vaultLocationOffset = null;
+            // vaultLocationOffset = null; // Optionally nullify
         }
         if (containedVaultKey == null && keyLocationOffset != null) {
              System.err.println("Warning: Segment '" + name + "' has keyLocationOffset but containedVaultKey is null.");
-             // keyLocationOffset = null;
+             // keyLocationOffset = null; // Optionally nullify
         }
 
 
         // --- Assign Fields ---
         this.name = name;
-        this.type = type;
+        this.type = type; // Assign the crucial type
         this.schematicFileName = schematicFileName;
         this.size = size;
         this.entryPoints = new ArrayList<>(entryPoints);
@@ -115,6 +109,7 @@ public class Segment {
         this.itemSpawnLocations = new ArrayList<>(itemSpawnLocations);
         this.coinSpawnLocations = new ArrayList<>(coinSpawnLocations);
         this.totalCoins = totalCoins;
+        // Removed assignments for: coinMultiplier, isHub, isPuzzleRoom, isLavaParkour
 
         // Assign Metadata Fields
         this.containedVault = containedVault;
@@ -126,7 +121,7 @@ public class Segment {
 
     // --- Getters for Core Info ---
     @NotNull public String getName() { return name; }
-    @Nullable public SegmentType getType() { return type; }
+    @Nullable public SegmentType getType() { return type; } // Getter for the type
     @NotNull public String getSchematicFileName() { return schematicFileName; }
     @NotNull public BlockVector3 getSize() { return size; }
     @NotNull public List<RelativeEntryPoint> getEntryPoints() { return Collections.unmodifiableList(entryPoints); }
@@ -138,6 +133,7 @@ public class Segment {
 
     // --- Getters for Gameplay Metadata ---
     public int getTotalCoins() { return totalCoins; }
+    // Removed getters: getCoinMultiplier(), isHub(), isPuzzleRoom(), isLavaParkour()
     @Nullable public VaultColor getContainedVault() { return containedVault; }
     @Nullable public VaultColor getContainedVaultKey() { return containedVaultKey; }
 
@@ -167,7 +163,7 @@ public class Segment {
 
 
     // --- Template-related Logic ---
-    public boolean hasEntryPointInDirection(@NotNull Direction dir) { /* ... unchanged ... */
+    public boolean hasEntryPointInDirection(@NotNull Direction dir) {
         Objects.requireNonNull(dir, "Direction cannot be null");
         for (RelativeEntryPoint ep : this.entryPoints) {
             if (ep.getDirection() == dir) {
@@ -176,8 +172,9 @@ public class Segment {
         }
         return false;
     }
+
     @Nullable
-    public RelativeEntryPoint findEntryPointByDirection(@NotNull Direction direction) { /* ... unchanged ... */
+    public RelativeEntryPoint findEntryPointByDirection(@NotNull Direction direction) {
         Objects.requireNonNull(direction, "Direction cannot be null");
          for (RelativeEntryPoint ep : this.entryPoints) {
              if (ep.getDirection() == direction) {
@@ -186,8 +183,9 @@ public class Segment {
          }
          return null;
      }
+
     @Nullable
-    public File getSchematicFile(@NotNull File baseDataFolder, @NotNull String schematicSubDir) { /* ... unchanged ... */
+    public File getSchematicFile(@NotNull File baseDataFolder, @NotNull String schematicSubDir) {
         Objects.requireNonNull(baseDataFolder, "Base data folder cannot be null");
         Objects.requireNonNull(schematicSubDir, "Schematic subdirectory cannot be null");
         if (!baseDataFolder.isDirectory()) {
@@ -199,10 +197,10 @@ public class Segment {
 
     @Override
     public String toString() {
-        // Updated toString to include new metadata
+        // Updated toString to remove deleted fields
         return "Segment{" +
                 "name='" + name + '\'' +
-                ", type=" + type +
+                ", type=" + type + // Type is now primary descriptor
                 ", schematic='" + schematicFileName + '\'' +
                 ", size=" + size +
                 ", entryPoints=" + entryPoints.size() +
@@ -212,21 +210,43 @@ public class Segment {
     }
 
     // --- Inner Class: RelativeEntryPoint ---
-    // (Remains the same as before)
+    // (Remains the same)
     public static class RelativeEntryPoint {
         private final BlockVector3 relativePosition;
         private final Direction direction;
-        public RelativeEntryPoint(@NotNull BlockVector3 relativePosition, @NotNull Direction direction) { /* ... */ this.relativePosition=relativePosition; this.direction=direction;}
+
+        public RelativeEntryPoint(@NotNull BlockVector3 relativePosition, @NotNull Direction direction) {
+            this.relativePosition = Objects.requireNonNull(relativePosition, "Relative position cannot be null");
+            this.direction = Objects.requireNonNull(direction, "Direction cannot be null");
+        }
+
         @NotNull public BlockVector3 getRelativePosition() { return relativePosition; }
         @NotNull public Direction getDirection() { return direction; }
-        public com.sk89q.worldedit.util.Location toWorldEditLocation(@NotNull com.sk89q.worldedit.util.Location segmentOriginInWorld) { /* ... */ return null;}
-        public org.bukkit.Location toBukkitLocation(@NotNull org.bukkit.Location segmentOriginInWorld) { /* ... */ return null;}
         @NotNull public Direction getOppositeDirection() { return direction.getOpposite(); }
-        @Override public String toString() { /* ... */ return ""; }
-        @Override public boolean equals(Object o) { /* ... */ return false;}
-        @Override public int hashCode() { /* ... */ return 0;}
-    }
 
-    // --- Removed Placeholders ---
-    // getBlueKeyOffset() removed entirely
+        // These conversion methods likely belong elsewhere or need world context
+        // public com.sk89q.worldedit.util.Location toWorldEditLocation(@NotNull com.sk89q.worldedit.util.Location segmentOriginInWorld) { return null;}
+        // public org.bukkit.Location toBukkitLocation(@NotNull org.bukkit.Location segmentOriginInWorld) { return null;}
+
+        @Override
+        public String toString() {
+            return "RelativeEntryPoint{" +
+                    "relativePosition=" + relativePosition +
+                    ", direction=" + direction +
+                    '}';
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) return true;
+            if (o == null || getClass() != o.getClass()) return false;
+            RelativeEntryPoint that = (RelativeEntryPoint) o;
+            return Objects.equals(relativePosition, that.relativePosition) && direction == that.direction;
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hash(relativePosition, direction);
+        }
+    }
 }

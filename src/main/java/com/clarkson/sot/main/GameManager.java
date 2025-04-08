@@ -7,6 +7,7 @@ import com.clarkson.sot.dungeon.DungeonManager;
 import com.clarkson.sot.dungeon.VaultManager;
 import com.clarkson.sot.dungeon.DungeonBlueprint;
 import com.clarkson.sot.dungeon.segment.PlacedSegment;
+import com.clarkson.sot.dungeon.segment.SegmentType;
 import com.clarkson.sot.scoring.BankingManager;
 import com.clarkson.sot.scoring.ScoreManager;
 import com.clarkson.sot.utils.*; // PlayerStateManager, PlayerStatus, SandManager, SoTTeam, TeamDefinition, TeamManager
@@ -617,7 +618,7 @@ public class GameManager {
 
         for (PlacedSegment blueprintSegment : segmentsToCheck) {
             // Check the template referenced by the PlacedSegment
-            if (blueprintSegment.getSegmentTemplate().isHub()) {
+            if (blueprintSegment.getSegmentTemplate().getType() == SegmentType.HUB) {
                 // The PlacedSegment's origin IS the relative origin in the blueprint
                 Location relativeHubOrigin = blueprintSegment.getWorldOrigin(); // This is RELATIVE here
                 // Calculate absolute location by adding relative origin to team's absolute origin

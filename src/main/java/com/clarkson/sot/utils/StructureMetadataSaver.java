@@ -7,7 +7,7 @@ import com.sk89q.worldedit.math.BlockVector3;
 import org.bukkit.plugin.Plugin;
 
 // Local project imports
-import com.clarkson.sot.dungeon.segment.Segment;
+import com.clarkson.sot.dungeon.segment.*;
 import com.clarkson.sot.dungeon.segment.Segment.RelativeEntryPoint;
 import com.clarkson.sot.dungeon.VaultColor; // Import VaultColor if needed for serialization
 
@@ -23,6 +23,8 @@ import java.util.List;
 import java.util.logging.Level;
 import java.util.regex.Pattern; // Import Pattern for regex
 
+import javax.annotation.Nullable;
+
 
 /**
  * Saves Segment TEMPLATE metadata to a JSON file using relative coordinates.
@@ -34,7 +36,6 @@ public class StructureMetadataSaver {
     private final Plugin plugin;
     private final Gson gson;
     // Regex to find characters NOT safe for typical filenames
-    // Made static final as it's a constant pattern
     private static final Pattern INVALID_FILE_CHARS = Pattern.compile("[^a-zA-Z0-9_.-]");
     // Example limit - adjust based on target OS filesystem limitations
     private static final int MAX_FILENAME_LENGTH = 200;
@@ -154,8 +155,15 @@ public class StructureMetadataSaver {
             plugin.getLogger().severe("[StructureMetadataSaver] Cannot save metadata for '" + name + "': Template has invalid size: " + size);
             return false;
         }
+        // Check if type is defined (optional, depending on requirements)
+        // if (segmentTemplate.getType() == null) {
+        //     plugin.getLogger().warning("[StructureMetadataSaver] Warning for template '" + name + "': Segment type is null.");
+        // }
         // Add other essential checks here if needed (e.g., entryPoints list cannot be null)
-        // if (segmentTemplate.getEntryPoints() == null) { ... return false; }
+        if (segmentTemplate.getEntryPoints() == null) {
+             plugin.getLogger().severe("[StructureMetadataSaver] Cannot save metadata for '" + name + "': Entry points list is null.");
+             return false;
+        }
 
         return true; // All checks passed
     }
@@ -164,7 +172,7 @@ public class StructureMetadataSaver {
     /**
      * Serializes the world-independent Segment template data into a JsonElement.
      * Reads directly from the template object's fields/getters using the provided Segment object.
-     * Includes all fields defined in the Segment class.
+     * Includes all fields defined in the Segment class (as per the latest refactor).
      *
      * @param segmentTemplate The world-independent Segment template object.
      * @return JsonElement representing the template data, or null on failure.
@@ -177,8 +185,9 @@ public class StructureMetadataSaver {
 
             // --- Serialize Core Identification & Structure ---
             json.addProperty("name", segmentName);
-            // Add type as string, handle null SegmentType
-            json.addProperty("type", segmentTemplate.getType() != null ? segmentTemplate.getType().toString() : null);
+            // Add type as string (enum name). Handle null type gracefully.
+            SegmentType type = segmentTemplate.getType();
+            json.addProperty("type", type != null ? type.name() : null); // Use enum's name() for serialization
             json.addProperty("schematicFileName", segmentTemplate.getSchematicFileName());
             json.add("size", serializeBlockVector3(segmentTemplate.getSize())); // Use helper for BlockVector3
             json.add("entryPoints", serializeRelativeEntryPointList(segmentTemplate.getEntryPoints(), segmentName)); // Use helper for list
@@ -190,30 +199,26 @@ public class StructureMetadataSaver {
 
             // --- Serialize Gameplay Metadata ---
             json.addProperty("totalCoins", segmentTemplate.getTotalCoins());
-            json.addProperty("coinMultiplier", segmentTemplate.getCoinMultiplier()); // Added
-            json.addProperty("isHub", segmentTemplate.isHub()); // Added
-            json.addProperty("isPuzzleRoom", segmentTemplate.isPuzzleRoom()); // Added
-            json.addProperty("isLavaParkour", segmentTemplate.isLavaParkour()); // Added
+            // Removed serialization for: coinMultiplier, isHub, isPuzzleRoom, isLavaParkour
 
             // Serialize vault/key info only if they are present (not null)
             VaultColor containedVault = segmentTemplate.getContainedVault();
             if (containedVault != null) {
-                json.addProperty("containedVault", containedVault.toString()); // Added
+                json.addProperty("containedVault", containedVault.name()); // Use enum's name()
             }
             VaultColor containedVaultKey = segmentTemplate.getContainedVaultKey();
             if (containedVaultKey != null) {
-                json.addProperty("containedVaultKey", containedVaultKey.toString()); // Added
+                json.addProperty("containedVaultKey", containedVaultKey.name()); // Use enum's name()
             }
 
             // Serialize vault/key location offsets only if they are present (not null)
-            // Use the getters which implicitly check if the corresponding vault/key is defined
-            BlockVector3 vaultOffset = segmentTemplate.getVaultOffset();
+            BlockVector3 vaultOffset = segmentTemplate.getVaultOffset(); // Getter handles null check based on containedVault
             if (vaultOffset != null) {
-                json.add("vaultLocationOffset", serializeBlockVector3(vaultOffset)); // Added
+                json.add("vaultLocationOffset", serializeBlockVector3(vaultOffset));
             }
-            BlockVector3 keyOffset = segmentTemplate.getKeyOffset();
+            BlockVector3 keyOffset = segmentTemplate.getKeyOffset(); // Getter handles null check based on containedVaultKey
             if (keyOffset != null) {
-                json.add("keyLocationOffset", serializeBlockVector3(keyOffset)); // Added
+                json.add("keyLocationOffset", serializeBlockVector3(keyOffset));
             }
 
             // Return the completed JSON object
@@ -229,16 +234,17 @@ public class StructureMetadataSaver {
     /**
      * Helper method to serialize a WorldEdit BlockVector3 into a JSON object format: {"x": _, "y": _, "z": _}.
      * @param vec The BlockVector3 to serialize.
-     * @return A JsonObject representing the vector, or an empty JsonObject if the input is null.
+     * @return A JsonObject representing the vector, or JsonNull.INSTANCE if the input is null.
      */
-    private JsonObject serializeBlockVector3(BlockVector3 vec) {
-        JsonObject vecJson = new JsonObject();
-        if (vec != null) {
-            vecJson.addProperty("x", vec.x());
-            vecJson.addProperty("y", vec.y());
-            vecJson.addProperty("z", vec.z());
+    private JsonElement serializeBlockVector3(@Nullable BlockVector3 vec) {
+        if (vec == null) {
+            return JsonNull.INSTANCE; // Represent null vectors explicitly as JSON null
         }
-        return vecJson; // Return empty object if vec is null
+        JsonObject vecJson = new JsonObject();
+        vecJson.addProperty("x", vec.x());
+        vecJson.addProperty("y", vec.y());
+        vecJson.addProperty("z", vec.z());
+        return vecJson;
     }
 
     /**
@@ -246,9 +252,9 @@ public class StructureMetadataSaver {
      * Each entry point object in the array will have "relativePosition" and "direction".
      * @param relativeEntryPoints The list of RelativeEntryPoint objects to serialize.
      * @param segmentName The name of the segment (for logging purposes).
-     * @return A JsonArray containing the serialized entry points.
+     * @return A JsonArray containing the serialized entry points. Returns an empty array if input list is null.
      */
-    private JsonArray serializeRelativeEntryPointList(List<RelativeEntryPoint> relativeEntryPoints, String segmentName) {
+    private JsonArray serializeRelativeEntryPointList(@Nullable List<RelativeEntryPoint> relativeEntryPoints, String segmentName) {
         JsonArray jsonArray = new JsonArray();
         // Check if the list is null before iterating
         if (relativeEntryPoints != null) {
@@ -258,8 +264,8 @@ public class StructureMetadataSaver {
                     JsonObject epJson = new JsonObject();
                     // Serialize the relative position using the helper
                     epJson.add("relativePosition", serializeBlockVector3(ep.getRelativePosition()));
-                    // Add the direction as a string
-                    epJson.addProperty("direction", ep.getDirection().toString()); // Assumes Direction enum has a meaningful toString()
+                    // Add the direction as a string (enum name)
+                    epJson.addProperty("direction", ep.getDirection().name());
                     jsonArray.add(epJson);
                 } else {
                     // Log a warning if an invalid entry point is encountered
@@ -275,14 +281,14 @@ public class StructureMetadataSaver {
      * @param vectorList The list of BlockVector3 objects to serialize.
      * @param listName The name of the list being serialized (for logging purposes).
      * @param segmentName The name of the segment (for logging purposes).
-     * @return A JsonArray containing the serialized vectors.
+     * @return A JsonArray containing the serialized vectors. Returns an empty array if input list is null.
      */
-    private JsonArray serializeBlockVectorList(List<BlockVector3> vectorList, String listName, String segmentName) {
+    private JsonArray serializeBlockVectorList(@Nullable List<BlockVector3> vectorList, String listName, String segmentName) {
         JsonArray jsonArray = new JsonArray();
         // Check if the list is null before iterating
         if (vectorList != null) {
             for (BlockVector3 vec : vectorList) {
-                // Check if the vector itself is not null
+                // Check if the vector itself is not null before serializing
                 if (vec != null) {
                     // Serialize using the helper and add to the array
                     jsonArray.add(serializeBlockVector3(vec));
@@ -299,9 +305,9 @@ public class StructureMetadataSaver {
      * Sanitizes a string to be used as a filename by removing or replacing invalid characters.
      * Replaces characters not matching [a-zA-Z0-9_.-] with underscores.
      * @param name The original string name.
-     * @return A sanitized string suitable for use as a filename.
+     * @return A sanitized string suitable for use as a filename, or an empty string if input is null/empty.
      */
-    private String sanitizeFileName(String name) {
+    private String sanitizeFileName(@Nullable String name) {
         if (name == null) return "";
         String trimmedName = name.trim(); // Remove leading/trailing whitespace
         if (trimmedName.isEmpty()) return "";
