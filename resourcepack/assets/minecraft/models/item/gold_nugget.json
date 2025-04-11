@@ -1,6 +1,11 @@
 {
   "parent": "minecraft:item/generated",
   "textures": {
-    "layer0": "minecraft:item/gold_nugget"
-  }
+    "layer0": "minecraft:item/gold_nugget" 
+  },
+  "overrides": [
+    { "predicate": { "custom_model_data": 1001 }, "model": "sot:item/Coin_stack_small" },
+    { "predicate": { "custom_model_data": 1002 }, "model": "sot:item/Coin_stack_medium" },
+    { "predicate": { "custom_model_data": 1003 }, "model": "sot:item/Coin_stack_large" }
+  ]
 }

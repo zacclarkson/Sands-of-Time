@@ -1,9 +1,5 @@
 package com.clarkson.sot.entities;
 
-// Removed incorrect GameManager/ScoreManager imports from previous version
-// import com.clarkson.sot.main.GameManager;
-// import com.clarkson.sot.scoring.ScoreManager;
-
 import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.NamespacedKey;
@@ -11,10 +7,10 @@ import org.bukkit.entity.Entity;
 import org.bukkit.entity.ItemDisplay; // Assuming ItemDisplay is used
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.ItemStack;
+import org.bukkit.inventory.meta.ItemMeta; // Needed for CustomModelData
 import org.bukkit.persistence.PersistentDataContainer;
 import org.bukkit.persistence.PersistentDataType;
 import org.bukkit.plugin.Plugin;
-// Removed BukkitRunnable import as it wasn't used
 
 import java.util.Objects;
 import java.util.UUID;
@@ -23,11 +19,18 @@ import java.util.logging.Level;
 /**
  * Represents a stack of coins on the floor that grants score when picked up.
  * Implements the FloorItem interface. Uses static NamespacedKeys for PDC interaction.
+ * Spawns an ItemDisplay entity with CustomModelData for visual representation.
  */
 public class CoinStack implements FloorItem {
 
+    // --- Constants for Custom Models ---
+    // Replace these with your actual CustomModelData integer values from your resource pack
+    private static final int COIN_STACK_SMALL_MODEL_ID = 1001; // Example ID
+    private static final int COIN_STACK_MEDIUM_MODEL_ID = 1002; // Example ID
+    private static final int COIN_STACK_LARGE_MODEL_ID = 1003; // Example ID
+
     // --- Dependencies & Core Properties ---
-    private final Plugin plugin; // Still needed for logging, potentially tasks
+    private final Plugin plugin;
     private final UUID uniqueId;
     private final Location location;
     private ItemDisplay itemDisplay; // Visual representation
@@ -39,20 +42,16 @@ public class CoinStack implements FloorItem {
 
     // --- Coin Specific ---
     private final int baseValue; // Base point value before scaling
+    private final int modelIdToUse; // Store which model ID this stack uses
 
     // --- State ---
     private boolean isPickedUp;
 
     // --- Static PDC Keys ---
-    // Define the key strings here or in a central Constants class
     private static final String FLOOR_ITEM_UUID_KEY_STR = "sot_floor_item_uuid";
     private static final String FLOOR_ITEM_TEAM_KEY_STR = "sot_floor_item_team";
-    // Add other key strings as needed
-
-    // Static NamespacedKey objects, initialized once
     private static NamespacedKey UUID_KEY;
     private static NamespacedKey TEAM_KEY;
-    // Add other static NamespacedKey fields as needed
 
     /**
      * Initializes the static NamespacedKey fields.
@@ -60,13 +59,12 @@ public class CoinStack implements FloorItem {
      * @param pluginInstance The instance of the main plugin.
      */
     public static void initializeKeys(Plugin pluginInstance) {
-        if (UUID_KEY == null) { // Initialize only if null
+        if (UUID_KEY == null) {
             UUID_KEY = new NamespacedKey(pluginInstance, FLOOR_ITEM_UUID_KEY_STR);
         }
-        if (TEAM_KEY == null) { // Initialize only if null
+        if (TEAM_KEY == null) {
             TEAM_KEY = new NamespacedKey(pluginInstance, FLOOR_ITEM_TEAM_KEY_STR);
         }
-        // Initialize other static keys here
     }
 
 
@@ -82,7 +80,7 @@ public class CoinStack implements FloorItem {
      * @param depth             Dungeon depth.
      */
     public CoinStack(Plugin plugin, Location location, int baseValue, UUID teamId, UUID segmentInstanceId, int depth) {
-        // Ensure static keys have been initialized (critical check)
+        // Ensure static keys have been initialized
         if (UUID_KEY == null || TEAM_KEY == null) {
             throw new IllegalStateException("NamespacedKeys for CoinStack have not been initialized! Call CoinStack.initializeKeys() in onEnable.");
         }
@@ -97,57 +95,88 @@ public class CoinStack implements FloorItem {
         this.uniqueId = UUID.randomUUID();
         this.isPickedUp = false;
 
-        // No need to initialize instance fields for uuidKey/teamKey anymore
+        // --- Determine which CustomModelData ID to use ---
+        // Example logic: Use different models based on the coin value
+        if (this.baseValue >= 50) { // Example threshold
+            this.modelIdToUse = COIN_STACK_LARGE_MODEL_ID;
+        } else if (this.baseValue >= 20) { // Example threshold
+            this.modelIdToUse = COIN_STACK_MEDIUM_MODEL_ID;
+        } else {
+            this.modelIdToUse = COIN_STACK_SMALL_MODEL_ID;
+        }
 
-        // Spawn the visual representation
+        // Spawn the visual representation using the chosen model ID
         spawnRepresentation();
     }
 
     /**
-     * Spawns the visual representation (e.g., ItemDisplay showing gold).
-     * Uses the static NamespacedKeys to tag the entity.
+     * Spawns the visual representation (ItemDisplay) using an ItemStack
+     * with the appropriate CustomModelData applied.
+     * Also tags the entity with relevant PDC data.
      */
     private void spawnRepresentation() {
-        ItemStack displayStack = new ItemStack(Material.GOLD_NUGGET); // Or GOLD_INGOT
-        Location spawnLocation = this.location.clone().add(0.5, 0.1, 0.5); // Center visually
+        // 1. Create the base ItemStack (must match the item your resource pack model overrides)
+        ItemStack displayStack = new ItemStack(Material.GOLD_NUGGET); // Or GOLD_INGOT, etc.
 
+        // 2. Get and modify ItemMeta
+        ItemMeta meta = displayStack.getItemMeta();
+        if (meta != null) {
+            // 3. Set the Custom Model Data
+            meta.setCustomModelData(this.modelIdToUse);
+
+            // Optionally set other meta like name (usually not needed for display entities)
+            // meta.displayName(Component.text("Coin Stack"));
+
+            // 4. Apply the modified meta back to the ItemStack
+            displayStack.setItemMeta(meta);
+        } else {
+            plugin.getLogger().warning("Could not get ItemMeta for CoinStack visual item: " + displayStack.getType());
+            // Proceeding without custom model data if meta is null
+        }
+
+        // 5. Define spawn location (slightly above floor, centered)
+        Location spawnLocation = this.location.clone().add(0.5, 0.1, 0.5);
+
+        // 6. Spawn the ItemDisplay entity
         try {
              this.itemDisplay = this.location.getWorld().spawn(spawnLocation, ItemDisplay.class, display -> {
+                 // 7. Set the ItemStack with CustomModelData onto the ItemDisplay
                  display.setItemStack(displayStack);
-                 display.setGravity(false);
-                 display.setPersistent(false);
-                 display.setInvulnerable(true);
-                 // TODO: Adjust ItemDisplay Transformation (size, rotation) if desired
 
-                 // Add PDC Tags using the static keys
+                 // 8. Set other ItemDisplay properties
+                 display.setGravity(false);
+                 display.setPersistent(false); // Don't save these entities across server restarts
+                 display.setInvulnerable(true);
+                 // TODO: Adjust ItemDisplay Transformation (size, rotation, alignment) if desired
+                 // Example: display.setTransformation(new Transformation(...));
+                 // Example: display.setBillboard(Display.Billboard.CENTER); // Make it face the player
+
+                 // 9. Add PDC Tags to the ENTITY for identification during gameplay/pickup
                  PersistentDataContainer pdc = display.getPersistentDataContainer();
                  pdc.set(UUID_KEY, PersistentDataType.STRING, this.uniqueId.toString());
                  pdc.set(TEAM_KEY, PersistentDataType.STRING, this.teamId.toString());
-                 // Add other tags if needed (e.g., "item_type" -> "COIN")
+                 // Add a tag to easily identify floor items in general, if needed by FloorItemManager
+                 // pdc.set(new NamespacedKey(plugin, "sot_floor_item_type"), PersistentDataType.STRING, "COIN");
              });
-              plugin.getLogger().finer("Spawned CoinStack visual " + uniqueId + " at " + location.toVector());
+              plugin.getLogger().finer("Spawned CoinStack visual " + uniqueId + " with Model ID " + this.modelIdToUse + " at " + location.toVector());
         } catch (Exception e) {
              plugin.getLogger().log(Level.SEVERE, "Failed to spawn ItemDisplay for CoinStack " + uniqueId, e);
-             // Handle error - maybe prevent item from being functional?
+             // Consider how to handle this - maybe the CoinStack shouldn't be functional?
         }
     }
 
     // --- FloorItem Interface Implementation ---
 
     @Override
-    public UUID getUniqueId() {
-        return this.uniqueId;
-    }
+    public UUID getUniqueId() { return this.uniqueId; }
 
     @Override
-    public Location getLocation() {
-        return this.location.clone(); // Return a clone for safety
-    }
+    public Location getLocation() { return this.location.clone(); }
 
     @Override
     public ItemStack getItemStack() {
-        // CoinStacks don't typically grant a physical item, just score.
-        return null; // Or return new ItemStack(Material.AIR);
+        // Return null or AIR as coins usually just grant score, not a physical item.
+        return null;
     }
 
     @Override
@@ -157,66 +186,36 @@ public class CoinStack implements FloorItem {
     }
 
     @Override
-    public int getDepth() {
-        return this.depth;
-    }
+    public int getDepth() { return this.depth; }
 
     @Override
-    public UUID getTeamId() {
-        return this.teamId;
-    }
+    public UUID getTeamId() { return this.teamId; }
 
     @Override
-    public UUID getSegmentInstanceId() {
-        return this.segmentInstanceId;
-    }
+    public UUID getSegmentInstanceId() { return this.segmentInstanceId; }
 
     @Override
-    public boolean isPickedUp() {
-        return this.isPickedUp;
-    }
+    public boolean isPickedUp() { return this.isPickedUp; }
 
-    /**
-     * Handles the internal state change when this CoinStack is picked up.
-     * Sets the picked-up flag and removes the visual representation.
-     * The actual score processing is handled by the listener that detected the pickup.
-     *
-     * @param player The player who picked up the item (passed by the listener).
-     */
     @Override
     public void handlePickup(Player player) {
-        // Prevent double processing
-        if (this.isPickedUp) {
-            return;
-        }
-
-        // 1. Mark as picked up internally
+        if (this.isPickedUp) { return; }
         this.isPickedUp = true;
-
-        // 2. Remove visual representation
-        removeRepresentation();
-
-        // 3. Log the pickup event for this specific item
+        removeRepresentation(); // Remove the visual entity
         plugin.getLogger().fine("CoinStack " + uniqueId + " state updated to picked up by " + player.getName());
-
-        // Reminder: Score processing and player feedback messages are handled
-        // by the listener (e.g., FloorItemManager) calling ScoreManager.
+        // ScoreManager handles giving score based on baseValue and depth
     }
 
-    /**
-     * Removes the visual representation (ItemDisplay) from the world.
-     */
     @Override
     public void removeRepresentation() {
-        // Add null check for itemDisplay before calling methods on it
         if (this.itemDisplay != null) {
-            if (this.itemDisplay.isValid()) { // Check if entity is still valid before removing
+            if (this.itemDisplay.isValid()) {
                  this.itemDisplay.remove();
                  plugin.getLogger().finer("Removed CoinStack visual " + uniqueId);
             } else {
                  plugin.getLogger().warning("Attempted to remove invalid/dead ItemDisplay for CoinStack " + uniqueId);
             }
-            this.itemDisplay = null; // Clear reference in either case
+            this.itemDisplay = null; // Clear reference
         }
     }
 
@@ -230,13 +229,11 @@ public class CoinStack implements FloorItem {
         return this.baseValue;
     }
 
-    // This method seems out of place for the interface/implementation logic
-    // It was likely a remnant from an earlier structure. Removing it unless
-    // there's a specific reason for FloorItems to spawn representations at arbitrary locations.
-    // @Override
-    // public void spawnRepresentation(Location location) {
-    //     // This logic is handled by the internal spawnRepresentation() called by the constructor
-    //     throw new UnsupportedOperationException("Use the constructor to spawn representation at the initial location.");
-    // }
-
+    /**
+     * Gets the CustomModelData ID used for this specific coin stack's visual.
+     * @return The model ID.
+     */
+    public int getModelIdUsed() {
+        return this.modelIdToUse;
+    }
 }
