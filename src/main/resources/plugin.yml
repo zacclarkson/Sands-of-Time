@@ -6,12 +6,10 @@ depend: [WorldEdit] # Add WorldEdit dependency
 author: ZacClarkson
 description: A minecraft game based on MCC
 commands:
-  generatedungeon:
-    description: Generates a dungeon based on the player's current location.
-    usage: /generatedungeon
-  cloneDoor:
-    description: Clones the door to the player's location
-    usage: /<command>
+  sotgetcointool:
+      description: Gives the player a tool to place Coin Displays.
+      usage: /<command> <value>
+      permission: sot.admin.givetool
   sotsavesegment: # Add the new command
     description: Saves the selected WorldEdit region as a new SoT segment template.
     usage: /<command> <name> <type> <schematic_filename> [totalCoins]
@@ -19,4 +17,10 @@ commands:
 permissions: # Optional
   sot.admin.savesegment:
     description: Allows saving new SoT segments.
+    default: op
+  sot.admin.givetool:
+    description: Allows getting the Coin Display placer tool.
+    default: op
+  sot.admin.placedisplay: # Permission checked by listener
+    description: Allows placing visual coin displays for building using the tool.
     default: op
