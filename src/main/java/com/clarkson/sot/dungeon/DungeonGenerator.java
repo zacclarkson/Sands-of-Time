@@ -119,8 +119,8 @@ public class DungeonGenerator {
         List<Vector> itemSpawnRelativeLocations = new ArrayList<>();
         Vector hubRelativeLocation = null;
         // Reset placed trackers for this attempt
-        keysPlacedInDFS.clear();
-        vaultsPlacedInDFS.clear();
+        keysPlacedInDFS.clear(); // Tracks Red, Green, Gold keys placed by DFS
+        vaultsPlacedInDFS.clear(); // Tracks Blue, Red, Green, Gold vaults placed by DFS
 
         // --- Pre-checks ---
         if (availableSegments.isEmpty()) { /* ... error log ... */ return null; }
@@ -134,22 +134,22 @@ public class DungeonGenerator {
         placedSegments.add(hubPlacedSegment);
         occupiedOrigins.add(hubOriginBV3);
         hubRelativeLocation = new Vector(hubOriginBV3.x(), hubOriginBV3.y(), hubOriginBV3.z());
-        // Assume hub might contain Blue Vault marker
-        if(hubTemplate.getContainedVault() == VaultColor.BLUE) {
-            vaultsPlacedInDFS.add(VaultColor.BLUE);
-        }
+        // NOTE: Do NOT assume Hub contains Blue Vault. Hub contains Blue Key location metadata.
+        // The actual Blue Key item is placed by VaultManager later.
+        // Vaults (including Blue) must be placed by the DFS in other segments.
 
 
         // --- Start DFS for each Colored Branch + Key Branches ---
-        // Determine which exits from the hub lead to which colored vault branch
-        // This logic needs careful design. Example: Assign colors to specific exits? Randomly?
         List<RelativeEntryPoint> hubExits = new ArrayList<>(hubTemplate.getEntryPoints());
-        Collections.shuffle(hubExits, random); // Randomize exit usage
+        Collections.shuffle(hubExits, random);
 
-        // Assign branches (Example: First 3 exits try for R, G, Gold vaults)
-        VaultColor[] targetVaults = {VaultColor.RED, VaultColor.GREEN, VaultColor.GOLD};
+        // Define branches needed: 3 Vaults (R, G, Gold) + potentially dedicated key branches or general filler
+        VaultColor[] targetVaults = {VaultColor.RED, VaultColor.GREEN, VaultColor.GOLD, VaultColor.BLUE};
+        // Maybe add BLUE here if you want a dedicated Blue Vault branch? Or let it be placed opportunistically?
+        // Let's assume for now we need dedicated branches for R, G, Gold vaults.
         int vaultBranchIndex = 0;
         List<VaultColor> branchesToGenerate = new ArrayList<>(Arrays.asList(targetVaults));
+        // Consider adding null entries to branchesToGenerate if you want non-vault specific paths for keys
 
         for (RelativeEntryPoint hubEntryPoint : hubExits) {
             VaultColor branchColor = null;
@@ -157,30 +157,30 @@ public class DungeonGenerator {
                 branchColor = branchesToGenerate.get(vaultBranchIndex++);
                 plugin.getLogger().info("Starting DFS from hub exit " + hubEntryPoint.getDirection() + " for branch: " + branchColor);
             } else {
-                // Use remaining exits for potential key paths or general filler
-                plugin.getLogger().info("Starting DFS from hub exit " + hubEntryPoint.getDirection() + " for general/key path.");
+                plugin.getLogger().info("Starting DFS from hub exit " + hubEntryPoint.getDirection() + " for general/key path (targetBranchColor=null).");
             }
-            // *** CALLER UPDATED ***
             generatePathRecursive(hubPlacedSegment, hubEntryPoint, placedSegments, occupiedOrigins, 1, branchColor);
         }
 
 
         // --- Post-DFS: Consolidate, Calculate Bounds, Validate ---
-        if (placedSegments.size() <= 1) { // Only hub was placed
-             plugin.getLogger().warning("DFS failed to place any segments beyond the hub.");
-             return null;
-        }
+        if (placedSegments.size() <= 1) { /* ... log warning ... */ return null; }
+
+        // Consolidate features (this populates the maps based on placed segments)
         consolidateFeatureLocations(placedSegments, vaultMarkerRelativeLocations, keySpawnRelativeLocations, sandSpawnRelativeLocations, coinSpawnRelativeLocations, itemSpawnRelativeLocations);
+
+        // Calculate Bounds
         Vector relativeMinVec = calculateRelativeMinBounds(placedSegments);
         Vector relativeMaxVec = calculateRelativeMaxBounds(placedSegments);
         Location relMinLoc = new Location(null, relativeMinVec.getX(), relativeMinVec.getY(), relativeMinVec.getZ());
         Location relMaxLoc = new Location(null, relativeMaxVec.getX(), relativeMaxVec.getY(), relativeMaxVec.getZ());
         Area blueprintBounds = new Area(relMinLoc, relMaxLoc);
 
-        // --- Validate Required Vaults & Keys (Excluding Blue Key) ---
+        // --- Validate Required Vaults & Keys ---
+        // Validation relies on consolidateFeatureLocations having correctly populated the maps
         boolean valid = true;
-        VaultColor[] requiredKeys = {VaultColor.RED, VaultColor.GREEN, VaultColor.GOLD};
-        VaultColor[] requiredVaults = {VaultColor.BLUE, VaultColor.RED, VaultColor.GREEN, VaultColor.GOLD};
+        VaultColor[] requiredKeys = {VaultColor.RED, VaultColor.GREEN, VaultColor.GOLD}; // Blue key is not placed by DFS
+        VaultColor[] requiredVaults = {VaultColor.BLUE, VaultColor.RED, VaultColor.GREEN, VaultColor.GOLD}; // All 4 vaults must be placed by DFS
 
         for (VaultColor requiredColor : requiredVaults) {
             if (!vaultMarkerRelativeLocations.containsKey(requiredColor)) {
@@ -188,7 +188,7 @@ public class DungeonGenerator {
                 valid = false;
             }
         }
-        for (VaultColor requiredColor : requiredKeys) { // Only check for R, G, Gold keys from DFS
+        for (VaultColor requiredColor : requiredKeys) {
             if (!keySpawnRelativeLocations.containsKey(requiredColor)) {
                 plugin.getLogger().warning("Validation Failed: Missing key spawn location for color: " + requiredColor);
                 valid = false;
@@ -209,31 +209,17 @@ public class DungeonGenerator {
 
 
     // --- Private DFS and Helper Methods ---
+    // ... (Signatures remain the same as before) ...
 
-    /**
-     * Recursive Depth-First Search function to generate dungeon paths.
-     * Now includes the target color for the branch to guide segment selection.
-     *
-     * @param currentSegment    The segment instance (in the blueprint) we are currently extending from.
-     * @param connectionPoint   The entry point on currentSegment we are connecting *from*.
-     * @param placedSegments    (In/Out) List of all segments placed so far in the blueprint.
-     * @param occupiedOrigins   (In/Out) Set of BlockVector3 relative origins already occupied.
-     * @param currentDepth      The current depth (number of segments) from the hub segment.
-     * @param targetBranchColor The VaultColor this branch is intended to lead to, or null if it's a general/key path.
-     */
-     // *** SIGNATURE UPDATED ***
     private void generatePathRecursive(
             @NotNull PlacedSegment currentSegment,
             @NotNull RelativeEntryPoint connectionPoint,
             @NotNull List<PlacedSegment> placedSegments,
             @NotNull Set<BlockVector3> occupiedOrigins,
             int currentDepth,
-            @Nullable VaultColor targetBranchColor // Added parameter
+            @Nullable VaultColor targetBranchColor
             ) {
         // Implementation omitted
-        // Inside: Call selectNextSegment passing targetBranchColor
-        //         Update keysPlacedInDFS/vaultsPlacedInDFS when placing a segment
-        //         Recursively call self, passing down targetBranchColor
         throw new UnsupportedOperationException("generatePathRecursive implementation not provided.");
     }
 
@@ -243,28 +229,14 @@ public class DungeonGenerator {
         throw new UnsupportedOperationException("findHubTemplate implementation not provided.");
     }
 
-    /**
-     * Selects a suitable segment template to connect to the current path based on various criteria,
-     * including the target vault color for the current branch.
-     *
-     * @param previousSegment   The template of the segment being connected *from*.
-     * @param requiredDirection The direction the new segment needs an entry point for (opposite of the connection).
-     * @param currentDepth      The current depth in the dungeon, used for applying depth-based rules.
-     * @param targetBranchColor The VaultColor this branch is intended to lead to, or null. Used for prioritizing segments.
-     * @return A suitable Segment template randomly chosen from valid candidates, or null if no suitable segment is found.
-     */
-     // *** SIGNATURE UPDATED ***
     @Nullable
     private Segment selectNextSegment(
             @NotNull Segment previousSegment,
             @NotNull Direction requiredDirection,
             int currentDepth,
-            @Nullable VaultColor targetBranchColor // Added parameter
+            @Nullable VaultColor targetBranchColor
             ) {
         // Implementation omitted
-        // Should filter availableSegments based on direction, depth, collision potential,
-        // AND prioritize segments matching targetBranchColor (especially the vault itself near max depth)
-        // or segments containing required keys (Red Key in PUZZLE_ROOM, Gold Key in LAVA_PARKOUR) if not yet placed.
         throw new UnsupportedOperationException("selectNextSegment implementation not provided.");
     }
 
@@ -286,22 +258,117 @@ public class DungeonGenerator {
         throw new UnsupportedOperationException("checkCollision implementation not provided.");
     }
 
+    /**
+     * Calculates the potential bounding Area (using relative coordinates) for a segment if placed at a given origin.
+     * Needed for advanced collision detection. The Locations in the returned Area will have a null world.
+     *
+     * @param segmentTemplate The segment template.
+     * @param relativeOrigin  The relative origin (BlockVector3) where the segment would be placed.
+     * @return An Area object representing the relative bounds.
+     */
     @NotNull
     private Area calculatePotentialBounds(@NotNull Segment segmentTemplate, @NotNull BlockVector3 relativeOrigin) {
-        // Implementation omitted
-        throw new UnsupportedOperationException("calculatePotentialBounds implementation not provided.");
+        // Get segment size
+        BlockVector3 size = segmentTemplate.getSize();
+        if (size == null || size.x() <= 0 || size.y() <= 0 || size.z() <= 0) {
+            // Handle invalid size, maybe return a zero-size area at origin or throw exception
+            plugin.getLogger().warning("Calculating potential bounds for segment " + segmentTemplate.getName() + " with invalid size: " + size);
+            Location zeroLoc = new Location(null, relativeOrigin.x(), relativeOrigin.y(), relativeOrigin.z());
+            return new Area(zeroLoc, zeroLoc); // Zero-size area
+        }
+
+        // Min corner is the relative origin itself
+        BlockVector3 minCornerBV3 = relativeOrigin;
+        // Max corner is relative origin + size - 1 (inclusive)
+        BlockVector3 maxCornerBV3 = relativeOrigin.add(size.subtract(1, 1, 1));
+
+        // Convert to relative Locations (null world)
+        Location relMinLoc = new Location(null, minCornerBV3.x(), minCornerBV3.y(), minCornerBV3.z());
+        Location relMaxLoc = new Location(null, maxCornerBV3.x(), maxCornerBV3.y(), maxCornerBV3.z());
+
+        // Create and return the Area
+        return new Area(relMinLoc, relMaxLoc);
     }
 
+     /**
+      * Calculates the minimum relative bounds vector based on placed segments.
+      * Iterates through all segments and finds the lowest X, Y, and Z coordinates
+      * reached by any segment's origin corner.
+      * Called after DFS is complete.
+      * @param placedSegments The final list of placed segments in the blueprint.
+      * @return The minimum corner Vector relative to the blueprint origin.
+      */
      @NotNull
     private Vector calculateRelativeMinBounds(@NotNull List<PlacedSegment> placedSegments) {
-        // Implementation omitted
-         throw new UnsupportedOperationException("calculateRelativeMinBounds implementation not provided.");
+        // Handle empty list case, although attemptGeneration should prevent this
+        if (placedSegments == null || placedSegments.isEmpty()) {
+             plugin.getLogger().warning("calculateRelativeMinBounds called with empty segment list.");
+             return new Vector(0, 0, 0); // Or throw exception
+        }
+
+        // Initialize min coordinates to the largest possible double value
+        double minX = Double.POSITIVE_INFINITY;
+        double minY = Double.POSITIVE_INFINITY;
+        double minZ = Double.POSITIVE_INFINITY;
+
+        // Iterate through each placed segment
+        for (PlacedSegment segment : placedSegments) {
+            // Get the relative origin vector of this segment (world is null)
+            // This vector represents the minimum corner of this segment
+            Vector origin = segment.getWorldOrigin().toVector();
+
+            // Update the overall minimums if this segment's origin is lower
+            minX = Math.min(minX, origin.getX());
+            minY = Math.min(minY, origin.getY());
+            minZ = Math.min(minZ, origin.getZ());
+        }
+
+        // Return the vector representing the overall minimum corner
+        return new Vector(minX, minY, minZ);
     }
 
+    /**
+     * Calculates the maximum relative bounds vector based on placed segments.
+     * Iterates through all segments and finds the highest X, Y, and Z coordinates
+     * reached by any segment's corner.
+     * Called after DFS is complete.
+     * @param placedSegments The final list of placed segments in the blueprint.
+     * @return The maximum corner Vector relative to the blueprint origin.
+     */
     @NotNull
     private Vector calculateRelativeMaxBounds(@NotNull List<PlacedSegment> placedSegments) {
-        // Implementation omitted
-         throw new UnsupportedOperationException("calculateRelativeMaxBounds implementation not provided.");
+        // Handle empty list case, although attemptGeneration should prevent this
+        if (placedSegments == null || placedSegments.isEmpty()) {
+             plugin.getLogger().warning("calculateRelativeMaxBounds called with empty segment list.");
+             return new Vector(0, 0, 0); // Or throw exception
+        }
+
+        // Initialize max coordinates to the smallest possible double value
+        double maxX = Double.NEGATIVE_INFINITY;
+        double maxY = Double.NEGATIVE_INFINITY;
+        double maxZ = Double.NEGATIVE_INFINITY;
+
+        // Iterate through each placed segment
+        for (PlacedSegment segment : placedSegments) {
+            // Get the relative origin vector of this segment (world is null)
+            Vector origin = segment.getWorldOrigin().toVector();
+            // Get the size of the segment template
+            BlockVector3 size = segment.getSegmentTemplate().getSize();
+
+            // Calculate the maximum corner coordinates for this segment
+            // Remember size includes the origin block, so add size-1 to origin coord
+            double segMaxX = origin.getX() + size.x() - 1;
+            double segMaxY = origin.getY() + size.y() - 1;
+            double segMaxZ = origin.getZ() + size.z() - 1;
+
+            // Update the overall maximums if this segment extends further
+            maxX = Math.max(maxX, segMaxX);
+            maxY = Math.max(maxY, segMaxY);
+            maxZ = Math.max(maxZ, segMaxZ);
+        }
+
+        // Return the vector representing the overall maximum corner
+        return new Vector(maxX, maxY, maxZ);
     }
 
 
@@ -313,9 +380,6 @@ public class DungeonGenerator {
             @NotNull List<Vector> coinSpawnRelativeLocations,
             @NotNull List<Vector> itemSpawnRelativeLocations) {
         // Implementation omitted
-        // Needs to populate the maps/lists based on segmentTemplate.getContainedVault/Key/Spawns
-        // Important: Ensure this correctly populates vaultMarkerRelativeLocations and keySpawnRelativeLocations
-        // so the validation check works.
         throw new UnsupportedOperationException("consolidateFeatureLocations implementation not provided.");
     }
 
