@@ -24,3 +24,9 @@ permissions: # Optional
   sot.admin.placedisplay: # Permission checked by listener
     description: Allows placing visual coin displays for building using the tool.
     default: op
+  sot.admin.placeitemspawn:
+    description: Allows placing item spawn markers for building using the tool.
+    default: op
+  sot.admin.removemarker: # <-- Added Permission
+    description: Allows removing SoT builder markers with left-click using a tool. # <-- Added
+    default: op # <-- Added (Only OPs can remove by default)
