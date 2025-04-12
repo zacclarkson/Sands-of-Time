@@ -245,17 +245,59 @@ public class DungeonGenerator {
             @NotNull BlockVector3 currentSegmentOrigin,
             @NotNull RelativeEntryPoint connectionFrom,
             @NotNull RelativeEntryPoint connectionTo) {
-        // Implementation omitted
-        throw new UnsupportedOperationException("calculatePlacementOrigin implementation not provided.");
+        // Get the relative positions from the entry points
+        BlockVector3 currentConnectionRelativePos = connectionFrom.getRelativePosition();
+        BlockVector3 nextConnectionRelativePos = connectionTo.getRelativePosition();
+
+        // Calculate the absolute position of the connection point in the blueprint's relative space
+        BlockVector3 absoluteConnectionPoint = currentSegmentOrigin.add(currentConnectionRelativePos);
+
+        // Calculate the origin of the new segment by subtracting its connection point's relative position
+        // from the absolute connection point. This aligns connectionTo with absoluteConnectionPoint.
+        return absoluteConnectionPoint.subtract(nextConnectionRelativePos);
     }
 
+    /**
+     * Checks if placing a segment with the given template at the potential origin would cause a collision
+     * with any already placed segments using bounding box intersection. Also performs a quick origin check.
+     *
+     * @param potentialOrigin   The potential relative origin (BlockVector3) for the new segment.
+     * @param newSegmentTemplate The template of the segment to be placed.
+     * @param occupiedOrigins   The set of already occupied relative origins (for fast check).
+     * @param placedSegments    The list of segments already placed (for bounding box checks).
+     * @return true if a collision is detected, false otherwise.
+     */
     private boolean checkCollision(
             @NotNull BlockVector3 potentialOrigin,
             @NotNull Segment newSegmentTemplate,
             @NotNull Set<BlockVector3> occupiedOrigins,
             @NotNull List<PlacedSegment> placedSegments) {
-        // Implementation omitted
-        throw new UnsupportedOperationException("checkCollision implementation not provided.");
+
+        // 1. Basic Origin Check (Fast Exit)
+        if (occupiedOrigins.contains(potentialOrigin)) {
+             // plugin.getLogger().finest("Collision detected (Origin): " + potentialOrigin); // Debug logging
+             return true; // Another segment already starts exactly here
+        }
+
+        // 2. Advanced Bounding Box Check (More Accurate, Slower)
+        Area potentialBounds = calculatePotentialBounds(newSegmentTemplate, potentialOrigin);
+        // Check against all previously placed segments
+        for (PlacedSegment existingSegment : placedSegments) {
+            // Get the relative bounds of the existing segment
+            // PlacedSegment.getWorldBounds() returns an Area with relative Locations (null world) in this blueprint context
+            Area existingBounds = existingSegment.getWorldBounds();
+
+            // Check if the potential new bounds intersect with the existing bounds
+            if (potentialBounds.intersects(existingBounds)) { // Assumes Area.intersects works correctly with relative coords
+                 plugin.getLogger().finest("Collision detected (Bounds): " + newSegmentTemplate.getName()
+                     + " at " + potentialOrigin + " intersects with " + existingSegment.getName()
+                     + " at " + existingSegment.getWorldOrigin().toVector()); // Debug logging
+                 return true; // Volumes overlap
+            }
+        }
+
+        // If no collision detected by either check
+        return false;
     }
 
     /**
