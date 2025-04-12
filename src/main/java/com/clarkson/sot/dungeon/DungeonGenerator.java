@@ -4,6 +4,7 @@ package com.clarkson.sot.dungeon;
 import com.clarkson.sot.dungeon.segment.PlacedSegment;
 import com.clarkson.sot.dungeon.segment.Segment;
 import com.clarkson.sot.dungeon.segment.Segment.RelativeEntryPoint;
+import com.clarkson.sot.dungeon.segment.SegmentType;
 import com.clarkson.sot.dungeon.segment.Direction; // Assuming this is the correct package
 import com.clarkson.sot.utils.StructureLoader;
 import com.clarkson.sot.entities.Area; // May be needed for collision detection
@@ -22,6 +23,7 @@ import org.jetbrains.annotations.Nullable;
 import java.io.File;
 import java.util.*;
 import java.util.logging.Level; // Import Level for logging
+import java.util.stream.Collectors;
 
 
 /**
@@ -44,6 +46,27 @@ public class DungeonGenerator {
     // Track placed vaults/keys during generation
     private Set<VaultColor> keysPlacedInDFS;
     private Set<VaultColor> vaultsPlacedInDFS;
+
+    // --- Generation Configuration ---
+    // Example Depth Ranges for Vaults (Min inclusive, Max inclusive)
+    private static final Map<VaultColor, MinMax> VAULT_DEPTH_RANGES = Map.of(
+        VaultColor.GREEN, new MinMax(3, 6),    // Green near hub
+        VaultColor.BLUE,  new MinMax(7, 10),
+        VaultColor.RED,   new MinMax(10, 14),
+        VaultColor.GOLD,  new MinMax(13, 15)   // Gold furthest
+    );
+    // Example Depth Ranges for Keys
+     private static final Map<VaultColor, MinMax> KEY_DEPTH_RANGES = Map.of(
+         // Blue key handled separately
+         VaultColor.GREEN, new MinMax(5, 9),
+         VaultColor.RED,   new MinMax(4, 8), // Puzzle room for Red Key
+         VaultColor.GOLD,  new MinMax(8, 12) // Lava parkour for Gold Key
+     );
+
+    // Probabilities (0.0 to 1.0)
+    private static final double VAULT_SPAWN_CHANCE_NORMAL = 0.20; // 20% chance within range (but before last 2 depths)
+    private static final double VAULT_SPAWN_CHANCE_HIGH = 0.50;  // 50% chance at depth MAX-1
+    // Similar probabilities could be defined for keys
 
 
     // --- Constructor ---
@@ -229,6 +252,16 @@ public class DungeonGenerator {
         throw new UnsupportedOperationException("findHubTemplate implementation not provided.");
     }
 
+    /**
+     * Selects a suitable segment template to connect to the current path based on various criteria,
+     * including the target vault color for the current branch and depth-based probabilities.
+     *
+     * @param previousSegment   The template of the segment being connected *from*.
+     * @param requiredDirection The direction the new segment needs an entry point for (opposite of the connection).
+     * @param currentDepth      The current depth in the dungeon, used for applying depth-based rules.
+     * @param targetBranchColor The VaultColor this branch is intended to lead to, or null. Used for prioritizing segments.
+     * @return A suitable Segment template randomly chosen from valid candidates, or null if no suitable segment is found.
+     */
     @Nullable
     private Segment selectNextSegment(
             @NotNull Segment previousSegment,
@@ -236,8 +269,100 @@ public class DungeonGenerator {
             int currentDepth,
             @Nullable VaultColor targetBranchColor
             ) {
-        // Implementation omitted
-        throw new UnsupportedOperationException("selectNextSegment implementation not provided.");
+
+        // 1. Filter basic candidates (must connect, not hub, not immediate backtrack maybe)
+        List<Segment> candidates = availableSegments.stream()
+                .filter(s -> s.getType() != SegmentType.HUB) // Cannot place another hub
+                .filter(s -> s.hasEntryPointInDirection(requiredDirection)) // Must have correct entry point
+                // Optional: Prevent placing the exact same segment type immediately?
+                // .filter(s -> s.getType() != previousSegment.getType() || s.getType() == SegmentType.CORRIDOR)
+                .collect(Collectors.toList());
+
+        if (candidates.isEmpty()) {
+            return null; // No segments can physically connect
+        }
+
+        // 2. Prioritize Vault Placement if on a Vault Branch
+        if (targetBranchColor != null && !vaultsPlacedInDFS.contains(targetBranchColor)) {
+            MinMax range = VAULT_DEPTH_RANGES.get(targetBranchColor);
+            if (range != null && currentDepth >= range.min && currentDepth <= range.max) {
+                // Find segments containing the target vault
+                 List<Segment> vaultCandidates = candidates.stream()
+                         .filter(s -> s.getContainedVault() == targetBranchColor)
+                         .collect(Collectors.toList());
+
+                 if (!vaultCandidates.isEmpty()) {
+                     boolean shouldPlaceVault = false;
+                     if (currentDepth == range.max) {
+                         shouldPlaceVault = true; // Force placement at max depth
+                         plugin.getLogger().finest("Attempting forced vault placement for " + targetBranchColor + " at depth " + currentDepth);
+                     } else if (currentDepth == range.max - 1 && random.nextDouble() < VAULT_SPAWN_CHANCE_HIGH) {
+                         shouldPlaceVault = true; // High chance at depth max-1
+                         plugin.getLogger().finest("High chance vault roll succeeded for " + targetBranchColor + " at depth " + currentDepth);
+                     } else if (random.nextDouble() < VAULT_SPAWN_CHANCE_NORMAL) {
+                         shouldPlaceVault = true; // Normal chance within range
+                         plugin.getLogger().finest("Normal chance vault roll succeeded for " + targetBranchColor + " at depth " + currentDepth);
+                     }
+
+                     if (shouldPlaceVault) {
+                         // Return a random segment from the vault candidates
+                         return vaultCandidates.get(random.nextInt(vaultCandidates.size()));
+                     }
+                 } else {
+                     // Log if we are forced to place but have no candidates
+                     if (currentDepth == range.max) {
+                          plugin.getLogger().warning("Forced vault placement failed for " + targetBranchColor + " at depth " + currentDepth + ": No suitable vault segments found!");
+                          // This branch will likely fail validation later, DFS will backtrack naturally if possible
+                     }
+                 }
+            }
+            // If vault placement wasn't triggered/possible, remove vault segments for this color from general pool
+            // to avoid placing it too early or accidentally.
+            final VaultColor finalTarget = targetBranchColor; // Needed for lambda
+             candidates.removeIf(s -> s.getContainedVault() == finalTarget);
+        }
+
+         // 3. Prioritize Key Placement (if not on a vault branch or vault not placed)
+         // Example: Prioritize Red Key in Puzzle Room
+         if (!keysPlacedInDFS.contains(VaultColor.RED)) {
+             MinMax range = KEY_DEPTH_RANGES.get(VaultColor.RED);
+             if (range != null && currentDepth >= range.min && currentDepth <= range.max) {
+                 List<Segment> keyCandidates = candidates.stream()
+                         .filter(s -> s.getType() == SegmentType.PUZZLE && s.getContainedVaultKey() == VaultColor.RED)
+                         .collect(Collectors.toList());
+                 if (!keyCandidates.isEmpty()) {
+                     // Add probability logic if desired, or just place if found
+                     plugin.getLogger().finest("Prioritizing Red Key placement at depth " + currentDepth);
+                     return keyCandidates.get(random.nextInt(keyCandidates.size()));
+                 }
+             }
+         }
+         // Example: Prioritize Gold Key in Lava Parkour
+         if (!keysPlacedInDFS.contains(VaultColor.GOLD)) {
+              MinMax range = KEY_DEPTH_RANGES.get(VaultColor.GOLD);
+              if (range != null && currentDepth >= range.min && currentDepth <= range.max) {
+                  List<Segment> keyCandidates = candidates.stream()
+                          .filter(s -> s.getType() == SegmentType.LAVA_PARKOUR && s.getContainedVaultKey() == VaultColor.GOLD)
+                          .collect(Collectors.toList());
+                  if (!keyCandidates.isEmpty()) {
+                      plugin.getLogger().finest("Prioritizing Gold Key placement at depth " + currentDepth);
+                      return keyCandidates.get(random.nextInt(keyCandidates.size()));
+                  }
+              }
+          }
+         // Add similar logic for Green Key if needed
+
+
+        // 4. Filter out segments containing *any* vault or key if they shouldn't be placed now
+         candidates.removeIf(s -> s.getContainedVault() != null && (targetBranchColor == null || s.getContainedVault() != targetBranchColor)); // Remove vaults not matching branch target
+         candidates.removeIf(s -> s.getContainedVaultKey() != null && s.getContainedVaultKey() != VaultColor.BLUE); // Remove segments containing R,G,Gold keys unless prioritized above
+
+        // 5. Final Selection from remaining candidates
+        if (candidates.isEmpty()) {
+            return null; // No suitable non-vault/non-key segment found
+        }
+        // Choose randomly from the suitable remaining candidates
+        return candidates.get(random.nextInt(candidates.size()));
     }
 
     @NotNull
@@ -423,6 +548,13 @@ public class DungeonGenerator {
             @NotNull List<Vector> itemSpawnRelativeLocations) {
         // Implementation omitted
         throw new UnsupportedOperationException("consolidateFeatureLocations implementation not provided.");
+    }
+
+    // Helper class for depth ranges
+    private static class MinMax {
+        final int min;
+        final int max;
+        MinMax(int min, int max) { this.min = min; this.max = max; }
     }
 
 }
