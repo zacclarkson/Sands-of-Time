@@ -21,12 +21,11 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4 # Use a recent version
 
-      # Step 2: Set up JDK. Paper 1.20+ requires Java 17+
-      # Your pom.xml might specify 1.8 for compatibility, but compilation needs 17+
-      - name: Set up JDK 17
+      # Step 2: Set up JDK 21 (Required for Paper 1.21+ and pom.xml target)
+      - name: Set up JDK 21 # <-- Updated Name
         uses: actions/setup-java@v4
         with:
-          java-version: '17'
+          java-version: '21' # <-- Updated Version
           distribution: 'temurin' # Popular distribution
           cache: maven # Automatically cache Maven dependencies
 
