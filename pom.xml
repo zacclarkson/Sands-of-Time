@@ -14,6 +14,7 @@
     <properties>
         <java.version>21</java.version>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <server.plugins.dir>C:\Users\zac\Desktop\test server\plugins</server.plugins.dir>
     </properties>
 
     <build>
@@ -44,6 +45,28 @@
                                     <shadedPattern>com.clarkson.sot.libs.gson</shadedPattern>
                                 </relocation>
                             </relocations>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-antrun-plugin</artifactId>
+                <version>3.1.0</version> <executions>
+                    <execution>
+                        <id>copy-to-server</id>
+                        <phase>install</phase>
+                        <goals>
+                            <goal>run</goal>
+                        </goals>
+                        <configuration>
+                            <target>
+                                <copy file="${project.build.directory}/${project.build.finalName}.jar"
+                                      todir="${server.plugins.dir}"
+                                      overwrite="true"
+                                      verbose="true" />
+                                <echo>Copied ${project.build.finalName}.jar to ${server.plugins.dir}</echo>
+                            </target>
                         </configuration>
                     </execution>
                 </executions>
@@ -79,23 +102,22 @@
             <version>1.21-R0.1-SNAPSHOT</version>
             <scope>provided</scope>
         </dependency>
-
         <dependency>
             <groupId>com.sk89q.worldedit</groupId>
             <artifactId>worldedit-bukkit</artifactId>
-            <version>7.3.10</version> <scope>provided</scope>
+            <version>7.3.10</version>
+            <scope>provided</scope>
         </dependency>
         <dependency>
             <groupId>com.google.code.gson</groupId>
             <artifactId>gson</artifactId>
             <version>2.10.1</version>
         </dependency>
-        <dependency>
+         <dependency>
              <groupId>org.jetbrains</groupId>
              <artifactId>annotations</artifactId>
              <version>24.1.0</version>
              <scope>provided</scope>
          </dependency>
-
     </dependencies>
 </project>
