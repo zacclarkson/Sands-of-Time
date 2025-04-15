@@ -1,7 +1,12 @@
 package com.clarkson.sot.main;
 
 import java.io.File;
-import java.util.logging.Level; // For logging errors
+import java.util.logging.Level;
+
+// Import Bukkit classes needed for placeholder locations
+import org.bukkit.Bukkit;
+import org.bukkit.Location;
+import org.bukkit.World;
 
 import org.bukkit.plugin.java.JavaPlugin;
 
@@ -12,19 +17,20 @@ import com.clarkson.sot.scoring.BankingManager;
 import com.clarkson.sot.scoring.ScoreManager;
 import com.clarkson.sot.utils.PlayerStateManager;
 import com.clarkson.sot.utils.SandManager;
-import com.clarkson.sot.utils.StructureLoader; // Assuming you have this utility
+import com.clarkson.sot.utils.StructureLoader;
 import com.clarkson.sot.utils.TeamManager;
 // Import Commands
-import com.clarkson.sot.commands.*; // Import all commands (or list individually)
+import com.clarkson.sot.commands.*;
 // Import Listeners
 import com.clarkson.sot.events.ToolListener;
-// Import other necessary classes like Location if needed for setup
+// Import Entities if needed for static init
+import com.clarkson.sot.entities.CoinStack;
 
 
 public class SoT extends JavaPlugin {
 
     // --- Instance Variables for Managers ---
-    private GameManager gameManager;
+    private GameManager gameManager; // Must be initialized first
     private TeamManager teamManager;
     private PlayerStateManager playerStateManager;
     private StructureLoader structureLoader;
@@ -43,70 +49,70 @@ public class SoT extends JavaPlugin {
         saveDefaultConfig(); // Save config.yml if not present
         ensureSchematicsDir(); // Ensure plugins/SoT/schematics exists
 
-        // TODO: Uncomment these lines ONLY when you have added the actual default files
-        //       to src/main/resources/default_segments/ and src/main/resources/default_segments/schematics/
+        // TODO: Uncomment saveResource calls ONLY when default files exist in src/main/resources
         // saveResource("default_segments/hub_segment.json", false);
         // saveResource("default_segments/schematics/hub_segment.schem", false);
-        // saveResource("default_segments/corridor_basic.json", false); // Add all defaults you create
-        // saveResource("default_segments/schematics/corridor_basic.schem", false);
 
 
-        // --- Initialize Core Managers ---
-        // Order can matter based on dependencies
+        // --- Load Required Config/Locations FIRST ---
+        // TODO: Replace these placeholders with actual loading from config.yml or command storage
+        World mainWorld = Bukkit.getWorlds().get(0); // Get default world as placeholder
+        if (mainWorld == null) {
+             getLogger().severe("Could not get a default world for placeholder locations! Disabling plugin.");
+             getServer().getPluginManager().disablePlugin(this);
+             return;
+        }
+        Location placeholderLobby = new Location(mainWorld, 0, 100, 0); // Example placeholder
+        Location placeholderTrapped = new Location(mainWorld, 10, 100, 10); // Example placeholder
+        // Add proper null checks after loading from config
+
+
+        // --- Initialize Core Managers (Correct Order) ---
+        // 1. Initialize GameManager (as others depend on it)
+        try {
+             // Use placeholder locations for now
+             gameManager = new GameManager(this, placeholderLobby, placeholderTrapped);
+        } catch (NullPointerException e) {
+             getLogger().log(Level.SEVERE, "Failed to initialize GameManager - lobby or trapped location might be null!", e);
+             getServer().getPluginManager().disablePlugin(this);
+             return;
+        } catch (Exception e) {
+             getLogger().log(Level.SEVERE, "An unexpected error occurred initializing GameManager!", e);
+             getServer().getPluginManager().disablePlugin(this);
+             return;
+        }
+
+        // 2. Initialize other managers that need GameManager
         playerStateManager = new PlayerStateManager();
-        // TODO: Get required locations (lobby, trapped) from config.yml or commands
-        // Location lobbyLocation = getConfigLocation("lobby"); // Example helper needed
-        // Location trappedLocation = getConfigLocation("trapped"); // Example helper needed
-        // if (lobbyLocation == null || trappedLocation == null) {
-        //     getLogger().severe("Lobby or Trapped location not configured! Disabling plugin.");
-        //     getServer().getPluginManager().disablePlugin(this);
-        //     return;
-        // }
-        // gameManager = new GameManager(this, lobbyLocation, trappedLocation); // Create GameManager first
-        teamManager = new TeamManager(gameManager); // Pass GameManager if needed
-        scoreManager = new ScoreManager(teamManager, gameManager, this); // Pass dependencies
-        bankingManager = new BankingManager(scoreManager); // Pass ScoreManager
-        sandManager = new SandManager(gameManager); // Pass GameManager
-        vaultManager = new VaultManager(this, gameManager); // Pass Plugin and GameManager
+        teamManager = new TeamManager(gameManager); // Now gameManager is not null
+        scoreManager = new ScoreManager(teamManager, gameManager, this);
+        bankingManager = new BankingManager(scoreManager);
+        sandManager = new SandManager(gameManager);
+        vaultManager = new VaultManager(this, gameManager);
         structureLoader = new StructureLoader(this);
         dungeonGenerator = new DungeonGenerator(this);
 
-        // Load segment templates FROM the data folder (after defaults potentially copied)
+        // 3. Load segment templates (needs StructureLoader)
         if (!dungeonGenerator.loadSegmentTemplates(getDataFolder())) {
              getLogger().warning("Could not load any segment templates from " + getDataFolder().getPath() + ". Dungeon generation may fail.");
-             // Consider if this should be a fatal error depending on plugin state
         }
 
-        // Initialize static keys if needed (e.g., for CoinStack)
-        // CoinStack.initializeKeys(this);
+        // 4. Initialize static keys if needed
+        CoinStack.initializeKeys(this);
 
 
         // --- Register Commands ---
-        // Builder/Admin Tools
+        // Pass necessary managers to commands that need them
         this.getCommand("sotplacecoindisplay").setExecutor(new PlaceCoinDisplayCommand(this));
-        this.getCommand("sotgetcointool").setExecutor(new GiveCoinToolCommand()); // Corrected constructor
+        this.getCommand("sotgetcointool").setExecutor(new GiveCoinToolCommand());
         this.getCommand("sotgetitemtool").setExecutor(new GiveItemToolCommand(this));
-        // this.getCommand("sotgetentrytool").setExecutor(new GiveEntryPointToolCommand(this)); // Register entry tool command
-        // this.getCommand("sotsavesegment").setExecutor(new SaveSegmentCommand(this)); // Register save command
-
-        // Game Control Commands (need CommandManager or individual executors)
-        // Example using a CommandManager class (needs creation)
-        // CommandManager commandManager = new CommandManager(gameManager, teamManager, ...);
-        // this.getCommand("sot").setExecutor(commandManager); // Example main command
-        // this.getCommand("team").setExecutor(commandManager); // Example team command
-
-        // Or register individually:
-        // this.getCommand("sot setup").setExecutor(new SetupCommand(gameManager)); // Example
-        // this.getCommand("sot start").setExecutor(new StartCommand(gameManager)); // Example
-        // ... etc ...
+        this.getCommand("sotgetentrytool").setExecutor(new GiveEntryPointToolCommand(this));
+        // this.getCommand("sotsavesegment").setExecutor(new SaveSegmentCommand(this)); // Needs StructureSaver instance
 
 
         // --- Register Listeners ---
         getServer().getPluginManager().registerEvents(new ToolListener(this), this);
-        getServer().getPluginManager().registerEvents(vaultManager, this); // Register VaultManager as listener
-        // getServer().getPluginManager().registerEvents(new PlayerConnectionListener(gameManager, playerStateManager), this); // Example
-        // getServer().getPluginManager().registerEvents(new PlayerDeathListener(gameManager), this); // Example
-        // getServer().getPluginManager().registerEvents(new ItemPickupListener(scoreManager, floorItemManager), this); // Example
+        getServer().getPluginManager().registerEvents(vaultManager, this); // VaultManager handles vault interactions
 
 
         getLogger().info("Sands of Time Enabled Successfully.");
@@ -116,10 +122,6 @@ public class SoT extends JavaPlugin {
     public void onDisable() {
         getLogger().info("Sands of Time Disabling...");
         // Plugin shutdown logic
-        // Example: Force end game if running?
-        // if (gameManager != null && gameManager.getCurrentState() == GameState.RUNNING) {
-        //     gameManager.endGame();
-        // }
         getLogger().info("Sands of Time Disabled.");
     }
 
@@ -135,9 +137,7 @@ public class SoT extends JavaPlugin {
      // TODO: Implement helper method to load locations from config.yml safely
      // private Location getConfigLocation(String path) { ... }
 
-     // --- Optional: Add getters for your managers if other classes need access via plugin instance ---
+     // --- Getters for Managers (Optional) ---
      // public GameManager getGameManager() { return gameManager; }
-     // public TeamManager getTeamManager() { return teamManager; }
-     // ... etc ...
 
 }

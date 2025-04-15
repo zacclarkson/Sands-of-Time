@@ -89,18 +89,49 @@ public class DungeonGenerator {
 
     // --- Public API Methods ---
 
-    /**
+/**
      * Loads segment templates from JSON files in the specified data directory.
      * Populates the internal list of available segments.
      *
      * @param dataFolder The plugin's data folder where segment JSON files reside.
-     * @return true if templates were loaded successfully and are valid, false otherwise.
+     * @return true if templates were loaded successfully and are valid (including finding a HUB), false otherwise.
      */
     public boolean loadSegmentTemplates(@NotNull File dataFolder) {
-        // Implementation omitted
-        throw new UnsupportedOperationException("loadSegmentTemplates implementation not provided.");
-    }
+        plugin.getLogger().info("Loading dungeon segment templates from: " + dataFolder.getPath());
 
+        // Ensure data folder exists (StructureLoader also checks, but good practice)
+        if (!dataFolder.exists()) {
+             plugin.getLogger().warning("Plugin data folder does not exist, cannot load segments: " + dataFolder.getPath());
+             // Attempt to create it? Or rely on Bukkit/saveResource to do it?
+             // dataFolder.mkdirs(); // Optionally create it here
+             return false; // Cannot load if folder doesn't exist
+        }
+         if (!dataFolder.isDirectory()) {
+              plugin.getLogger().severe("Specified data folder is not a directory: " + dataFolder.getPath());
+              return false;
+         }
+
+        // Use the StructureLoader to load templates from JSON files in the data folder
+        this.availableSegments = structureLoader.loadSegmentTemplates(dataFolder);
+
+        // Check if loading was successful and if essential segments exist
+        if (this.availableSegments == null || this.availableSegments.isEmpty()) {
+            // StructureLoader logs details, but we add a summary warning here
+            plugin.getLogger().warning("No dungeon segment templates were loaded successfully from " + dataFolder.getPath());
+            this.availableSegments = new ArrayList<>(); // Ensure list is not null
+            // Decide if this is fatal - likely yes if no segments load
+            return false;
+        }
+
+        // Validate that at least one hub segment exists
+        if (findHubTemplate() == null) {
+             plugin.getLogger().severe("CRITICAL: No segment template with type 'HUB' found! Dungeon generation requires a Hub segment.");
+             return false; // Cannot generate without a hub
+        }
+
+        plugin.getLogger().info("Successfully loaded " + this.availableSegments.size() + " segment templates.");
+        return true;
+    }
     /**
      * Generates the dungeon layout blueprint using DFS. This is the main entry point
      * for creating the relative structure of the dungeon before it's instantiated.
@@ -232,24 +263,123 @@ public class DungeonGenerator {
 
 
     // --- Private DFS and Helper Methods ---
-    // ... (Signatures remain the same as before) ...
-
+    /**
+     * Recursive Depth-First Search function to generate dungeon paths.
+     * Selects, places, and connects segments, then calls itself for new exits.
+     *
+     * @param currentSegment    The segment instance (in the blueprint) we are currently extending from.
+     * @param connectionPoint   The entry point on currentSegment we are connecting *from*.
+     * @param placedSegments    (In/Out) List of all segments placed so far in the blueprint.
+     * @param occupiedOrigins   (In/Out) Set of BlockVector3 relative origins already occupied.
+     * @param currentDepth      The current depth (number of segments) from the hub segment.
+     * @param targetBranchColor The VaultColor this branch is intended to lead to, or null if it's a general/key path.
+     */
     private void generatePathRecursive(
             @NotNull PlacedSegment currentSegment,
             @NotNull RelativeEntryPoint connectionPoint,
             @NotNull List<PlacedSegment> placedSegments,
             @NotNull Set<BlockVector3> occupiedOrigins,
             int currentDepth,
-            @Nullable VaultColor targetBranchColor
-            ) {
-        // Implementation omitted
-        throw new UnsupportedOperationException("generatePathRecursive implementation not provided.");
+            @Nullable VaultColor targetBranchColor) {
+
+        // --- Base Cases / Termination Conditions ---
+        if (currentDepth >= MAX_DEPTH) {
+            return; // Reached max depth for this branch
+        }
+        if (placedSegments.size() >= MAX_TOTAL_SEGMENTS) {
+            // Optional: Log warning if hitting total segment limit frequently
+            return; // Reached overall dungeon size limit
+        }
+
+        // --- Select Next Segment Template ---
+        Direction requiredDirection = connectionPoint.getDirection().getOpposite();
+        Segment nextSegmentTemplate = selectNextSegment(
+            currentSegment.getSegmentTemplate(),
+            requiredDirection,
+            currentDepth,
+            targetBranchColor
+        );
+
+        // If no suitable segment found, this path ends (backtrack)
+        if (nextSegmentTemplate == null) {
+            // plugin.getLogger().finest("DFS dead end at depth " + currentDepth + " from " + currentSegment.getName() + " facing " + connectionPoint.getDirection());
+            return;
+        }
+
+        // --- Calculate Placement ---
+        RelativeEntryPoint nextEntryPoint = nextSegmentTemplate.findEntryPointByDirection(requiredDirection);
+        if (nextEntryPoint == null) {
+             plugin.getLogger().warning("Segment " + nextSegmentTemplate.getName() + " selected but missing required entry point " + requiredDirection + ". Stopping branch.");
+             return; // Should not happen if selectNextSegment filters correctly
+        }
+        BlockVector3 currentSegmentOrigin = BlockVector3.at(
+            currentSegment.getWorldOrigin().toVector().getX(),
+            currentSegment.getWorldOrigin().toVector().getY(),
+            currentSegment.getWorldOrigin().toVector().getZ()
+        ); // Relative origin
+        BlockVector3 nextSegmentOrigin = calculatePlacementOrigin(currentSegmentOrigin, connectionPoint, nextEntryPoint);
+
+        // --- Check Collision ---
+        if (checkCollision(nextSegmentOrigin, nextSegmentTemplate, occupiedOrigins, placedSegments)) {
+            // plugin.getLogger().finest("DFS collision detected for " + nextSegmentTemplate.getName() + " at " + nextSegmentOrigin + ". Stopping branch.");
+            return; // Collision detected, stop this branch
+        }
+
+        // --- Place Segment ---
+        Location relativeNextOriginLoc = new Location(null, nextSegmentOrigin.x(), nextSegmentOrigin.y(), nextSegmentOrigin.z());
+        PlacedSegment nextPlacedSegment = new PlacedSegment(nextSegmentTemplate, relativeNextOriginLoc, currentDepth); // Pass currentDepth
+
+        placedSegments.add(nextPlacedSegment);
+        occupiedOrigins.add(nextSegmentOrigin);
+        // plugin.getLogger().finer("DFS placed segment " + nextSegmentTemplate.getName() + " at relative origin " + nextSegmentOrigin + " (Depth: " + currentDepth + ", Branch: "+ targetBranchColor + ")");
+
+        // --- Update Global Placed Vaults/Keys Tracking ---
+        VaultColor placedVault = nextSegmentTemplate.getContainedVault();
+        if (placedVault != null) {
+            if (vaultsPlacedInDFS.add(placedVault)) { // .add() returns true if the element was not already present
+                 plugin.getLogger().info("Placed " + placedVault + " vault segment (" + nextSegmentTemplate.getName() + ") at depth " + currentDepth);
+            }
+        }
+        VaultColor placedKey = nextSegmentTemplate.getContainedVaultKey();
+         // We don't track the blue key this way as it's placed specially
+        if (placedKey != null && placedKey != VaultColor.BLUE) {
+             if (keysPlacedInDFS.add(placedKey)) {
+                  plugin.getLogger().info("Placed " + placedKey + " key segment (" + nextSegmentTemplate.getName() + ") at depth " + currentDepth);
+             }
+        }
+
+
+        // --- Recursive Calls for New Segment's Outgoing Connections ---
+        // Shuffle exits to add more randomness to path exploration order
+        List<RelativeEntryPoint> outgoingExits = new ArrayList<>(nextSegmentTemplate.getEntryPoints());
+        Collections.shuffle(outgoingExits, random);
+
+        for (RelativeEntryPoint outgoingEntryPoint : outgoingExits) {
+            // Don't go back through the entry point we just came from
+            if (outgoingEntryPoint.getDirection() != requiredDirection) {
+                // Pass the targetBranchColor down the same branch
+                generatePathRecursive(nextPlacedSegment, outgoingEntryPoint, placedSegments, occupiedOrigins, currentDepth + 1, targetBranchColor);
+            }
+        }
     }
 
+    /**
+     * Finds the first segment template with type HUB.
+     *
+     * @return The hub Segment template, or null if none is found.
+     */
     @Nullable
     private Segment findHubTemplate() {
-        // Implementation omitted
-        throw new UnsupportedOperationException("findHubTemplate implementation not provided.");
+        if (availableSegments == null || availableSegments.isEmpty()) {
+            return null;
+        }
+        for (Segment segment : availableSegments) {
+            // Check type, ensuring type is not null
+            if (segment.getType() != null && segment.getType() == SegmentType.HUB) {
+                return segment;
+            }
+        }
+        return null; // No segment with type HUB found
     }
 
     /**
