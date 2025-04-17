@@ -224,4 +224,15 @@ public class TeamManager {
         // Return the found color, or default to WHITE if the name was invalid
         return Objects.requireNonNullElse(color, NamedTextColor.WHITE);
     }
+
+    public NamedTextColor getTeamColor(UUID teamId) {
+        if (teamId == null) {
+            return NamedTextColor.WHITE; // Default color if teamId is null
+        }
+        TeamDefinition definition = getTeamDefinition(teamId);
+        if (definition != null && definition.getColor() != null) {
+            return parseColor(definition.getColor()); // Convert the color string to NamedTextColor
+        }
+        return NamedTextColor.WHITE; // Default color if team definition or color is not found
+    }
 }

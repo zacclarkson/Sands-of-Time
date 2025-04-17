@@ -344,8 +344,8 @@ public class ToolListener implements Listener {
             currentTransform.getRightRotation()
         );
 
-// Apply the new transformation
-display.setTransformation(newTransform);
+        // Apply the new transformation
+        display.setTransformation(newTransform);
          display.setTransformation(newTransform);
 
          player.sendActionBar(Component.text("Rotated Entry Point Marker to " + nextDirection.name(), NamedTextColor.YELLOW));
@@ -390,29 +390,5 @@ display.setTransformation(newTransform);
          spawnLocation.setYaw(player.getLocation().getYaw());
          return spawnLocation;
      }
-
-     // Helper needed for default direction calculation
-     private static class DirectionUtils { // Or move to your Direction enum
-        public static Direction fromYaw(float yaw) {
-             yaw = (yaw % 360 + 360) % 360; // Normalize yaw 0-360
-             if (yaw >= 315 || yaw < 45) return Direction.SOUTH;
-             if (yaw >= 45 && yaw < 135) return Direction.WEST;
-             if (yaw >= 135 && yaw < 225) return Direction.NORTH;
-             if (yaw >= 225 && yaw < 315) return Direction.EAST;
-             return Direction.SOUTH; // Fallback
-         }
-         public static Direction fromBlockFace(BlockFace face) {
-              switch (face) {
-                  case NORTH: return Direction.NORTH;
-                  case SOUTH: return Direction.SOUTH;
-                  case EAST: return Direction.EAST;
-                  case WEST: return Direction.WEST;
-                  case UP: return Direction.UP;
-                  case DOWN: return Direction.DOWN;
-                  default: return null; // Or throw exception for non-cardinal/axis faces
-              }
-          }
-     }
-
 
 }

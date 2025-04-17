@@ -231,4 +231,9 @@ public class FloorItemManager implements Listener {
         }
     }
 
+    public void clearAllTeamStates() {
+        // TODO Auto-generated method stub
+        throw new UnsupportedOperationException("Unimplemented method 'clearAllTeamStates'");
+    }
+
 }

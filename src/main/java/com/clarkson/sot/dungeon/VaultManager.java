@@ -437,6 +437,11 @@ public class VaultManager implements Listener {
         }
     }
 
+    public void clearAllTeamStates() {
+        // TODO Auto-generated method stub
+        throw new UnsupportedOperationException("Unimplemented method 'clearAllTeamStates'");
+    }
+
      // TODO: Add method to get CustomModelData for keys if needed
      // private int getCustomModelDataForKey(VaultColor color) { ... }
 

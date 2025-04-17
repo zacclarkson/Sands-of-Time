@@ -1,42 +1,45 @@
 package com.clarkson.sot.dungeon;
 
-import com.clarkson.sot.dungeon.segment.PlacedSegment;
+// Removed PlacedSegment import as it's no longer stored here
 import org.bukkit.Location;
 import org.bukkit.World;
+import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable; // For hubLocation potentially
+
+import com.clarkson.sot.dungeon.segment.PlacedSegment;
 
 import java.util.*;
 
 /**
- * Represents the consolidated data and important locations for a specific
+ * Represents the consolidated data and important ABSOLUTE locations for a specific
  * team's fully generated and initialized dungeon instance.
- * This object is created by the DungeonManager instance after pasting and feature placement.
+ * This object is created by the DungeonManager instance after calculating absolute positions.
  */
 public class Dungeon {
 
+    private final UUID instanceId; // Unique ID for this specific dungeon instance run
     private final UUID teamId;
     private final Location origin; // Absolute world origin of this dungeon instance
     private final World world;
-    private final List<PlacedSegment> placedSegments; // Reference to the actual segments placed
+    private final DungeonBlueprint blueprint; // Keep reference to the blueprint used
 
-    // Consolidated locations within this specific instance
-    private final Location hubLocation;
+    // Consolidated ABSOLUTE locations within this specific instance
+    private final Location hubLocation; // Can be null if blueprint had no hub? (Shouldn't happen)
     private final Map<VaultColor, Location> vaultMarkerLocations;
-    private final Map<VaultColor, Location> keySpawnLocations; // Assuming keys are placed at specific spots
+    private final Map<VaultColor, Location> keySpawnLocations;
     private final List<Location> sandSpawnLocations;
     private final List<Location> coinSpawnLocations;
     private final List<Location> itemSpawnLocations;
-    // Add other relevant locations if needed (e.g., puzzle elements, sacrifice points)
-    // private final Map<String, Location> puzzleLocations;
+    // TODO: Add List<Location> deathCageLocations;
 
     /**
      * Constructor for the Dungeon data object.
-     * Should be called by the DungeonManager instance after segments are pasted
-     * and features (vaults, keys) are placed.
+     * Should be called by the DungeonManager instance after calculating absolute locations.
      *
      * @param teamId The ID of the team this dungeon belongs to.
-     * @param origin The absolute world origin of this instance.
      * @param world The world this instance resides in.
-     * @param placedSegments The list of PlacedSegment instances making up this dungeon.
+     * @param origin The absolute world origin of this instance.
+     * @param blueprint The blueprint used to generate this dungeon.
      * @param hubLocation The absolute location of the hub within this instance.
      * @param vaultMarkerLocations Map of vault colors to their absolute marker locations.
      * @param keySpawnLocations Map of vault colors to their absolute key spawn locations.
@@ -44,22 +47,22 @@ public class Dungeon {
      * @param coinSpawnLocations List of absolute coin spawn locations.
      * @param itemSpawnLocations List of absolute general item spawn locations.
      */
-    public Dungeon(UUID teamId, Location origin, World world,
-                   List<PlacedSegment> placedSegments,
-                   Location hubLocation,
-                   Map<VaultColor, Location> vaultMarkerLocations,
-                   Map<VaultColor, Location> keySpawnLocations,
-                   List<Location> sandSpawnLocations,
-                   List<Location> coinSpawnLocations,
-                   List<Location> itemSpawnLocations) {
+    public Dungeon(@NotNull UUID teamId, @NotNull World world, @NotNull Location origin, @NotNull DungeonBlueprint blueprint,
+                   @Nullable Location hubLocation, // Hub location might technically fail to calculate?
+                   @NotNull Map<VaultColor, Location> vaultMarkerLocations,
+                   @NotNull Map<VaultColor, Location> keySpawnLocations,
+                   @NotNull List<Location> sandSpawnLocations,
+                   @NotNull List<Location> coinSpawnLocations,
+                   @NotNull List<Location> itemSpawnLocations) {
 
+        this.instanceId = UUID.randomUUID(); // Generate unique ID for this run
         this.teamId = Objects.requireNonNull(teamId, "Team ID cannot be null");
-        this.origin = Objects.requireNonNull(origin, "Dungeon origin cannot be null");
         this.world = Objects.requireNonNull(world, "Dungeon world cannot be null");
-        // Store an immutable copy of the segment list
-        this.placedSegments = Collections.unmodifiableList(new ArrayList<>(placedSegments));
-        this.hubLocation = hubLocation; // Can be null if hub not found
-        // Store immutable copies of maps/lists
+        this.origin = Objects.requireNonNull(origin, "Dungeon origin cannot be null");
+        this.blueprint = Objects.requireNonNull(blueprint, "Blueprint cannot be null"); // Store the blueprint reference
+        this.hubLocation = hubLocation; // Allow null? Or ensure generator guarantees it?
+
+        // Store immutable copies of maps/lists containing ABSOLUTE locations
         this.vaultMarkerLocations = Collections.unmodifiableMap(new HashMap<>(vaultMarkerLocations));
         this.keySpawnLocations = Collections.unmodifiableMap(new HashMap<>(keySpawnLocations));
         this.sandSpawnLocations = Collections.unmodifiableList(new ArrayList<>(sandSpawnLocations));
@@ -69,59 +72,42 @@ public class Dungeon {
 
     // --- Getters ---
 
-    public UUID getTeamId() { return teamId; }
-    public Location getOrigin() { return origin; }
-    public World getWorld() { return world; }
-    public List<PlacedSegment> getPlacedSegments() { return placedSegments; }
-    public Location getHubLocation() { return hubLocation; } // Might be null
-    public Map<VaultColor, Location> getVaultMarkerLocations() { return vaultMarkerLocations; }
-    public Map<VaultColor, Location> getKeySpawnLocations() { return keySpawnLocations; }
-    public List<Location> getSandSpawnLocations() { return sandSpawnLocations; }
-    public List<Location> getCoinSpawnLocations() { return coinSpawnLocations; }
-    public List<Location> getItemSpawnLocations() { return itemSpawnLocations; }
+    @NotNull public UUID getInstanceId() { return instanceId; }
+    @NotNull public UUID getTeamId() { return teamId; }
+    @NotNull public Location getOrigin() { return origin.clone(); } // Clone for safety
+    @NotNull public World getWorld() { return world; }
+    @NotNull public DungeonBlueprint getBlueprintData() { return blueprint; } // Allow access to original blueprint if needed
+    @Nullable public Location getHubLocation() { return hubLocation != null ? hubLocation.clone() : null; }
+    @NotNull public Map<VaultColor, Location> getVaultMarkerLocations() { return vaultMarkerLocations; } // Already unmodifiable
+    @NotNull public Map<VaultColor, Location> getKeySpawnLocations() { return keySpawnLocations; } // Already unmodifiable
+    @NotNull public List<Location> getSandSpawnLocations() { return sandSpawnLocations; } // Already unmodifiable
+    @NotNull public List<Location> getCoinSpawnLocations() { return coinSpawnLocations; } // Already unmodifiable
+    @NotNull public List<Location> getItemSpawnLocations() { return itemSpawnLocations; } // Already unmodifiable
 
-    // --- Helper Methods (Examples) ---
-
-    /**
-     * Checks if the given absolute world location corresponds to a known vault marker location
-     * within this dungeon instance.
-     * @param location The absolute world location to check.
-     * @return The VaultColor if it's a vault location, otherwise null.
-     */
-    public VaultColor getVaultColorAt(Location location) {
-        if (!world.equals(location.getWorld())) return null; // Check world first
-        // Efficiently check against the pre-calculated map
-        for (Map.Entry<VaultColor, Location> entry : vaultMarkerLocations.entrySet()) {
-            // Compare block coordinates for robustness
-            if (entry.getValue().getBlockX() == location.getBlockX() &&
-                entry.getValue().getBlockY() == location.getBlockY() &&
-                entry.getValue().getBlockZ() == location.getBlockZ()) {
-                return entry.getKey();
-            }
-        }
-        return null;
+    // TODO: Implement getDeathCageLocations() - needs data from blueprint/segments
+    @NotNull public List<Location> getDeathCageLocations() {
+        // Placeholder - Needs logic to find death cage segments in blueprint
+        // and calculate their absolute locations based on dungeon origin.
+        return Collections.emptyList();
     }
 
     /**
-     * Finds the PlacedSegment instance that contains the given world location.
-     * (This might duplicate logic from DungeonManager, decide where it best fits)
-     * @param location The absolute world location.
-     * @return The PlacedSegment containing the location, or null if not found.
+     * Helper method to get the depth associated with a segment containing a specific location.
+     * Requires iterating through the PlacedSegments managed by DungeonManager.
+     * NOTE: Consider if this logic better belongs in DungeonManager.
+     * @param location Absolute world location.
+     * @param placedSegments The list of segments placed in the world for this instance.
+     * @return The depth of the segment, or 0 if not found.
      */
-    public PlacedSegment getSegmentAt(Location location) {
-        if (!world.equals(location.getWorld())) return null;
-        for (PlacedSegment segment : placedSegments) {
+    public int getDepthAtLocation(@NotNull Location location, @NotNull List<PlacedSegment> placedSegments) {
+         if (!world.equals(location.getWorld())) return 0;
+         for (PlacedSegment segment : placedSegments) {
              // Assumes Area class has a suitable contains method
              if (segment.getWorldBounds().contains(location)) {
-                 return segment;
+                 return segment.getDepth();
              }
-        }
-        return null;
-    }
-
-    public List<Location> getDeathCageLocations() {
-        // TODO Auto-generated method stub
-        throw new UnsupportedOperationException("Unimplemented method 'getDeathCageLocations'");
-    }
+         }
+         return 0; // Default depth if outside known segments
+     }
 
 }
