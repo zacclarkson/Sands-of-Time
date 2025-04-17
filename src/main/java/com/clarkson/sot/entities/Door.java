@@ -1,54 +1,54 @@
 package com.clarkson.sot.entities; // Or com.clarkson.sot.dungeon
+
+import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.Material;
+import org.bukkit.Sound;
+import org.bukkit.SoundCategory;
+import org.bukkit.World;
+import org.bukkit.block.Block;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.ItemStack;
-import org.bukkit.plugin.Plugin; // Needed for scheduling
-import org.bukkit.scheduler.BukkitTask; // To manage animations
+import org.bukkit.plugin.Plugin;
+import org.bukkit.scheduler.BukkitRunnable;
+import org.bukkit.scheduler.BukkitTask;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import java.util.UUID;
-import java.util.Objects;
+import java.util.*;
+
 
 /**
  * Represents a generic animated door within a dungeon instance.
  * Handles common state and provides abstract methods for key checks
- * and potentially concrete methods for shared open/close animations.
+ * and concrete methods for shared open/close animations.
  */
 public abstract class Door {
 
     // --- Shared Fields ---
-    protected final Plugin plugin; // For scheduling animations
-    protected final UUID id; // Unique ID for this door instance
+    protected final Plugin plugin;
+    protected final UUID id;
     protected final UUID teamId;
     protected final Area bounds; // Defines the blocks making up the door structure
     protected final Location lockLocation; // Block to interact with
     protected boolean isOpen;
-    protected BukkitTask currentAnimationTask; // To prevent overlapping animations
+    protected BukkitTask currentAnimationTask;
+    protected final int animationTickDelay;
 
-    /**
-     * Constructor for the base Door class.
-     *
-     * @param plugin Plugin instance for scheduling.
-     * @param teamId Team this door belongs to.
-     * @param bounds Area containing the door blocks.
-     * @param lockLocation Location of the lock block.
-     */
+    // Constructor and other methods...
     protected Door(@NotNull Plugin plugin, @NotNull UUID teamId, @NotNull Area bounds, @NotNull Location lockLocation) {
+        this(plugin, teamId, bounds, lockLocation, 3);
+    }
+    protected Door(@NotNull Plugin plugin, @NotNull UUID teamId, @NotNull Area bounds, @NotNull Location lockLocation, int animationTickDelay) {
         this.plugin = Objects.requireNonNull(plugin, "Plugin cannot be null");
         this.teamId = Objects.requireNonNull(teamId, "Team ID cannot be null");
         this.bounds = Objects.requireNonNull(bounds, "Bounds cannot be null");
         this.lockLocation = Objects.requireNonNull(lockLocation, "Lock location cannot be null");
-
-        // *** Initialize the final UUID field ***
-        this.id = UUID.randomUUID(); // Assign a unique ID
-
-        this.isOpen = false; // Doors start closed
+        this.id = UUID.randomUUID();
+        this.isOpen = false;
         this.currentAnimationTask = null;
+        this.animationTickDelay = Math.max(1, animationTickDelay);
     }
-
-    // --- Common Getters ---
 
     @NotNull public UUID getId() { return id; }
     @NotNull public UUID getTeamId() { return teamId; }
@@ -56,95 +56,183 @@ public abstract class Door {
     @NotNull public Location getLockLocation() { return lockLocation; }
     public boolean isOpen() { return isOpen; }
 
-    // --- Abstract Methods (Must be implemented by subclasses) ---
-
-    /**
-     * Checks if the provided ItemStack is the correct key for THIS specific door type.
-     * Implementation differs for SegmentDoor (Rusty Key) vs VaultDoor (Colored Key).
-     * @param keyStack The ItemStack to check.
-     * @return true if it's the correct key, false otherwise.
-     */
     public abstract boolean isCorrectKey(@Nullable ItemStack keyStack);
+    @NotNull protected abstract Material getClosedMaterial();
+
+    public boolean open(@NotNull Player player) {
+        if (isOpen || (currentAnimationTask != null && !currentAnimationTask.isCancelled())) return false;
+        startOpeningAnimation(player);
+        return true;
+    }
+
+    public boolean close(@Nullable Player player) {
+         if (!isOpen || (currentAnimationTask != null && !currentAnimationTask.isCancelled())) return false;
+         startClosingAnimation(player);
+         return true;
+    }
+
+    protected void startOpeningAnimation(@NotNull Player player) {
+        cancelAnimation();
+        final List<Block> blocksToChange = getBlocksSorted(true); // Get blocks sorted top-to-bottom
+        final World world = lockLocation.getWorld();
+
+        if (blocksToChange.isEmpty() || world == null) {
+            plugin.getLogger().warning("Cannot start opening animation for door " + id + ": No blocks found or world is null.");
+            this.isOpen = true;
+            return;
+        }
+
+        this.currentAnimationTask = new BukkitRunnable() {
+            int currentIndex = 0;
+            @Override
+            public void run() {
+                if (currentIndex >= blocksToChange.size()) { finishOpening(); return; }
+                double currentY = blocksToChange.get(currentIndex).getY();
+                boolean layerProcessed = false;
+                while (currentIndex < blocksToChange.size() && blocksToChange.get(currentIndex).getY() == currentY) {
+                    Block block = blocksToChange.get(currentIndex++);
+                    if (block.getType() != Material.AIR) { block.setType(Material.AIR, false); layerProcessed = true; }
+                }
+                if (layerProcessed) world.playSound(lockLocation, Sound.BLOCK_PISTON_CONTRACT, SoundCategory.BLOCKS, 0.5f, 1.2f);
+            }
+        }.runTaskTimer(plugin, 0L, animationTickDelay);
+    }
+
+     private void finishOpening() {
+         this.isOpen = true; this.currentAnimationTask = null;
+         if (lockLocation.getWorld() != null) lockLocation.getWorld().playSound(lockLocation, Sound.BLOCK_IRON_DOOR_OPEN, SoundCategory.BLOCKS, 1.0f, 1.0f);
+         plugin.getLogger().fine("Finished opening door " + id);
+     }
+
+    protected void startClosingAnimation(@Nullable Player player) {
+        cancelAnimation();
+        final List<Block> blocksToChange = getBlocksSorted(false); // Get blocks sorted bottom-to-top
+        final Material closedMat = getClosedMaterial();
+        final World world = lockLocation.getWorld();
+
+        if (blocksToChange.isEmpty() || world == null) {
+             plugin.getLogger().warning("Cannot start closing animation for door " + id + ": No blocks found or world is null.");
+             this.isOpen = false;
+             return;
+        }
+
+        this.currentAnimationTask = new BukkitRunnable() {
+            int currentIndex = 0;
+            @Override
+            public void run() {
+                if (currentIndex >= blocksToChange.size()) { finishClosing(); return; }
+                 double currentY = blocksToChange.get(currentIndex).getY();
+                 boolean layerProcessed = false;
+                 while (currentIndex < blocksToChange.size() && blocksToChange.get(currentIndex).getY() == currentY) {
+                     Block block = blocksToChange.get(currentIndex++);
+                     if (block.getType() != closedMat) { block.setType(closedMat, false); layerProcessed = true; }
+                 }
+                 if (layerProcessed) world.playSound(lockLocation, Sound.BLOCK_PISTON_EXTEND, SoundCategory.BLOCKS, 0.5f, 1.2f);
+            }
+        }.runTaskTimer(plugin, 0L, animationTickDelay);
+    }
+
+     private void finishClosing() {
+         this.isOpen = false; this.currentAnimationTask = null;
+         List<Block> finalBlocks = getBlocksSorted(false); // Get blocks again to be safe
+         forceBlockUpdates(finalBlocks); // Update physics now
+         if (lockLocation.getWorld() != null) lockLocation.getWorld().playSound(lockLocation, Sound.BLOCK_IRON_DOOR_CLOSE, SoundCategory.BLOCKS, 1.0f, 1.0f);
+         plugin.getLogger().fine("Finished closing door " + id);
+     }
+
+    public void setOpenState(boolean open) {
+        cancelAnimation();
+        this.isOpen = open;
+        Material targetMaterial = open ? Material.AIR : getClosedMaterial();
+        // Get blocks using the now implemented helper
+        List<Block> blocks = getBlocksSorted(false); // Sorting order doesn't matter for instant set
+
+        if (!Bukkit.isPrimaryThread()) {
+            new BukkitRunnable() { @Override public void run() { setBlocksInstantly(blocks, targetMaterial); } }.runTask(plugin);
+        } else {
+            setBlocksInstantly(blocks, targetMaterial);
+        }
+         plugin.getLogger().fine("Set door " + id + " state to " + (open ? "OPEN" : "CLOSED") + " instantly.");
+    }
+
+    private void setBlocksInstantly(List<Block> blocks, Material material) {
+        for (Block block : blocks) { if (block.getType() != material) block.setType(material, false); }
+        forceBlockUpdates(blocks);
+    }
+
+     private void forceBlockUpdates(List<Block> blocks) {
+         if (blocks.isEmpty()) return;
+         // Run on next tick to allow block changes to settle slightly? Optional.
+         new BukkitRunnable() {
+             @Override
+             public void run() {
+                  for(Block block : blocks) {
+                      // Check if chunk is loaded before updating state
+                      if (block.getChunk().isLoaded()) {
+                           block.getState().update(true, true); // Force update, apply physics
+                      }
+                  }
+             }
+         }.runTask(plugin);
+     }
+
+    protected void cancelAnimation() {
+        if (this.currentAnimationTask != null && !this.currentAnimationTask.isCancelled()) {
+            this.currentAnimationTask.cancel();
+             plugin.getLogger().finer("Cancelled animation task for door " + id);
+        }
+        this.currentAnimationTask = null;
+    }
+
+    // --- Helper Methods ---
 
     /**
-     * Gets the Material the door should be made of when closed.
-     * Might differ between door types.
-     * @return The Material for the closed door state.
+     * Gets the list of blocks within the door's bounds by iterating coordinates,
+     * then sorts them by Y-coordinate.
+     * @param topToBottom If true, sort highest Y first. If false, sort lowest Y first.
+     * @return Sorted list of blocks. Returns empty list if bounds are invalid or world is null.
      */
     @NotNull
-    protected abstract Material getClosedMaterial();
+    protected List<Block> getBlocksSorted(boolean topToBottom) {
+        List<Block> blocks = new ArrayList<>();
+        World world = lockLocation.getWorld(); // Get world from lock location
+        Location min = bounds.getMinPoint();
+        Location max = bounds.getMaxPoint();
 
+        // Validate bounds and world
+        if (world == null || min == null || max == null) {
+             plugin.getLogger().severe("Cannot get blocks for door " + id + ": Invalid bounds or null world.");
+             return blocks; // Return empty list
+        }
 
-    // --- Core Action Methods (Could be final if animation is always the same) ---
+        // Ensure min/max are correct (Area constructor should handle this, but double-check)
+        int minX = Math.min(min.getBlockX(), max.getBlockX());
+        int minY = Math.min(min.getBlockY(), max.getBlockY());
+        int minZ = Math.min(min.getBlockZ(), max.getBlockZ());
+        int maxX = Math.max(min.getBlockX(), max.getBlockX());
+        int maxY = Math.max(min.getBlockY(), max.getBlockY());
+        int maxZ = Math.max(min.getBlockZ(), max.getBlockZ());
 
-    /**
-     * Initiates the process to open the door if it's closed and not already animating.
-     * Key checking should happen *before* calling this (e.g., in DoorManager).
-     * Calls the animation method.
-     *
-     * @param player The player initiating the action.
-     * @return true if the opening animation started, false if already open or animating.
-     */
-    public boolean open(@NotNull Player player) {
-        // Implementation omitted (Would check isOpen, check currentAnimationTask, then call startOpeningAnimation)
-        throw new UnsupportedOperationException("open implementation not provided.");
+        // Iterate through all coordinates within the bounds
+        for (int y = minY; y <= maxY; y++) {
+            for (int x = minX; x <= maxX; x++) {
+                for (int z = minZ; z <= maxZ; z++) {
+                    // Check if chunk is loaded before getting block - prevents sync load
+                    if (world.isChunkLoaded(x >> 4, z >> 4)) {
+                        blocks.add(world.getBlockAt(x, y, z));
+                    } else {
+                        plugin.getLogger().warning("Skipping block for door " + id + " at " + x + "," + y + "," + z + " - Chunk not loaded.");
+                    }
+                }
+            }
+        }
+
+        // Sort the collected blocks based on Y coordinate
+        if (topToBottom) {
+            blocks.sort(Comparator.comparingDouble(Block::getY).reversed()); // Highest Y first
+        } else {
+            blocks.sort(Comparator.comparingDouble(Block::getY)); // Lowest Y first
+        }
+        return blocks;
     }
-
-    /**
-     * Initiates the process to close the door if it's open and not already animating.
-     * VaultDoor might override this to always return false.
-     *
-     * @param player The player initiating the action (or null).
-     * @return true if the closing animation started, false if already closed, animating, or not supported.
-     */
-    public boolean close(@Nullable Player player) {
-         // Implementation omitted (Would check isOpen, check currentAnimationTask, then call startClosingAnimation)
-        throw new UnsupportedOperationException("close implementation not provided.");
-    }
-
-    // --- Animation Logic (Protected - Called by open/close) ---
-
-    /**
-     * Starts the visual animation sequence for opening the door.
-     * (e.g., blocks moving down iteratively). Sets isOpen = true on completion.
-     * Implementation involves BukkitRunnable.
-     * @param player Player who triggered the opening.
-     */
-    protected void startOpeningAnimation(@NotNull Player player) {
-        // Implementation omitted (BukkitRunnable logic to change blocks over time)
-        throw new UnsupportedOperationException("startOpeningAnimation implementation not provided.");
-    }
-
-    /**
-     * Starts the visual animation sequence for closing the door.
-     * (e.g., blocks moving up iteratively). Sets isOpen = false on completion.
-     * Implementation involves BukkitRunnable.
-     * @param player Player who triggered the closing (or null).
-     */
-    protected void startClosingAnimation(@Nullable Player player) {
-        // Implementation omitted (BukkitRunnable logic to change blocks over time)
-        throw new UnsupportedOperationException("startClosingAnimation implementation not provided.");
-    }
-
-
-    // --- State Management ---
-
-    /**
-     * Forcefully sets the open state without animation.
-     * Used for initialization or resetting state.
-     * @param isOpen The desired state.
-     */
-    public void setOpenState(boolean isOpen) {
-        // Implementation omitted (Sets the isOpen field)
-         throw new UnsupportedOperationException("setOpenState implementation not provided.");
-    }
-
-    /**
-     * Cancels any ongoing opening/closing animation.
-     */
-    protected void cancelAnimation() {
-        // Implementation omitted (Checks currentAnimationTask and cancels if not null/cancelled)
-        throw new UnsupportedOperationException("cancelAnimation implementation not provided.");
-    }
-
 }
