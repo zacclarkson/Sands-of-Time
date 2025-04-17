@@ -3,6 +3,7 @@ package com.clarkson.sot.scoring; // Example package
 import com.clarkson.sot.main.GameManager; // Need GameManager access
 import com.clarkson.sot.dungeon.segment.PlacedSegment; // Need PlacedSegment
 import com.clarkson.sot.dungeon.segment.Segment; // Need Segment template
+import com.clarkson.sot.entities.FloorItem;
 import com.clarkson.sot.utils.SoTTeam;
 import com.clarkson.sot.utils.TeamManager; // Assuming dependency
 
@@ -15,6 +16,7 @@ import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.persistence.PersistentDataContainer;
 import org.bukkit.persistence.PersistentDataType;
 import org.bukkit.plugin.Plugin; // ScoreManager might not need Plugin directly anymore
+import org.jetbrains.annotations.NotNull;
 
 import java.util.Optional;
 import java.util.UUID;
@@ -113,6 +115,11 @@ public class ScoreManager {
     /** Clears unbanked score when player is trapped by timer */
     public void applyTimerEndPenalty(UUID playerUUID) {
 
+    }
+
+    public void collectFloorItem(Player player, FloorItem item) {
+        // TODO Auto-generated method stub
+        throw new UnsupportedOperationException("Unimplemented method 'collectFloorItem'");
     }
 
 }
