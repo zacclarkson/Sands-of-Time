@@ -176,69 +176,90 @@ public class DungeonManager {
     }
 
 
-    /** Pastes all segment schematics into the world at their absolute locations. */
+    /** Pastes all segment schematics into the world using a single EditSession. */
     private boolean pasteSegmentSchematics() {
-        this.placedSegmentsInWorld.clear(); // Start fresh for this instance
+        this.placedSegmentsInWorld.clear();
+        boolean overallSuccess = true; // Track if any paste fails
 
-        for (PlacedSegment blueprintSegment : blueprintData.getRelativeSegments()) {
-            Segment template = blueprintSegment.getSegmentTemplate();
-            Vector relativeOriginVec = blueprintSegment.getWorldOrigin().toVector(); // Origin relative to blueprint 0,0,0
-            Location absoluteOriginLoc = dungeonOrigin.clone().add(relativeOriginVec); // Absolute world location to paste at
+        // Adapt world once
+        com.sk89q.worldedit.world.World weWorld = BukkitAdapter.adapt(world);
 
-            // --- Call Pasting Logic ---
-            boolean success = pasteSchematic(template, absoluteOriginLoc); // Use helper
-            if (!success) {
-                plugin.getLogger().severe("Failed to paste schematic '" + template.getSchematicFileName() + "' for team " + teamId + " at " + absoluteOriginLoc.toVector());
-                return false; // Stop if one fails? Or continue? For now, stop.
+        // Create a single EditSession for all paste operations in this instance
+        try (EditSession editSession = WorldEdit.getInstance().newEditSessionBuilder().world(weWorld).build()) {
+            for (PlacedSegment blueprintSegment : blueprintData.getRelativeSegments()) {
+                Segment template = blueprintSegment.getSegmentTemplate();
+                Vector relativeOriginVec = blueprintSegment.getWorldOrigin().toVector();
+                Location absoluteOriginLoc = dungeonOrigin.clone().add(relativeOriginVec);
+
+                // Call pasting logic, passing the single EditSession
+                boolean success = pasteSchematic(template, absoluteOriginLoc, editSession); // Pass session
+                if (!success) {
+                    plugin.getLogger().severe("Failed to paste schematic '" + template.getSchematicFileName() + "' for team " + teamId + " at " + absoluteOriginLoc.toVector());
+                    overallSuccess = false; // Mark failure but continue pasting others if desired
+                    // return false; // Option: Stop immediately on first failure
+                } else {
+                     // Only add to placedSegmentsInWorld if successfully pasted
+                     PlacedSegment worldSegment = new PlacedSegment(template, absoluteOriginLoc, blueprintSegment.getDepth());
+                     this.placedSegmentsInWorld.add(worldSegment);
+                     plugin.getLogger().finer("Pasted segment " + template.getName() + " for team " + teamId + " at " + absoluteOriginLoc.toVector());
+                }
             }
+            // Optional: Flush the session once after all operations are queued
+            // Operations are usually completed implicitly when the try-with-resources block closes the session.
+            // editSession.flushSession();
+            plugin.getLogger().fine("Completed pasting operations for team " + teamId);
 
-            // Create a new PlacedSegment representing the actual world placement
-            // Use the ABSOLUTE location now
-            PlacedSegment worldSegment = new PlacedSegment(template, absoluteOriginLoc, blueprintSegment.getDepth());
-            this.placedSegmentsInWorld.add(worldSegment);
-            plugin.getLogger().finer("Pasted segment " + template.getName() + " for team " + teamId + " at " + absoluteOriginLoc.toVector());
+        } catch (Exception e) { // Catch unexpected errors
+             plugin.getLogger().log(Level.SEVERE, "Unexpected error during paste session for team " + teamId, e);
+             return false;
         }
-        return true;
+
+        return overallSuccess; // Return true only if all pastes succeeded
     }
 
-    /** Pastes a single schematic using WorldEdit. */
-    private boolean pasteSchematic(Segment template, Location pasteOrigin) {
-         // Use File path relative to plugin data folder
-         File schematicDir = new File(plugin.getDataFolder(), "schematics");
-         File schematicFile = new File(schematicDir, template.getSchematicFileName());
+    /**
+     * Pastes a single schematic using WorldEdit within a provided EditSession.
+     * @param template The segment template containing schematic info.
+     * @param pasteOrigin The absolute world location to paste the schematic at.
+     * @param editSession The EditSession to use for the paste operation.
+     * @return true if pasting was successful, false otherwise.
+     */
+    private boolean pasteSchematic(Segment template, Location pasteOrigin, EditSession editSession) { // Added EditSession parameter
+        File schematicDir = new File(plugin.getDataFolder(), "schematics");
+        File schematicFile = new File(schematicDir, template.getSchematicFileName());
 
-         if (!schematicFile.exists()) {
-             plugin.getLogger().severe("Schematic file not found: " + schematicFile.getPath());
+        if (!schematicFile.exists()) {
+            plugin.getLogger().severe("Schematic file not found: " + schematicFile.getPath());
+            return false;
+        }
+
+        try {
+            ClipboardFormat format = ClipboardFormats.findByFile(schematicFile);
+            if (format == null) {
+                 plugin.getLogger().severe("Unknown schematic format: " + schematicFile.getName());
+                 return false;
+            }
+            try (ClipboardReader reader = format.getReader(new FileInputStream(schematicFile))) {
+                Clipboard clipboard = reader.read();
+
+                // --- Use the provided EditSession ---
+                // No need to create a new one here
+                Operation operation = new ClipboardHolder(clipboard)
+                        .createPaste(editSession) // Use passed-in session
+                        .to(BlockVector3.at(pasteOrigin.getBlockX(), pasteOrigin.getBlockY(), pasteOrigin.getBlockZ()))
+                        .ignoreAirBlocks(true) // Paste non-air blocks
+                        .build();
+                Operations.complete(operation); // Queue and complete the operation within the session
+                // --- Removed the local EditSession try-with-resources block ---
+            }
+            return true;
+        } catch (IOException | WorldEditException e) {
+             plugin.getLogger().log(Level.SEVERE, "Failed to paste schematic " + template.getSchematicFileName() + " at " + pasteOrigin.toVector(), e);
              return false;
-         }
-
-         try {
-             ClipboardFormat format = ClipboardFormats.findByFile(schematicFile);
-             if (format == null) {
-                  plugin.getLogger().severe("Unknown schematic format: " + schematicFile.getName());
-                  return false;
-             }
-             try (ClipboardReader reader = format.getReader(new FileInputStream(schematicFile))) {
-                 Clipboard clipboard = reader.read();
-                 com.sk89q.worldedit.world.World weWorld = BukkitAdapter.adapt(pasteOrigin.getWorld());
-
-                 try (EditSession editSession = WorldEdit.getInstance().newEditSessionBuilder().world(weWorld).build()) {
-                     Operation operation = new ClipboardHolder(clipboard)
-                             .createPaste(editSession)
-                             .to(BlockVector3.at(pasteOrigin.getBlockX(), pasteOrigin.getBlockY(), pasteOrigin.getBlockZ()))
-                             .ignoreAirBlocks(true) // Paste non-air blocks
-                             .build();
-                     Operations.complete(operation);
-                 }
-             }
-             return true;
-         } catch (IOException | WorldEditException e) {
-              plugin.getLogger().log(Level.SEVERE, "Failed to paste schematic " + template.getSchematicFileName() + " at " + pasteOrigin.toVector(), e);
-              return false;
-         } catch (Exception e) {
-             plugin.getLogger().log(Level.SEVERE, "Unexpected error pasting schematic " + template.getSchematicFileName(), e);
-             return false;
-         }
+        } catch (Exception e) {
+            plugin.getLogger().log(Level.SEVERE, "Unexpected error pasting schematic " + template.getSchematicFileName(), e);
+            return false;
+        }
     }
 
 

@@ -22,7 +22,6 @@ import org.jetbrains.annotations.Nullable;
 // Java imports
 import java.io.File;
 import java.util.*;
-import java.util.logging.Level; // Import Level for logging
 import java.util.stream.Collectors;
 
 
@@ -774,5 +773,4 @@ public class DungeonGenerator {
         final int max;
         MinMax(int min, int max) { this.min = min; this.max = max; }
     }
-
 }
