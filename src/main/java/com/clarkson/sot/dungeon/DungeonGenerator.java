@@ -669,15 +669,103 @@ public class DungeonGenerator {
     }
 
 
+    /**
+     * Iterates through all placed segments in the completed blueprint layout and consolidates
+     * the relative locations of all defined features (vaults, keys, spawns) into the final maps/lists
+     * used to construct the DungeonBlueprint object. Converts relative BlockVector3 offsets to relative Bukkit Vectors.
+     * Called after DFS is complete.
+     *
+     * @param placedSegments             The final list of PlacedSegment objects in the blueprint.
+     * @param vaultMarkerRelativeLocations (Out) Map to populate with vault color -> relative vault marker location (Vector).
+     * @param keySpawnRelativeLocations    (Out) Map to populate with vault color -> relative key spawn location (Vector).
+     * @param sandSpawnRelativeLocations   (Out) List to populate with relative sand spawn locations (Vector).
+     * @param coinSpawnRelativeLocations   (Out) List to populate with relative coin spawn locations (Vector).
+     * @param itemSpawnRelativeLocations   (Out) List to populate with relative item spawn locations (Vector).
+     */
     private void consolidateFeatureLocations(
             @NotNull List<PlacedSegment> placedSegments,
-            @NotNull Map<VaultColor, Vector> vaultMarkerRelativeLocations,
-            @NotNull Map<VaultColor, Vector> keySpawnRelativeLocations,
-            @NotNull List<Vector> sandSpawnRelativeLocations,
-            @NotNull List<Vector> coinSpawnRelativeLocations,
-            @NotNull List<Vector> itemSpawnRelativeLocations) {
-        // Implementation omitted
-        throw new UnsupportedOperationException("consolidateFeatureLocations implementation not provided.");
+            @NotNull Map<VaultColor, Vector> vaultMarkerRelativeLocations, // Map to populate
+            @NotNull Map<VaultColor, Vector> keySpawnRelativeLocations,    // Map to populate
+            @NotNull List<Vector> sandSpawnRelativeLocations,             // List to populate
+            @NotNull List<Vector> coinSpawnRelativeLocations,             // List to populate
+            @NotNull List<Vector> itemSpawnRelativeLocations              // List to populate
+            ) {
+
+        // Clear output collections before populating
+        vaultMarkerRelativeLocations.clear();
+        keySpawnRelativeLocations.clear();
+        sandSpawnRelativeLocations.clear();
+        coinSpawnRelativeLocations.clear();
+        itemSpawnRelativeLocations.clear();
+
+        plugin.getLogger().fine("Consolidating feature locations from " + placedSegments.size() + " placed segments...");
+
+        // Iterate through each segment placed in the blueprint
+        for (PlacedSegment placedSegment : placedSegments) {
+            Segment template = placedSegment.getSegmentTemplate();
+            // Get the origin of this segment RELATIVE to the blueprint's 0,0,0
+            Vector segmentRelativeOrigin = placedSegment.getWorldOrigin().toVector();
+
+            // --- Consolidate Vault Marker ---
+            VaultColor vaultColor = template.getContainedVault();
+            BlockVector3 vaultOffset = template.getVaultOffset(); // Offset relative to segment origin
+            if (vaultColor != null && vaultOffset != null) {
+                // Calculate final relative position: Segment Origin + Offset
+                Vector vaultRelativePos = segmentRelativeOrigin.clone().add(new Vector(vaultOffset.x(), vaultOffset.y(), vaultOffset.z()));
+                // Only add if this color hasn't been placed yet (first one found wins)
+                if (vaultMarkerRelativeLocations.putIfAbsent(vaultColor, vaultRelativePos) == null) {
+                     plugin.getLogger().finer("Consolidated " + vaultColor + " vault marker location: " + vaultRelativePos);
+                } else {
+                     plugin.getLogger().warning("Duplicate vault marker found for color " + vaultColor + " in segment " + template.getName() + ". Keeping first one found.");
+                }
+            }
+
+            // --- Consolidate Key Spawn ---
+            VaultColor keyColor = template.getContainedVaultKey();
+            BlockVector3 keyOffset = template.getKeyOffset(); // Offset relative to segment origin
+             // Ignore Blue Key consolidation - handled separately by VaultManager relative to Hub
+            if (keyColor != null && keyOffset != null && keyColor != VaultColor.BLUE) {
+                // Calculate final relative position: Segment Origin + Offset
+                Vector keyRelativePos = segmentRelativeOrigin.clone().add(new Vector(keyOffset.x(), keyOffset.y(), keyOffset.z()));
+                // Only add if this color hasn't been placed yet
+                if (keySpawnRelativeLocations.putIfAbsent(keyColor, keyRelativePos) == null) {
+                    plugin.getLogger().finer("Consolidated " + keyColor + " key spawn location: " + keyRelativePos);
+                } else {
+                     plugin.getLogger().warning("Duplicate key spawn found for color " + keyColor + " in segment " + template.getName() + ". Keeping first one found.");
+                }
+            }
+
+            // --- Consolidate Sand Spawns ---
+            List<BlockVector3> sandOffsets = template.getSandSpawnLocations();
+            if (sandOffsets != null) {
+                for (BlockVector3 offset : sandOffsets) {
+                    if (offset != null) {
+                        sandSpawnRelativeLocations.add(segmentRelativeOrigin.clone().add(new Vector(offset.x(), offset.y(), offset.z())));
+                    }
+                }
+            }
+
+            // --- Consolidate Coin Spawns ---
+            List<BlockVector3> coinOffsets = template.getCoinSpawnLocations();
+             if (coinOffsets != null) {
+                for (BlockVector3 offset : coinOffsets) {
+                     if (offset != null) {
+                         coinSpawnRelativeLocations.add(segmentRelativeOrigin.clone().add(new Vector(offset.x(), offset.y(), offset.z())));
+                     }
+                 }
+             }
+
+            // --- Consolidate Item Spawns ---
+            List<BlockVector3> itemOffsets = template.getItemSpawnLocations();
+             if (itemOffsets != null) {
+                for (BlockVector3 offset : itemOffsets) {
+                     if (offset != null) {
+                         itemSpawnRelativeLocations.add(segmentRelativeOrigin.clone().add(new Vector(offset.x(), offset.y(), offset.z())));
+                     }
+                 }
+             }
+        }
+        plugin.getLogger().fine("Feature consolidation complete.");
     }
 
     // Helper class for depth ranges
