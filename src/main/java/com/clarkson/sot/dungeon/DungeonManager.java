@@ -437,7 +437,7 @@ public class DungeonManager {
              for (Entity entity : entitiesInBounds) {
                  // IMPORTANT: Do NOT remove players!
                  if (!(entity instanceof Player)) {
-                     // Optional: Add more filters? E.g., only remove Items, Monsters, specific marker types?
+                     // TODO: Add more filters? E.g., only remove Items, Monsters, specific marker types?
                      entity.remove();
                      removedCount++;
                  }
