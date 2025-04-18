@@ -263,26 +263,83 @@ public class DungeonManager {
     }
 
 
-    /** Spawns floor items using the FloorItemManager. */
+    /**
+     * Spawns floor items (Coins, Generic Items, Sand Piles) using the FloorItemManager
+     * based on the absolute locations stored in the `dungeonData` object.
+     * Called by `initializeInstance`.
+     */
     private void populateFloorItems() {
-        if (dungeonData == null) { /* ... error log ... */ return; }
-        plugin.getLogger().fine("Populating floor items for team " + teamId);
-
-        // Populate Coins
-        for (Location absLoc : dungeonData.getCoinSpawnLocations()) {
-            int baseValue = 5; // TODO: Get value based on depth/segment
-            int depth = dungeonData.getDepthAtLocation(absLoc, this.placedSegmentsInWorld); // Pass placed segments
-            floorItemManager.spawnCoinStack(absLoc, baseValue, teamId, dungeonData.getInstanceId(), depth);
+        // Ensure data is ready
+        if (dungeonData == null) {
+            plugin.getLogger().severe("Cannot populate floor items: Dungeon data object is null for team " + teamId);
+            return;
+        }
+        if (floorItemManager == null) {
+             plugin.getLogger().severe("Cannot populate floor items: FloorItemManager is null!");
+             // Possibly throw an exception or return early depending on how critical floor items are
+             return;
         }
 
-        // Populate Items
-        for (Location absLoc : dungeonData.getItemSpawnLocations()) {
-             int depth = dungeonData.getDepthAtLocation(absLoc, this.placedSegmentsInWorld); // Pass placed segments
-            floorItemManager.spawnGenericItem(absLoc, teamId, dungeonData.getInstanceId(), depth);
+        plugin.getLogger().fine("Populating floor items for team " + teamId + " instance " + dungeonData.getInstanceId());
+        UUID instanceUUID = dungeonData.getInstanceId(); // Get instance ID for tracking items
+
+        // --- Populate Coins ---
+        List<Location> coinLocs = dungeonData.getCoinSpawnLocations();
+        if (coinLocs != null && !coinLocs.isEmpty()) {
+            plugin.getLogger().finer("Processing " + coinLocs.size() + " potential coin spawn locations.");
+            for (Location absLoc : coinLocs) {
+                if (absLoc == null) continue;
+                try {
+                    // Calculate depth for this location
+                    int depth = dungeonData.getDepthAtLocation(absLoc, this.placedSegmentsInWorld);
+                    // Calculate value based on depth (example formula)
+                    int baseValue = 5 + (depth / 2); // Increases by 1 every 2 depth levels, starting at 5
+                    // Call FloorItemManager to handle actual spawning (including rates if implemented there)
+                    floorItemManager.spawnCoinStack(absLoc, baseValue, teamId, instanceUUID, depth);
+                } catch (Exception e) {
+                    plugin.getLogger().log(Level.WARNING, "Error processing coin spawn at " + absLoc + " for team " + teamId, e);
+                }
+            }
+        } else {
+             plugin.getLogger().finer("No coin spawn locations found for team " + teamId);
         }
 
-        // Populate Sand (if handled as FloorItem)
-        // for (Location absLoc : dungeonData.getSandSpawnLocations()) { ... }
+        // --- Populate Generic Items ---
+        List<Location> itemLocs = dungeonData.getItemSpawnLocations();
+        if (itemLocs != null && !itemLocs.isEmpty()) {
+            plugin.getLogger().finer("Processing " + itemLocs.size() + " potential item spawn locations.");
+            for (Location absLoc : itemLocs) {
+                 if (absLoc == null) continue;
+                 try {
+                     int depth = dungeonData.getDepthAtLocation(absLoc, this.placedSegmentsInWorld);
+                     // FloorItemManager handles rates and loot tables internally
+                     floorItemManager.spawnGenericItem(absLoc, teamId, instanceUUID, depth);
+                 } catch (Exception e) {
+                     plugin.getLogger().log(Level.WARNING, "Error processing item spawn at " + absLoc + " for team " + teamId, e);
+                 }
+            }
+        } else {
+             plugin.getLogger().finer("No generic item spawn locations found for team " + teamId);
+        }
+
+        // --- Populate Sand (if handled as FloorItem with spawn rates) ---
+        List<Location> sandLocs = dungeonData.getSandSpawnLocations();
+        if (sandLocs != null && !sandLocs.isEmpty()) {
+             plugin.getLogger().finer("Processing " + sandLocs.size() + " potential sand spawn locations.");
+             for (Location absLoc : sandLocs) {
+                  if (absLoc == null) continue;
+                  try {
+                      int depth = dungeonData.getDepthAtLocation(absLoc, this.placedSegmentsInWorld);
+                      int amount = 5; // TODO: Get amount based on depth/segment or config?
+                      // FloorItemManager handles spawn rate check internally
+                      floorItemManager.spawnSandPile(absLoc, amount, teamId, instanceUUID, depth);
+                  } catch (Exception e) {
+                     plugin.getLogger().log(Level.WARNING, "Error processing sand spawn at " + absLoc + " for team " + teamId, e);
+                  }
+             }
+        } else {
+             plugin.getLogger().finer("No sand spawn locations found for team " + teamId);
+        }
 
         plugin.getLogger().fine("Finished populating floor items for team " + teamId);
     }
