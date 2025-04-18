@@ -3,11 +3,8 @@ package com.clarkson.sot.dungeon;
 // Local project imports
 import com.clarkson.sot.dungeon.segment.PlacedSegment;
 import com.clarkson.sot.dungeon.segment.Segment;
-import com.clarkson.sot.entities.Area;
-import com.clarkson.sot.dungeon.DoorManager; // Import DoorManager
 import com.clarkson.sot.events.FloorItemManager;
 import com.clarkson.sot.main.GameManager;
-import com.clarkson.sot.main.SoT; // Or just Plugin
 
 // Bukkit/WorldEdit imports
 import org.bukkit.Location;
@@ -52,7 +49,6 @@ public class DungeonManager {
 
     // --- Dependencies ---
     private final Plugin plugin;
-    private final GameManager gameManager;
     // Managers retrieved from GameManager
     private final VaultManager vaultManager;
     private final FloorItemManager floorItemManager;
@@ -86,7 +82,6 @@ public class DungeonManager {
                           @NotNull UUID teamId, @NotNull Location dungeonOrigin, @NotNull DungeonBlueprint blueprintData) {
 
         this.plugin = Objects.requireNonNull(plugin, "Plugin cannot be null");
-        this.gameManager = Objects.requireNonNull(gameManager, "GameManager cannot be null");
         this.vaultManager = Objects.requireNonNull(gameManager.getVaultManager(), "VaultManager cannot be null via GameManager");
         this.floorItemManager = Objects.requireNonNull(gameManager.getFloorItemManager(), "FloorItemManager cannot be null via GameManager");
         this.doorManager = Objects.requireNonNull(gameManager.getDoorManager(), "DoorManager cannot be null via GameManager");
