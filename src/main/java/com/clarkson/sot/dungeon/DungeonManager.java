@@ -3,6 +3,7 @@ package com.clarkson.sot.dungeon;
 // Local project imports
 import com.clarkson.sot.dungeon.segment.PlacedSegment;
 import com.clarkson.sot.dungeon.segment.Segment;
+import com.clarkson.sot.entities.Area;
 import com.clarkson.sot.events.FloorItemManager;
 import com.clarkson.sot.main.GameManager;
 
@@ -11,13 +12,15 @@ import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.World;
 import org.bukkit.block.Block;
+import org.bukkit.entity.Entity; // Import Entity
+import org.bukkit.entity.Player; // Import Player
 import org.bukkit.plugin.Plugin;
 import org.bukkit.util.Vector;
 import com.sk89q.worldedit.math.BlockVector3;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-// WorldEdit imports for pasting (Example - move to dedicated class later)
+// WorldEdit imports for pasting & cleanup
 import com.sk89q.worldedit.WorldEdit;
 import com.sk89q.worldedit.bukkit.BukkitAdapter;
 import com.sk89q.worldedit.extent.clipboard.Clipboard;
@@ -29,12 +32,15 @@ import com.sk89q.worldedit.EditSession;
 import com.sk89q.worldedit.function.operation.Operation;
 import com.sk89q.worldedit.function.operation.Operations;
 import com.sk89q.worldedit.WorldEditException;
+import com.sk89q.worldedit.regions.CuboidRegion; // Import CuboidRegion
+import com.sk89q.worldedit.regions.Region; // Import Region
+import com.sk89q.worldedit.world.block.BlockTypes; // Import BlockTypes
 
 
 // Java imports
-import java.io.File; // For schematic file path
-import java.io.FileInputStream; // For schematic reading
-import java.io.IOException; // For schematic reading
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.IOException;
 import java.util.*;
 import java.util.logging.Level;
 import java.util.stream.Collectors;
@@ -370,20 +376,95 @@ public class DungeonManager {
         return null;
     }
 
-    /** Removes the blocks and entities associated with this dungeon instance. */
+    /**
+     * Removes the blocks and entities associated with this dungeon instance.
+     * Clears the area using WorldEdit and removes non-player entities.
+     * Also clears state from associated managers.
+     */
     public void cleanupInstance() {
-         plugin.getLogger().info("Attempting cleanup for dungeon instance of team " + teamId);
-         // TODO: Implement cleanup logic (e.g., WorldEdit //set air over the bounds)
+         plugin.getLogger().info("Attempting cleanup for dungeon instance of team " + teamId + " at origin " + dungeonOrigin.toVector());
 
-         placedSegmentsInWorld.clear();
-         if (dungeonData != null) {
-             // Tell managers to clear state related to this teamId
-             vaultManager.clearTeamState(teamId);
-             doorManager.clearTeamState(teamId);
-             floorItemManager.clearTeamState(teamId);
-             dungeonData = null;
+         // Ensure we have the blueprint data to calculate bounds
+         if (blueprintData == null || dungeonData == null) { // Check dungeonData too, as it confirms successful init
+             plugin.getLogger().warning("Cannot cleanup instance for team " + teamId + ": Blueprint or Dungeon data is missing.");
+             // Still attempt to clear manager states
+             clearManagerStates();
+             return;
          }
+
+         // --- 1. Calculate Absolute Bounds ---
+         Area relativeBounds = blueprintData.getRelativeBounds();
+         Location absMinLoc = dungeonOrigin.clone().add(relativeBounds.getMinPoint().toVector());
+         Location absMaxLoc = dungeonOrigin.clone().add(relativeBounds.getMaxPoint().toVector());
+         plugin.getLogger().fine("Calculated absolute cleanup bounds: " + absMinLoc.toVector() + " to " + absMaxLoc.toVector());
+
+         // Adapt world and create WorldEdit region
+         com.sk89q.worldedit.world.World weWorld = BukkitAdapter.adapt(world);
+         BlockVector3 minBV3 = BukkitAdapter.asBlockVector(absMinLoc);
+         BlockVector3 maxBV3 = BukkitAdapter.asBlockVector(absMaxLoc);
+         Region cleanupRegion = new CuboidRegion(weWorld, minBV3, maxBV3);
+
+         // --- 2. Clear Blocks with WorldEdit ---
+         plugin.getLogger().info("Clearing blocks within dungeon bounds for team " + teamId);
+         try (EditSession editSession = WorldEdit.getInstance().newEditSessionBuilder()
+                 .world(weWorld)
+                 // Removed fastMode(true) as it is not a valid method
+                 .build()) {
+             // Set the entire region to air
+             editSession.setBlocks(cleanupRegion, BlockTypes.AIR.getDefaultState());
+             // Operations.complete(editSession); // Often not needed with try-with-resources flushing
+             plugin.getLogger().fine("WorldEdit block clearing operation completed for team " + teamId);
+         } catch (WorldEditException e) {
+             plugin.getLogger().log(Level.SEVERE, "WorldEditException during dungeon cleanup for team " + teamId, e);
+             // Continue cleanup even if block clearing fails? Or stop? For now, continue.
+         } catch (Exception e) {
+              plugin.getLogger().log(Level.SEVERE, "Unexpected error during WorldEdit cleanup for team " + teamId, e);
+         }
+
+         // --- 3. Remove Entities (Optional but recommended) ---
+         plugin.getLogger().info("Removing non-player entities within dungeon bounds for team " + teamId);
+         try {
+             // Get entities within the absolute bounding box
+             // Note: getNearbyEntities is often preferred over getEntitiesByBoundingBox for performance if available/suitable
+             Collection<Entity> entitiesInBounds = world.getNearbyEntities(
+                 new org.bukkit.util.BoundingBox(
+                     absMinLoc.getX(), absMinLoc.getY(), absMinLoc.getZ(),
+                     absMaxLoc.getX() + 1, absMaxLoc.getY() + 1, absMaxLoc.getZ() + 1 // Add 1 for inclusive check
+                 )
+             );
+
+             int removedCount = 0;
+             for (Entity entity : entitiesInBounds) {
+                 // IMPORTANT: Do NOT remove players!
+                 if (!(entity instanceof Player)) {
+                     // Optional: Add more filters? E.g., only remove Items, Monsters, specific marker types?
+                     entity.remove();
+                     removedCount++;
+                 }
+             }
+             plugin.getLogger().fine("Removed " + removedCount + " non-player entities for team " + teamId);
+         } catch (Exception e) {
+              plugin.getLogger().log(Level.SEVERE, "Error removing entities during cleanup for team " + teamId, e);
+         }
+
+
+         // --- 4. Clear Internal State and Manager States ---
+         clearManagerStates(); // Call helper to clear states
+
          plugin.getLogger().info("Cleanup logic finished for team " + teamId);
+     }
+
+     /** Helper method to clear internal state and notify managers */
+     private void clearManagerStates() {
+          placedSegmentsInWorld.clear();
+          if (dungeonData != null) { // Check if dungeonData was successfully created
+              // Tell managers to clear state related to this teamId
+              if (vaultManager != null) vaultManager.clearTeamState(teamId);
+              if (doorManager != null) doorManager.clearTeamState(teamId);
+              if (floorItemManager != null) floorItemManager.clearTeamState(teamId);
+              dungeonData = null; // Clear local reference
+          }
+          plugin.getLogger().fine("Cleared internal manager states for team " + teamId);
      }
 
 }
