@@ -3,8 +3,6 @@ package com.clarkson.sot.dungeon; // Assuming package
 import com.clarkson.sot.main.GameManager;
 import com.clarkson.sot.main.GameState;
 import com.clarkson.sot.main.SoT; // Assuming main plugin class
-import com.clarkson.sot.utils.SoTTeam; // May need for context
-import com.clarkson.sot.utils.TeamManager; // To get player's team
 
 // Adventure API Imports
 import net.kyori.adventure.text.Component;
@@ -17,7 +15,6 @@ import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.NamespacedKey;
-import org.bukkit.World;
 import org.bukkit.block.Block;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
@@ -30,7 +27,6 @@ import org.bukkit.inventory.PlayerInventory;
 import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.persistence.PersistentDataContainer;
 import org.bukkit.persistence.PersistentDataType;
-import org.bukkit.plugin.Plugin; // Use Plugin interface
 import org.bukkit.scheduler.BukkitRunnable;
 
 import java.util.*;
@@ -77,7 +73,6 @@ public class VaultManager implements Listener {
      */
     public void initializeForInstance(@Nonnull Dungeon dungeonData) {
         UUID teamId = dungeonData.getTeamId();
-        World world = dungeonData.getWorld();
         plugin.getLogger().info("Initializing vaults and keys for team instance: " + teamId);
         openVaultsByTeam.put(teamId, Collections.synchronizedSet(new HashSet<>()));
         for (Map.Entry<VaultColor, Location> entry : dungeonData.getVaultMarkerLocations().entrySet()) {
