@@ -159,7 +159,7 @@ public class SaveSegmentCommand implements CommandExecutor {
         // --- Create Segment Template (Basic - Missing complex data) ---
         Segment segmentTemplate;
         try {
-            // WARNING: Passing empty lists for entry/spawn points and null for vault/key info.
+            // TODO: Passing empty lists for entry/spawn points and null for vault/key info.
             // A real implementation needs to get this data, likely via in-game marking or more args.
             segmentTemplate = new Segment(
                     segmentName,
