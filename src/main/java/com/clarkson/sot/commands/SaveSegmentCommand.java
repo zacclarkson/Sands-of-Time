@@ -1,7 +1,6 @@
 package com.clarkson.sot.commands;
 
 import com.clarkson.sot.dungeon.segment.SegmentType;
-import com.clarkson.sot.dungeon.VaultColor;
 import com.clarkson.sot.dungeon.segment.Segment;
 import com.clarkson.sot.dungeon.segment.PlacedSegment;
 import com.clarkson.sot.main.SoT; // Your main plugin class
@@ -13,14 +12,14 @@ import com.sk89q.worldedit.bukkit.WorldEditPlugin;
 import com.sk89q.worldedit.math.BlockVector3;
 import com.sk89q.worldedit.regions.Region;
 import com.sk89q.worldedit.session.SessionManager;
-import com.sk89q.worldedit.session.SessionOwner;
+// Removed SessionOwner import as it's unused
 import com.sk89q.worldedit.IncompleteRegionException;
 import com.sk89q.worldedit.LocalSession;
 import com.sk89q.worldedit.WorldEdit;
 
 
 import org.bukkit.Bukkit;
-import org.bukkit.ChatColor;
+// Removed: import org.bukkit.ChatColor;
 import org.bukkit.Location;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
@@ -29,9 +28,14 @@ import org.bukkit.entity.Player;
 import org.bukkit.plugin.Plugin;
 import org.jetbrains.annotations.NotNull;
 
+// Adventure API Imports
+import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.format.NamedTextColor;
+
 import java.util.ArrayList; // For empty lists
 import java.util.List;
 import java.util.logging.Level;
+import java.util.stream.Collectors; // For joining segment type names
 
 /**
  * Command to save a selected structure as a new Segment template.
@@ -64,11 +68,13 @@ public class SaveSegmentCommand implements CommandExecutor {
     @Override
     public boolean onCommand(@NotNull CommandSender sender, @NotNull Command command, @NotNull String label, @NotNull String[] args) {
         if (!(sender instanceof Player)) {
-            sender.sendMessage(ChatColor.RED + "This command can only be run by a player.");
+            // Use Adventure Component for console message
+            sender.sendMessage(Component.text("This command can only be run by a player.", NamedTextColor.RED));
             return true;
         }
         if (worldEdit == null) {
-             sender.sendMessage(ChatColor.RED + "WorldEdit is not available. Cannot save segment.");
+             // Use Adventure Component for player message
+             sender.sendMessage(Component.text("WorldEdit is not available. Cannot save segment.", NamedTextColor.RED));
              return true;
         }
 
@@ -76,9 +82,12 @@ public class SaveSegmentCommand implements CommandExecutor {
 
         // --- Argument Parsing (Basic Example) ---
         if (args.length < 3) {
-            player.sendMessage(ChatColor.RED + "Usage: /" + label + " <name> <type> <schematic_filename> [totalCoins]");
-            player.sendMessage(ChatColor.GRAY + "Example: /" + label + " my_room CORRIDOR my_room.schem 50");
-            // TODO: List available SegmentTypes
+            // Send usage message using Adventure Components
+            player.sendMessage(Component.text("Usage: /" + label + " <name> <type> <schematic_filename> [totalCoins]", NamedTextColor.RED));
+            player.sendMessage(Component.text("Example: /" + label + " my_room CORRIDOR my_room.schem 50", NamedTextColor.GRAY));
+            // TODO: List available SegmentTypes using Adventure
+            player.sendMessage(Component.text("Available types: ", NamedTextColor.GRAY)
+                .append(Component.text(String.join(", ", getSegmentTypeNames()), NamedTextColor.WHITE)));
             return true;
         }
 
@@ -90,7 +99,8 @@ public class SaveSegmentCommand implements CommandExecutor {
             try {
                 totalCoins = Integer.parseInt(args[3]);
             } catch (NumberFormatException e) {
-                player.sendMessage(ChatColor.RED + "Invalid number for totalCoins: " + args[3]);
+                // Use Adventure Component for error message
+                player.sendMessage(Component.text("Invalid number for totalCoins: " + args[3], NamedTextColor.RED));
                 return true;
             }
         }
@@ -100,8 +110,10 @@ public class SaveSegmentCommand implements CommandExecutor {
         try {
             segmentType = SegmentType.valueOf(typeStr);
         } catch (IllegalArgumentException e) {
-            player.sendMessage(ChatColor.RED + "Invalid segment type: " + args[1]);
-            player.sendMessage(ChatColor.GRAY + "Valid types are: " + String.join(", ", getSegmentTypeNames())); // Helper needed
+            // Use Adventure Component for error message
+            player.sendMessage(Component.text("Invalid segment type: " + args[1], NamedTextColor.RED));
+            player.sendMessage(Component.text("Valid types are: ", NamedTextColor.GRAY)
+                .append(Component.text(String.join(", ", getSegmentTypeNames()), NamedTextColor.WHITE)));
             return true;
         }
 
@@ -109,7 +121,8 @@ public class SaveSegmentCommand implements CommandExecutor {
         if (!schematicFileName.toLowerCase().endsWith(".schem") && !schematicFileName.toLowerCase().endsWith(".schematic")) {
              // Allow both common extensions
              schematicFileName += ".schem"; // Append default if missing
-             player.sendMessage(ChatColor.YELLOW + "Appending '.schem' to schematic filename.");
+             // Use Adventure Component for info message
+             player.sendMessage(Component.text("Appending '.schem' to schematic filename.", NamedTextColor.YELLOW));
         }
 
         // --- Get WorldEdit Selection ---
@@ -133,11 +146,13 @@ public class SaveSegmentCommand implements CommandExecutor {
             size = max.subtract(min).add(1, 1, 1); // Size is max - min + 1
 
         } catch (IncompleteRegionException e) {
-            player.sendMessage(ChatColor.RED + "Your WorldEdit selection is incomplete. Please select two points.");
+            // Use Adventure Component for error message
+            player.sendMessage(Component.text("Your WorldEdit selection is incomplete. Please select two points.", NamedTextColor.RED));
             return true;
         } catch (Exception e) {
             plugin.getLogger().log(Level.SEVERE, "Error getting WorldEdit selection for " + player.getName(), e);
-            player.sendMessage(ChatColor.RED + "An error occurred while getting your WorldEdit selection.");
+            // Use Adventure Component for error message
+            player.sendMessage(Component.text("An error occurred while getting your WorldEdit selection.", NamedTextColor.RED));
             return true;
         }
 
@@ -163,7 +178,8 @@ public class SaveSegmentCommand implements CommandExecutor {
             );
         } catch (Exception e) {
              plugin.getLogger().log(Level.SEVERE, "Error creating Segment template object for " + segmentName, e);
-             player.sendMessage(ChatColor.RED + "An error occurred creating the segment template data.");
+             // Use Adventure Component for error message
+             player.sendMessage(Component.text("An error occurred creating the segment template data.", NamedTextColor.RED));
              return true;
         }
 
@@ -173,17 +189,22 @@ public class SaveSegmentCommand implements CommandExecutor {
         PlacedSegment placedSegment = new PlacedSegment(segmentTemplate, worldOrigin, 0);
 
         // --- Call StructureSaver ---
-        player.sendMessage(ChatColor.YELLOW + "Attempting to save segment '" + segmentName + "'...");
+        // Use Adventure Component for status message
+        player.sendMessage(Component.text("Attempting to save segment '" + segmentName + "'...", NamedTextColor.YELLOW));
         boolean success = structureSaver.saveStructure(placedSegment);
 
         if (success) {
-            player.sendMessage(ChatColor.GREEN + "Segment '" + segmentName + "' saved successfully!");
-            player.sendMessage(ChatColor.GREEN + "Schematic: " + schematicFileName);
-            player.sendMessage(ChatColor.GREEN + "Metadata: " + segmentName + ".json");
-            player.sendMessage(ChatColor.YELLOW + "Reload templates or restart server to use the new segment.");
+            // Use Adventure Components for success message
+            player.sendMessage(Component.text("Segment '" + segmentName + "' saved successfully!", NamedTextColor.GREEN));
+            player.sendMessage(Component.text("Schematic: ", NamedTextColor.GREEN)
+                .append(Component.text(schematicFileName, NamedTextColor.WHITE)));
+            player.sendMessage(Component.text("Metadata: ", NamedTextColor.GREEN)
+                .append(Component.text(segmentName + ".json", NamedTextColor.WHITE)));
+            player.sendMessage(Component.text("Reload templates or restart server to use the new segment.", NamedTextColor.YELLOW));
             // Consider adding automatic reloading if feasible
         } else {
-            player.sendMessage(ChatColor.RED + "Failed to save segment '" + segmentName + "'. Check console for errors.");
+            // Use Adventure Component for failure message
+            player.sendMessage(Component.text("Failed to save segment '" + segmentName + "'. Check console for errors.", NamedTextColor.RED));
         }
 
         return true;
@@ -191,10 +212,10 @@ public class SaveSegmentCommand implements CommandExecutor {
 
     // Helper to get enum names (replace with your actual enum path)
     private List<String> getSegmentTypeNames() {
-        List<String> names = new ArrayList<>();
-        for (SegmentType type : SegmentType.values()) {
-            names.add(type.name());
-        }
-        return names;
+        // Using streams for a slightly more modern approach
+        return List.of(SegmentType.values()) // Get all enum values
+                   .stream()                 // Create a stream
+                   .map(Enum::name)          // Map each enum value to its name (String)
+                   .collect(Collectors.toList()); // Collect the names into a List
     }
 }
