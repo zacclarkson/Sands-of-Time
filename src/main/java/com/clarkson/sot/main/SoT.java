@@ -15,12 +15,16 @@ import com.clarkson.sot.dungeon.DungeonGenerator;
 import com.clarkson.sot.dungeon.VaultManager;
 import com.clarkson.sot.scoring.BankingManager;
 import com.clarkson.sot.scoring.ScoreManager;
+import com.clarkson.sot.utils.BuilderSessionManager;
 import com.clarkson.sot.utils.PlayerStateManager;
 import com.clarkson.sot.utils.SandManager;
+import com.clarkson.sot.utils.SegmentBuilderKeys;
 import com.clarkson.sot.utils.StructureLoader;
 import com.clarkson.sot.utils.TeamManager;
 // Import Commands
-import com.clarkson.sot.commands.*;
+import com.clarkson.sot.commands.GiveBuilderToolCommand;
+import com.clarkson.sot.commands.SaveSegmentCommand;
+import com.clarkson.sot.commands.SetBuilderModeCommand;
 // Import Listeners
 import com.clarkson.sot.events.ToolListener;
 // Import Entities if needed for static init
@@ -101,18 +105,19 @@ public class SoT extends JavaPlugin {
         CoinStack.initializeKeys(this);
 
 
-        // --- Register Commands ---
-        // Pass necessary managers to commands that need them
-        this.getCommand("sotplacecoindisplay").setExecutor(new PlaceCoinDisplayCommand(this));
-        this.getCommand("sotgetcointool").setExecutor(new GiveCoinToolCommand());
-        this.getCommand("sotgetitemtool").setExecutor(new GiveItemToolCommand(this));
-        this.getCommand("sotgetentrytool").setExecutor(new GiveEntryPointToolCommand(this));
-        // this.getCommand("sotsavesegment").setExecutor(new SaveSegmentCommand(this)); // Needs StructureSaver instance
+        // --- Shared builder infrastructure ---
+        SegmentBuilderKeys builderKeys = new SegmentBuilderKeys(this);
+        BuilderSessionManager sessionManager = new BuilderSessionManager();
 
+        // --- Register Commands ---
+        ToolListener toolListener = new ToolListener(this, sessionManager, builderKeys);
+        this.getCommand("sotbuilder").setExecutor(new GiveBuilderToolCommand(this, builderKeys));
+        this.getCommand("sotmode").setExecutor(new SetBuilderModeCommand(this, sessionManager));
+        this.getCommand("sotsavesegment").setExecutor(new SaveSegmentCommand(this, builderKeys));
 
         // --- Register Listeners ---
-        getServer().getPluginManager().registerEvents(new ToolListener(this), this);
-        getServer().getPluginManager().registerEvents(vaultManager, this); // VaultManager handles vault interactions
+        getServer().getPluginManager().registerEvents(toolListener, this);
+        getServer().getPluginManager().registerEvents(vaultManager, this);
 
 
         getLogger().info("Sands of Time Enabled Successfully.");

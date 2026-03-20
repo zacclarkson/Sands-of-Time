@@ -45,28 +45,40 @@ public class Segment {
     @Nullable private final BlockVector3 vaultLocationOffset; // Relative position of the vault marker block, if containedVault is not null
     @Nullable private final BlockVector3 keyLocationOffset;   // Relative position of the key spawn, if containedVaultKey is not null
 
+    // --- Structural Openings & Interactive Features ---
+    @Nullable private final SegmentBound vaultDoorBound;         // 2D bounds of the vault door opening (null if no vault door)
+    private final List<SegmentBound> gates;                      // 2D bounds of gate openings (may be empty)
+    @Nullable private final BlockVector3 leverOffset;            // Relative position of the gate lever (required when gates is non-empty)
+    private final List<BlockVector3> sandSacrificeLocations;     // Relative positions of sand sacrifice altars
+    private final List<BlockVector3> mobSpawnerLocations;        // Relative positions of mob spawner blocks
+
 
     /**
      * Constructor for creating a Segment template.
      * Values are typically loaded from JSON metadata.
      *
-     * @param name                Unique name of the segment template.
-     * @param type                General category/type of the segment (e.g., HUB, PUZZLE_ROOM).
-     * @param schematicFileName   Filename of the associated schematic (e.g., "my_segment.schem").
-     * @param size                Dimensions (width, height, length) of the segment.
-     * @param entryPoints         List of entry points with relative positions and directions.
-     * @param sandSpawnLocations  List of relative spawn locations for sand.
-     * @param itemSpawnLocations  List of relative spawn locations for items.
-     * @param coinSpawnLocations  List of relative spawn locations for coins.
-     * @param totalCoins          Approximate total base coin value in the segment.
-     * @param containedVault      The color of the vault entrance within this segment, or null.
-     * @param containedVaultKey   The color of the vault key found within this segment, or null.
-     * @param vaultLocationOffset Relative offset (from segment origin) of the vault marker block, if containedVault is not null.
-     * @param keyLocationOffset   Relative offset (from segment origin) of the key spawn location, if containedVaultKey is not null.
+     * @param name                   Unique name of the segment template.
+     * @param type                   General category/type of the segment (e.g., HUB, PUZZLE_ROOM).
+     * @param schematicFileName      Filename of the associated schematic (e.g., "my_segment.schem").
+     * @param size                   Dimensions (width, height, length) of the segment.
+     * @param entryPoints            List of entry points with relative positions and directions.
+     * @param sandSpawnLocations     List of relative spawn locations for sand.
+     * @param itemSpawnLocations     List of relative spawn locations for items.
+     * @param coinSpawnLocations     List of relative spawn locations for coins.
+     * @param totalCoins             Approximate total base coin value in the segment.
+     * @param containedVault         The color of the vault entrance within this segment, or null.
+     * @param containedVaultKey      The color of the vault key found within this segment, or null.
+     * @param vaultLocationOffset    Relative offset of the vault marker block, or null.
+     * @param keyLocationOffset      Relative offset of the key spawn location, or null.
+     * @param vaultDoorBound         2D bounds of the vault door opening, or null.
+     * @param gates                  List of 2D bounds for gate openings.
+     * @param leverOffset            Relative offset of the gate lever block (required when gates non-empty).
+     * @param sandSacrificeLocations List of relative positions of sand sacrifice altars.
+     * @param mobSpawnerLocations    List of relative positions of mob spawner blocks.
      */
     public Segment(
             @NotNull String name,
-            @Nullable SegmentType type, // Type is now crucial
+            @Nullable SegmentType type,
             @NotNull String schematicFileName,
             @NotNull BlockVector3 size,
             @NotNull List<RelativeEntryPoint> entryPoints,
@@ -77,7 +89,12 @@ public class Segment {
             @Nullable VaultColor containedVault,
             @Nullable VaultColor containedVaultKey,
             @Nullable BlockVector3 vaultLocationOffset,
-            @Nullable BlockVector3 keyLocationOffset
+            @Nullable BlockVector3 keyLocationOffset,
+            @Nullable SegmentBound vaultDoorBound,
+            @NotNull List<SegmentBound> gates,
+            @Nullable BlockVector3 leverOffset,
+            @NotNull List<BlockVector3> sandSacrificeLocations,
+            @NotNull List<BlockVector3> mobSpawnerLocations
     ) {
         // --- Basic Validation ---
         Objects.requireNonNull(name, "Segment name cannot be null");
@@ -101,7 +118,7 @@ public class Segment {
 
         // --- Assign Fields ---
         this.name = name;
-        this.type = type; // Assign the crucial type
+        this.type = type;
         this.schematicFileName = schematicFileName;
         this.size = size;
         this.entryPoints = new ArrayList<>(entryPoints);
@@ -109,14 +126,19 @@ public class Segment {
         this.itemSpawnLocations = new ArrayList<>(itemSpawnLocations);
         this.coinSpawnLocations = new ArrayList<>(coinSpawnLocations);
         this.totalCoins = totalCoins;
-        // Removed assignments for: coinMultiplier, isHub, isPuzzleRoom, isLavaParkour
 
-        // Assign Metadata Fields
+        // Vault / key metadata
         this.containedVault = containedVault;
         this.containedVaultKey = containedVaultKey;
-        // Assign Offset Fields
         this.vaultLocationOffset = vaultLocationOffset;
         this.keyLocationOffset = keyLocationOffset;
+
+        // Structural openings & interactive features
+        this.vaultDoorBound = vaultDoorBound;
+        this.gates = new ArrayList<>(gates);
+        this.leverOffset = leverOffset;
+        this.sandSacrificeLocations = new ArrayList<>(sandSacrificeLocations);
+        this.mobSpawnerLocations = new ArrayList<>(mobSpawnerLocations);
     }
 
     // --- Getters for Core Info ---
@@ -162,6 +184,13 @@ public class Segment {
     }
 
 
+    // --- Getters for Structural Openings & Interactive Features ---
+    @Nullable public SegmentBound getVaultDoorBound() { return vaultDoorBound; }
+    @NotNull  public List<SegmentBound> getGates() { return Collections.unmodifiableList(gates); }
+    @Nullable public BlockVector3 getLeverOffset() { return leverOffset; }
+    @NotNull  public List<BlockVector3> getSandSacrificeLocations() { return Collections.unmodifiableList(sandSacrificeLocations); }
+    @NotNull  public List<BlockVector3> getMobSpawnerLocations() { return Collections.unmodifiableList(mobSpawnerLocations); }
+
     // --- Template-related Logic ---
     public boolean hasEntryPointInDirection(@NotNull Direction dir) {
         Objects.requireNonNull(dir, "Direction cannot be null");
@@ -197,15 +226,19 @@ public class Segment {
 
     @Override
     public String toString() {
-        // Updated toString to remove deleted fields
         return "Segment{" +
                 "name='" + name + '\'' +
-                ", type=" + type + // Type is now primary descriptor
+                ", type=" + type +
                 ", schematic='" + schematicFileName + '\'' +
                 ", size=" + size +
                 ", entryPoints=" + entryPoints.size() +
                 ", vault=" + containedVault + (vaultLocationOffset != null ? "@" + vaultLocationOffset : "") +
                 ", key=" + containedVaultKey + (keyLocationOffset != null ? "@" + keyLocationOffset : "") +
+                ", vaultDoor=" + vaultDoorBound +
+                ", gates=" + gates.size() +
+                (leverOffset != null ? ", lever@" + leverOffset : "") +
+                ", sandSacrifice=" + sandSacrificeLocations.size() +
+                ", mobSpawners=" + mobSpawnerLocations.size() +
                 '}';
     }
 

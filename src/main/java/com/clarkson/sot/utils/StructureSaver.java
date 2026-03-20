@@ -1,11 +1,12 @@
 package com.clarkson.sot.utils;
 
 // Local project imports
-import com.clarkson.sot.dungeon.segment.*; // Import SegmentType if needed by Segment
-import com.clarkson.sot.dungeon.VaultColor; // Import VaultColor if needed by Segment
+import com.clarkson.sot.dungeon.segment.*;
+import com.clarkson.sot.dungeon.VaultColor;
 import com.clarkson.sot.dungeon.segment.PlacedSegment;
 import com.clarkson.sot.dungeon.segment.Segment;
 import com.clarkson.sot.dungeon.segment.Segment.RelativeEntryPoint;
+import com.clarkson.sot.dungeon.segment.SegmentBound;
 
 // WorldEdit imports
 import com.sk89q.worldedit.EditSession;
@@ -24,7 +25,8 @@ import com.sk89q.worldedit.world.World; // WorldEdit World
 // Bukkit imports
 import org.bukkit.Location;
 import org.bukkit.plugin.Plugin;
-import org.jetbrains.annotations.Nullable; // For nullable checks
+import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
 // Gson imports
 import com.google.gson.*;
@@ -343,6 +345,19 @@ public class StructureSaver {
                 json.add("keyLocationOffset", serializeBlockVector3(keyOffset));
             }
 
+            // --- Serialize structural openings & interactive features ---
+            SegmentBound vaultDoorBound = segmentTemplate.getVaultDoorBound();
+            if (vaultDoorBound != null) {
+                json.add("vaultDoorBound", serializeSegmentBound(vaultDoorBound));
+            }
+            json.add("gates", serializeSegmentBoundList(segmentTemplate.getGates(), segmentName));
+            BlockVector3 leverOffset = segmentTemplate.getLeverOffset();
+            if (leverOffset != null) {
+                json.add("leverOffset", serializeBlockVector3(leverOffset));
+            }
+            json.add("sandSacrificeLocations", serializeBlockVectorList(segmentTemplate.getSandSacrificeLocations(), "sandSacrificeLocations", segmentName));
+            json.add("mobSpawnerLocations", serializeBlockVectorList(segmentTemplate.getMobSpawnerLocations(), "mobSpawnerLocations", segmentName));
+
             return json;
 
         } catch (Exception e) {
@@ -392,6 +407,27 @@ public class StructureSaver {
             }
         }
         return jsonArray;
+    }
+
+    private JsonObject serializeSegmentBound(@NotNull SegmentBound bound) {
+        JsonObject obj = new JsonObject();
+        obj.add("min", serializeBlockVector3(bound.getRelativeMin()));
+        obj.add("max", serializeBlockVector3(bound.getRelativeMax()));
+        return obj;
+    }
+
+    private JsonArray serializeSegmentBoundList(@Nullable List<SegmentBound> bounds, String segmentName) {
+        JsonArray arr = new JsonArray();
+        if (bounds != null) {
+            for (SegmentBound b : bounds) {
+                if (b != null) {
+                    arr.add(serializeSegmentBound(b));
+                } else {
+                    plugin.getLogger().warning("[StructureSaver] Skipping null SegmentBound in list for: " + segmentName);
+                }
+            }
+        }
+        return arr;
     }
 
     // sanitizeFileName remains the same

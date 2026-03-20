@@ -1,10 +1,11 @@
 package com.clarkson.sot.utils;
 
 // Local project imports
-import com.clarkson.sot.dungeon.segment.*; // Import SegmentType
-import com.clarkson.sot.dungeon.VaultColor; // Import VaultColor
+import com.clarkson.sot.dungeon.segment.*;
+import com.clarkson.sot.dungeon.VaultColor;
 import com.clarkson.sot.dungeon.segment.Segment;
 import com.clarkson.sot.dungeon.segment.Segment.RelativeEntryPoint;
+import com.clarkson.sot.dungeon.segment.SegmentBound;
 
 // WorldEdit imports
 import com.sk89q.worldedit.math.BlockVector3;
@@ -163,24 +164,41 @@ public class StructureLoader {
                  keyLocationOffset = deserializeBlockVector3(json.getAsJsonObject("keyLocationOffset"), "keyLocationOffset", name, sourceFileName);
             }
 
+            // --- Deserialize structural openings & interactive features ---
+            SegmentBound vaultDoorBound = null;
+            if (json.has("vaultDoorBound") && json.get("vaultDoorBound").isJsonObject()) {
+                vaultDoorBound = deserializeSegmentBound(json.getAsJsonObject("vaultDoorBound"), "vaultDoorBound", name, sourceFileName);
+            }
+            List<SegmentBound> gates = deserializeSegmentBoundList(json.getAsJsonArray("gates"), "gates", name, sourceFileName);
+
+            BlockVector3 leverOffset = null;
+            if (json.has("leverOffset") && json.get("leverOffset").isJsonObject()) {
+                leverOffset = deserializeBlockVector3(json.getAsJsonObject("leverOffset"), "leverOffset", name, sourceFileName);
+            }
+
+            List<BlockVector3> sandSacrifice = deserializeBlockVectorList(json.getAsJsonArray("sandSacrificeLocations"), "sandSacrificeLocations", name, sourceFileName);
+            List<BlockVector3> mobSpawners   = deserializeBlockVectorList(json.getAsJsonArray("mobSpawnerLocations"), "mobSpawnerLocations", name, sourceFileName);
+
             // --- Construct the Segment Template Object ---
-            // Ensure this call matches the LATEST Segment constructor signature EXACTLY
             return new Segment(
                     name,
-                    type, // Pass the parsed SegmentType
+                    type,
                     schematicFileName,
                     size,
-                    // Provide empty lists if deserialization returned null (though helpers return empty lists now)
                     entryPoints != null ? entryPoints : new ArrayList<>(),
-                    sandSpawns != null ? sandSpawns : new ArrayList<>(),
-                    itemSpawns != null ? itemSpawns : new ArrayList<>(),
-                    coinSpawns != null ? coinSpawns : new ArrayList<>(),
-                    totalCoins != null ? totalCoins : 0, // Default totalCoins to 0 if missing/invalid
-                    // Removed arguments for: coinMultiplier, isHub, isPuzzleRoom, isLavaParkour
-                    containedVault,      // Can be null
-                    containedVaultKey,   // Can be null
-                    vaultLocationOffset, // Can be null
-                    keyLocationOffset    // Can be null
+                    sandSpawns  != null ? sandSpawns  : new ArrayList<>(),
+                    itemSpawns  != null ? itemSpawns  : new ArrayList<>(),
+                    coinSpawns  != null ? coinSpawns  : new ArrayList<>(),
+                    totalCoins  != null ? totalCoins  : 0,
+                    containedVault,
+                    containedVaultKey,
+                    vaultLocationOffset,
+                    keyLocationOffset,
+                    vaultDoorBound,
+                    gates,
+                    leverOffset,
+                    sandSacrifice,
+                    mobSpawners
             );
 
         } catch (JsonParseException | IllegalStateException | ClassCastException | NullPointerException e) {
@@ -311,6 +329,36 @@ public class StructureLoader {
             } // Error logged in deserializeBlockVector3 if null
         }
         return vectors;
+    }
+
+    /**
+     * Deserializes a JSON object representing a SegmentBound (min + max BlockVector3).
+     * Expected format: {"min": {"x":0,"y":0,"z":0}, "max": {"x":5,"y":3,"z":0}}
+     */
+    @Nullable
+    private SegmentBound deserializeSegmentBound(@Nullable JsonObject boundJson, String context, String segmentName, String sourceFileName) {
+        if (boundJson == null) return null;
+        BlockVector3 min = deserializeBlockVector3(boundJson.get("min"), context + ".min", segmentName, sourceFileName);
+        BlockVector3 max = deserializeBlockVector3(boundJson.get("max"), context + ".max", segmentName, sourceFileName);
+        if (min == null || max == null) {
+            plugin.getLogger().warning("[StructureLoader] Invalid SegmentBound (missing min or max) for '" + context + "' in template '" + segmentName + "' from " + sourceFileName);
+            return null;
+        }
+        return new SegmentBound(min, max);
+    }
+
+    private List<SegmentBound> deserializeSegmentBoundList(@Nullable JsonElement arrayElement, String listName, String segmentName, String sourceFileName) {
+        List<SegmentBound> bounds = new ArrayList<>();
+        if (arrayElement == null || !arrayElement.isJsonArray()) return bounds;
+        JsonArray arr = arrayElement.getAsJsonArray();
+        for (int i = 0; i < arr.size(); i++) {
+            JsonElement el = arr.get(i);
+            if (el != null && el.isJsonObject()) {
+                SegmentBound bound = deserializeSegmentBound(el.getAsJsonObject(), listName + "[" + i + "]", segmentName, sourceFileName);
+                if (bound != null) bounds.add(bound);
+            }
+        }
+        return bounds;
     }
 
     /**

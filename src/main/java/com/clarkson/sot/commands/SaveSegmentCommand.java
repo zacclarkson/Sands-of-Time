@@ -1,221 +1,322 @@
 package com.clarkson.sot.commands;
 
-import com.clarkson.sot.dungeon.segment.SegmentType;
+import com.clarkson.sot.dungeon.segment.Direction;
 import com.clarkson.sot.dungeon.segment.Segment;
+import com.clarkson.sot.dungeon.segment.SegmentBound;
+import com.clarkson.sot.dungeon.segment.SegmentType;
 import com.clarkson.sot.dungeon.segment.PlacedSegment;
-import com.clarkson.sot.main.SoT; // Your main plugin class
+import com.clarkson.sot.events.ToolListener;
+import com.clarkson.sot.main.SoT;
+import com.clarkson.sot.utils.SegmentBuilderKeys;
 import com.clarkson.sot.utils.StructureSaver;
 
-// WorldEdit imports
+import com.sk89q.worldedit.IncompleteRegionException;
+import com.sk89q.worldedit.LocalSession;
+import com.sk89q.worldedit.WorldEdit;
 import com.sk89q.worldedit.bukkit.BukkitAdapter;
 import com.sk89q.worldedit.bukkit.WorldEditPlugin;
 import com.sk89q.worldedit.math.BlockVector3;
 import com.sk89q.worldedit.regions.Region;
 import com.sk89q.worldedit.session.SessionManager;
-// Removed SessionOwner import as it's unused
-import com.sk89q.worldedit.IncompleteRegionException;
-import com.sk89q.worldedit.LocalSession;
-import com.sk89q.worldedit.WorldEdit;
 
+import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.format.NamedTextColor;
 
 import org.bukkit.Bukkit;
-// Removed: import org.bukkit.ChatColor;
 import org.bukkit.Location;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.CommandSender;
+import org.bukkit.entity.BlockDisplay;
+import org.bukkit.entity.Entity;
 import org.bukkit.entity.Player;
+import org.bukkit.persistence.PersistentDataContainer;
+import org.bukkit.persistence.PersistentDataType;
 import org.bukkit.plugin.Plugin;
+import org.bukkit.util.BoundingBox;
 import org.jetbrains.annotations.NotNull;
 
-// Adventure API Imports
-import net.kyori.adventure.text.Component;
-import net.kyori.adventure.text.format.NamedTextColor;
-
-import java.util.ArrayList; // For empty lists
+import java.util.ArrayList;
+import java.util.Collection;
 import java.util.List;
 import java.util.logging.Level;
-import java.util.stream.Collectors; // For joining segment type names
+import java.util.stream.Collectors;
 
 /**
- * Command to save a selected structure as a new Segment template.
- * Usage: /sotsavesegment <name> <type> <schematic_filename> [totalCoins]
- * NOTE: This is a basic example. It does NOT handle parsing entry points,
- * spawn points, or vault/key locations from arguments, which is complex.
- * An in-game marking tool is recommended for those features.
+ * /sotsavesegment <name> <type> [totalCoins]
+ *
+ * Reads all BUILD_MARKER_TAG entities within the current WorldEdit selection,
+ * converts their absolute positions to relative offsets, and saves the segment.
+ * Schematic filename is auto-generated as <name>.schem.
  */
 public class SaveSegmentCommand implements CommandExecutor {
 
     private final SoT plugin;
     private final StructureSaver structureSaver;
     private final WorldEditPlugin worldEdit;
+    private final SegmentBuilderKeys keys;
 
-    public SaveSegmentCommand(SoT plugin) {
+    public SaveSegmentCommand(SoT plugin, SegmentBuilderKeys keys) {
         this.plugin = plugin;
-        this.structureSaver = new StructureSaver(plugin); // Instantiate the saver
+        this.keys = keys;
+        this.structureSaver = new StructureSaver(plugin);
 
-        // Get WorldEdit plugin instance
         Plugin wep = Bukkit.getServer().getPluginManager().getPlugin("WorldEdit");
-        if (wep instanceof WorldEditPlugin) {
-            this.worldEdit = (WorldEditPlugin) wep;
+        if (wep instanceof WorldEditPlugin we) {
+            this.worldEdit = we;
         } else {
             this.worldEdit = null;
-            plugin.getLogger().severe("WorldEdit plugin not found or is not the correct type! /sotsavesegment will not work.");
-            // Disable the command or handle appropriately
+            plugin.getLogger().severe("WorldEdit not found — /sotsavesegment will not work.");
         }
     }
 
     @Override
     public boolean onCommand(@NotNull CommandSender sender, @NotNull Command command, @NotNull String label, @NotNull String[] args) {
-        if (!(sender instanceof Player)) {
-            // Use Adventure Component for console message
-            sender.sendMessage(Component.text("This command can only be run by a player.", NamedTextColor.RED));
+        if (!(sender instanceof Player player)) {
+            sender.sendMessage(Component.text("Players only.", NamedTextColor.RED));
             return true;
         }
         if (worldEdit == null) {
-             // Use Adventure Component for player message
-             sender.sendMessage(Component.text("WorldEdit is not available. Cannot save segment.", NamedTextColor.RED));
-             return true;
+            player.sendMessage(Component.text("WorldEdit is not available.", NamedTextColor.RED));
+            return true;
         }
-
-        Player player = (Player) sender;
-
-        // --- Argument Parsing (Basic Example) ---
-        if (args.length < 3) {
-            // Send usage message using Adventure Components
-            player.sendMessage(Component.text("Usage: /" + label + " <name> <type> <schematic_filename> [totalCoins]", NamedTextColor.RED));
-            player.sendMessage(Component.text("Example: /" + label + " my_room CORRIDOR my_room.schem 50", NamedTextColor.GRAY));
-            // TODO: List available SegmentTypes using Adventure
-            player.sendMessage(Component.text("Available types: ", NamedTextColor.GRAY)
-                .append(Component.text(String.join(", ", getSegmentTypeNames()), NamedTextColor.WHITE)));
+        if (args.length < 2) {
+            player.sendMessage(Component.text("Usage: /" + label + " <name> <type> [totalCoins]", NamedTextColor.RED));
+            player.sendMessage(Component.text("Types: " + getTypeNames(), NamedTextColor.GRAY));
             return true;
         }
 
         String segmentName = args[0];
-        String typeStr = args[1].toUpperCase();
-        String schematicFileName = args[2];
+        SegmentType segmentType;
+        try {
+            segmentType = SegmentType.valueOf(args[1].toUpperCase());
+        } catch (IllegalArgumentException e) {
+            player.sendMessage(Component.text("Invalid type: " + args[1] + ". Valid: " + getTypeNames(), NamedTextColor.RED));
+            return true;
+        }
+
         int totalCoins = 0;
-        if (args.length >= 4) {
+        if (args.length >= 3) {
             try {
-                totalCoins = Integer.parseInt(args[3]);
+                totalCoins = Integer.parseInt(args[2]);
             } catch (NumberFormatException e) {
-                // Use Adventure Component for error message
-                player.sendMessage(Component.text("Invalid number for totalCoins: " + args[3], NamedTextColor.RED));
+                player.sendMessage(Component.text("Invalid number for totalCoins: " + args[2], NamedTextColor.RED));
                 return true;
             }
         }
 
-        // Validate SegmentType
-        SegmentType segmentType;
-        try {
-            segmentType = SegmentType.valueOf(typeStr);
-        } catch (IllegalArgumentException e) {
-            // Use Adventure Component for error message
-            player.sendMessage(Component.text("Invalid segment type: " + args[1], NamedTextColor.RED));
-            player.sendMessage(Component.text("Valid types are: ", NamedTextColor.GRAY)
-                .append(Component.text(String.join(", ", getSegmentTypeNames()), NamedTextColor.WHITE)));
-            return true;
-        }
-
-        // Validate schematic filename format (basic)
-        if (!schematicFileName.toLowerCase().endsWith(".schem") && !schematicFileName.toLowerCase().endsWith(".schematic")) {
-             // Allow both common extensions
-             schematicFileName += ".schem"; // Append default if missing
-             // Use Adventure Component for info message
-             player.sendMessage(Component.text("Appending '.schem' to schematic filename.", NamedTextColor.YELLOW));
-        }
-
-        // --- Get WorldEdit Selection ---
+        // --- Get WorldEdit selection ---
         Region selection;
-        Location worldOrigin; // Absolute minimum point of the selection
+        Location worldOrigin;
         BlockVector3 size;
+        BlockVector3 selMin;
 
         try {
-            // Adapt player for WorldEdit session
-             com.sk89q.worldedit.entity.Player wePlayer = BukkitAdapter.adapt(player);
-             SessionManager sessionManager = WorldEdit.getInstance().getSessionManager();
-             LocalSession localSession = sessionManager.get(wePlayer);
+            com.sk89q.worldedit.entity.Player wePlayer = BukkitAdapter.adapt(player);
+            SessionManager sessionManager = WorldEdit.getInstance().getSessionManager();
+            LocalSession localSession = sessionManager.get(wePlayer);
+            selection = localSession.getSelection(wePlayer.getWorld());
 
-            // Get the selection from the player's session
-            selection = localSession.getSelection(wePlayer.getWorld()); // Pass world context
-            worldOrigin = BukkitAdapter.adapt(player.getWorld(), selection.getMinimumPoint()); // Convert WE min point to Bukkit Location
-
-            // Calculate size
             BlockVector3 min = selection.getMinimumPoint();
             BlockVector3 max = selection.getMaximumPoint();
-            size = max.subtract(min).add(1, 1, 1); // Size is max - min + 1
-
+            selMin = min;
+            worldOrigin = BukkitAdapter.adapt(player.getWorld(), min);
+            size = max.subtract(min).add(1, 1, 1);
         } catch (IncompleteRegionException e) {
-            // Use Adventure Component for error message
-            player.sendMessage(Component.text("Your WorldEdit selection is incomplete. Please select two points.", NamedTextColor.RED));
+            player.sendMessage(Component.text("WorldEdit selection is incomplete. Select two points first.", NamedTextColor.RED));
             return true;
         } catch (Exception e) {
-            plugin.getLogger().log(Level.SEVERE, "Error getting WorldEdit selection for " + player.getName(), e);
-            // Use Adventure Component for error message
-            player.sendMessage(Component.text("An error occurred while getting your WorldEdit selection.", NamedTextColor.RED));
+            plugin.getLogger().log(Level.SEVERE, "Error getting WorldEdit selection", e);
+            player.sendMessage(Component.text("Error reading WorldEdit selection.", NamedTextColor.RED));
             return true;
         }
 
-        // --- Create Segment Template (Basic - Missing complex data) ---
+        // --- Scan all build markers within the selection ---
+        BoundingBox bb = new BoundingBox(
+            selMin.x(), selMin.y(), selMin.z(),
+            selMin.x() + size.x(), selMin.y() + size.y(), selMin.z() + size.z()
+        );
+        Collection<Entity> nearby = player.getWorld().getNearbyEntities(bb);
+
+        List<Segment.RelativeEntryPoint> entryPoints   = new ArrayList<>();
+        List<BlockVector3>               coinSpawns     = new ArrayList<>();
+        List<BlockVector3>               itemSpawns     = new ArrayList<>();
+        List<BlockVector3>               sandSpawns     = new ArrayList<>();
+        List<BlockVector3>               sandSacrifices = new ArrayList<>();
+        List<BlockVector3>               mobSpawners    = new ArrayList<>();
+        List<SegmentBound>               gates          = new ArrayList<>();
+        SegmentBound                     vaultDoorBound = null;
+        BlockVector3                     leverOffset    = null;
+
+        for (Entity entity : nearby) {
+            if (!(entity instanceof BlockDisplay)) continue;
+            PersistentDataContainer pdc = entity.getPersistentDataContainer();
+            if (!pdc.has(keys.BUILD_MARKER_TAG, PersistentDataType.BYTE)) continue;
+
+            String type = pdc.get(keys.MARKER_TYPE, PersistentDataType.STRING);
+            if (type == null) continue;
+
+            // Skip purely visual entities — they carry no data
+            if (ToolListener.MT_BOUND_VISUAL.equals(type) || ToolListener.MT_BOUND_TEMP.equals(type)) continue;
+
+            BlockVector3 relPos = toRelative(entity.getLocation(), selMin);
+
+            switch (type) {
+                case ToolListener.MT_ENTRYPOINT -> {
+                    String dirStr = pdc.get(keys.DIRECTION, PersistentDataType.STRING);
+                    if (dirStr != null) {
+                        try {
+                            Direction dir = Direction.valueOf(dirStr);
+                            entryPoints.add(new Segment.RelativeEntryPoint(relPos, dir));
+                        } catch (IllegalArgumentException ex) {
+                            plugin.getLogger().warning("[SaveSegment] Unknown direction '" + dirStr + "' on entry point marker, skipping.");
+                        }
+                    }
+                }
+                case ToolListener.MT_COIN_SPAWN     -> coinSpawns.add(relPos);
+                case ToolListener.MT_ITEM_SPAWN     -> itemSpawns.add(relPos);
+                case ToolListener.MT_SAND_SPAWN     -> sandSpawns.add(relPos);
+                case ToolListener.MT_SAND_SACRIFICE -> sandSacrifices.add(relPos);
+                case ToolListener.MT_MOB_SPAWNER    -> mobSpawners.add(relPos);
+                case ToolListener.MT_LEVER          -> {
+                    if (leverOffset != null) {
+                        player.sendMessage(Component.text("Warning: multiple lever markers found — using the first.", NamedTextColor.YELLOW));
+                    } else {
+                        leverOffset = relPos;
+                    }
+                }
+                case ToolListener.MT_VAULT_DOOR -> {
+                    SegmentBound bound = readBound(pdc, selMin);
+                    if (bound != null) {
+                        if (vaultDoorBound != null) {
+                            player.sendMessage(Component.text("Warning: multiple vault door bounds found — using the first.", NamedTextColor.YELLOW));
+                        } else {
+                            vaultDoorBound = bound;
+                        }
+                    }
+                }
+                case ToolListener.MT_GATE -> {
+                    SegmentBound bound = readBound(pdc, selMin);
+                    if (bound != null) gates.add(bound);
+                }
+            }
+        }
+
+        // --- Validate gate ↔ lever constraint ---
+        if (!gates.isEmpty() && leverOffset == null) {
+            player.sendMessage(Component.text(
+                "Save failed: this segment has " + gates.size() + " gate(s) but no lever marker. Place a lever marker first.",
+                NamedTextColor.RED));
+            return true;
+        }
+        if (gates.isEmpty() && leverOffset != null) {
+            player.sendMessage(Component.text(
+                "Warning: lever marker found but no gates. Lever offset will be saved but may be unused.", NamedTextColor.YELLOW));
+        }
+
+        // --- Build summary feedback ---
+        player.sendMessage(Component.text("─── Segment Marker Summary ───", NamedTextColor.GOLD));
+        player.sendMessage(summary("Entry Points",    entryPoints.size()));
+        player.sendMessage(summary("Coin Spawns",     coinSpawns.size()));
+        player.sendMessage(summary("Item Spawns",     itemSpawns.size()));
+        player.sendMessage(summary("Sand Spawns",     sandSpawns.size()));
+        player.sendMessage(summary("Sand Sacrifices", sandSacrifices.size()));
+        player.sendMessage(summary("Mob Spawners",    mobSpawners.size()));
+        player.sendMessage(summary("Gates",           gates.size()));
+        player.sendMessage(Component.text("  Vault Door: ", NamedTextColor.GRAY)
+            .append(Component.text(vaultDoorBound != null ? "yes" : "none", vaultDoorBound != null ? NamedTextColor.GREEN : NamedTextColor.DARK_GRAY)));
+        player.sendMessage(Component.text("  Lever: ", NamedTextColor.GRAY)
+            .append(Component.text(leverOffset != null ? "yes" : "none", leverOffset != null ? NamedTextColor.GREEN : NamedTextColor.DARK_GRAY)));
+
+        // --- Construct Segment ---
+        String schematicFileName = segmentName.replaceAll("[^a-zA-Z0-9_.-]", "_") + ".schem";
+
         Segment segmentTemplate;
         try {
-            // TODO: Passing empty lists for entry/spawn points and null for vault/key info.
-            // A real implementation needs to get this data, likely via in-game marking or more args.
             segmentTemplate = new Segment(
-                    segmentName,
-                    segmentType,
-                    schematicFileName,
-                    size,
-                    new ArrayList<>(), // Empty Entry Points - NEEDS IMPLEMENTATION
-                    new ArrayList<>(), // Empty Sand Spawns - NEEDS IMPLEMENTATION
-                    new ArrayList<>(), // Empty Item Spawns - NEEDS IMPLEMENTATION
-                    new ArrayList<>(), // Empty Coin Spawns - NEEDS IMPLEMENTATION
-                    totalCoins,
-                    null, // No contained vault - NEEDS IMPLEMENTATION
-                    null, // No contained key - NEEDS IMPLEMENTATION
-                    null, // No vault offset - NEEDS IMPLEMENTATION
-                    null  // No key offset - NEEDS IMPLEMENTATION
+                segmentName,
+                segmentType,
+                schematicFileName,
+                size,
+                entryPoints,
+                sandSpawns,
+                itemSpawns,
+                coinSpawns,
+                totalCoins,
+                null,  // containedVault  — set manually in JSON if needed
+                null,  // containedVaultKey
+                null,  // vaultLocationOffset
+                null,  // keyLocationOffset
+                vaultDoorBound,
+                gates,
+                leverOffset,
+                sandSacrifices,
+                mobSpawners
             );
         } catch (Exception e) {
-             plugin.getLogger().log(Level.SEVERE, "Error creating Segment template object for " + segmentName, e);
-             // Use Adventure Component for error message
-             player.sendMessage(Component.text("An error occurred creating the segment template data.", NamedTextColor.RED));
-             return true;
+            plugin.getLogger().log(Level.SEVERE, "Error constructing Segment object for " + segmentName, e);
+            player.sendMessage(Component.text("Error building segment data. Check console.", NamedTextColor.RED));
+            return true;
         }
 
-
-        // --- Create PlacedSegment ---
-        // Depth is 0 as we are saving a base template outside generation context
+        // --- Save ---
         PlacedSegment placedSegment = new PlacedSegment(segmentTemplate, worldOrigin, 0);
-
-        // --- Call StructureSaver ---
-        // Use Adventure Component for status message
-        player.sendMessage(Component.text("Attempting to save segment '" + segmentName + "'...", NamedTextColor.YELLOW));
+        player.sendMessage(Component.text("Saving '" + segmentName + "'...", NamedTextColor.YELLOW));
         boolean success = structureSaver.saveStructure(placedSegment);
 
         if (success) {
-            // Use Adventure Components for success message
             player.sendMessage(Component.text("Segment '" + segmentName + "' saved successfully!", NamedTextColor.GREEN));
-            player.sendMessage(Component.text("Schematic: ", NamedTextColor.GREEN)
-                .append(Component.text(schematicFileName, NamedTextColor.WHITE)));
-            player.sendMessage(Component.text("Metadata: ", NamedTextColor.GREEN)
-                .append(Component.text(segmentName + ".json", NamedTextColor.WHITE)));
-            player.sendMessage(Component.text("Reload templates or restart server to use the new segment.", NamedTextColor.YELLOW));
-            // Consider adding automatic reloading if feasible
+            player.sendMessage(Component.text("  Schematic: " + schematicFileName, NamedTextColor.GREEN));
+            player.sendMessage(Component.text("  Metadata:  " + segmentName + ".json", NamedTextColor.GREEN));
+            player.sendMessage(Component.text("Reload templates to use the new segment.", NamedTextColor.YELLOW));
         } else {
-            // Use Adventure Component for failure message
-            player.sendMessage(Component.text("Failed to save segment '" + segmentName + "'. Check console for errors.", NamedTextColor.RED));
+            player.sendMessage(Component.text("Failed to save '" + segmentName + "'. Check console for errors.", NamedTextColor.RED));
         }
 
         return true;
     }
 
-    // Helper to get enum names (replace with your actual enum path)
-    private List<String> getSegmentTypeNames() {
-        // Using streams for a slightly more modern approach
-        return List.of(SegmentType.values()) // Get all enum values
-                   .stream()                 // Create a stream
-                   .map(Enum::name)          // Map each enum value to its name (String)
-                   .collect(Collectors.toList()); // Collect the names into a List
+    // -------------------------------------------------------------------------
+    // Helpers
+    // -------------------------------------------------------------------------
+
+    /** Converts an entity's absolute block location to a relative offset from the selection minimum. */
+    private static BlockVector3 toRelative(Location loc, BlockVector3 selMin) {
+        return BlockVector3.at(
+            loc.getBlockX() - selMin.x(),
+            loc.getBlockY() - selMin.y(),
+            loc.getBlockZ() - selMin.z()
+        );
+    }
+
+    /** Reads the stored absolute BOUND_MIN/MAX from a data entity and converts to relative. */
+    private SegmentBound readBound(PersistentDataContainer pdc, BlockVector3 selMin) {
+        Integer minX = pdc.get(keys.BOUND_MIN_X, PersistentDataType.INTEGER);
+        Integer minY = pdc.get(keys.BOUND_MIN_Y, PersistentDataType.INTEGER);
+        Integer minZ = pdc.get(keys.BOUND_MIN_Z, PersistentDataType.INTEGER);
+        Integer maxX = pdc.get(keys.BOUND_MAX_X, PersistentDataType.INTEGER);
+        Integer maxY = pdc.get(keys.BOUND_MAX_Y, PersistentDataType.INTEGER);
+        Integer maxZ = pdc.get(keys.BOUND_MAX_Z, PersistentDataType.INTEGER);
+
+        if (minX == null || minY == null || minZ == null || maxX == null || maxY == null || maxZ == null) {
+            plugin.getLogger().warning("[SaveSegment] Bound data entity is missing coordinate PDC values, skipping.");
+            return null;
+        }
+
+        BlockVector3 relMin = BlockVector3.at(minX - selMin.x(), minY - selMin.y(), minZ - selMin.z());
+        BlockVector3 relMax = BlockVector3.at(maxX - selMin.x(), maxY - selMin.y(), maxZ - selMin.z());
+        return new SegmentBound(relMin, relMax);
+    }
+
+    private Component summary(String label, int count) {
+        NamedTextColor valueColor = count > 0 ? NamedTextColor.WHITE : NamedTextColor.DARK_GRAY;
+        return Component.text("  " + label + ": ", NamedTextColor.GRAY)
+            .append(Component.text(String.valueOf(count), valueColor));
+    }
+
+    private String getTypeNames() {
+        return java.util.Arrays.stream(SegmentType.values())
+            .map(Enum::name)
+            .collect(Collectors.joining(", "));
     }
 }

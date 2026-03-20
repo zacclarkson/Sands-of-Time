@@ -1,22 +1,22 @@
 package com.clarkson.sot.events;
 
-// Use consistent key definitions - ideally move these to a shared Constants class
+import com.clarkson.sot.commands.BuilderMode;
+import com.clarkson.sot.dungeon.segment.Direction;
 import com.clarkson.sot.main.SoT;
-import com.clarkson.sot.dungeon.segment.Direction; // Import Direction
+import com.clarkson.sot.utils.BuilderSessionManager;
+import com.clarkson.sot.utils.PlayerBuilderSession;
+import com.clarkson.sot.utils.SegmentBuilderKeys;
 
-// Adventure API Imports
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
 
+import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.Material;
-import org.bukkit.NamespacedKey;
 import org.bukkit.block.Block;
 import org.bukkit.block.BlockFace;
-import org.bukkit.entity.Display;
-import org.bukkit.entity.Entity; // Import base Entity class
-import org.bukkit.entity.EntityType;
-import org.bukkit.entity.ItemDisplay;
+import org.bukkit.entity.BlockDisplay;
+import org.bukkit.entity.Entity;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
@@ -28,367 +28,460 @@ import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.persistence.PersistentDataContainer;
 import org.bukkit.persistence.PersistentDataType;
-import org.bukkit.plugin.Plugin;
-import org.bukkit.util.RayTraceResult; // Import for entity ray tracing
+import org.bukkit.util.RayTraceResult;
 import org.bukkit.util.Transformation;
 import org.joml.AxisAngle4f;
-import org.joml.Quaternionf; // Using Quaternion for potentially easier rotation
 import org.joml.Vector3f;
 
+import java.util.UUID;
+import java.util.function.Predicate;
 import java.util.logging.Level;
-import java.util.function.Predicate; // For ray trace filter
 
 /**
- * Listens for interactions with SoT tools.
- * Right-click places markers OR rotates existing entry point markers.
- * Left-click removes markers the player is looking at.
+ * Handles all interactions with the master Segment Builder tool.
+ *
+ * Right-click: place marker (mode-dependent).
+ * Left-click: remove marker in sight, or cancel in-progress bound selection.
+ *
+ * Marker visuals use BlockDisplay entities so they are clearly visible at distance.
+ * All markers are tagged with BUILD_MARKER_TAG and are never included in the saved schematic.
  */
 public class ToolListener implements Listener {
 
+    // --- Marker type string constants (package-private so SaveSegmentCommand can use them) ---
+    static final String MT_ENTRYPOINT     = "ENTRYPOINT";
+    static final String MT_COIN_SPAWN     = "COIN_SPAWN";
+    static final String MT_ITEM_SPAWN     = "ITEM_SPAWN";
+    static final String MT_SAND_SPAWN     = "SAND_SPAWN";
+    static final String MT_SAND_SACRIFICE = "SAND_SACRIFICE";
+    static final String MT_MOB_SPAWNER    = "MOB_SPAWNER";
+    static final String MT_LEVER          = "LEVER";
+    static final String MT_VAULT_DOOR     = "VAULT_DOOR";  // data entity
+    static final String MT_GATE           = "GATE";         // data entity
+    static final String MT_BOUND_VISUAL   = "BOUND_VISUAL"; // corner visual, no data
+    static final String MT_BOUND_TEMP     = "BOUND_TEMP";   // first-corner pending visual
+
+    private static final String TOOL_ID = "SEGMENT_BUILDER";
+
     private final SoT plugin;
+    private final BuilderSessionManager sessionManager;
+    final SegmentBuilderKeys keys; // package-private for SaveSegmentCommand
 
-    // --- Constants ---
-    private static final int COIN_STACK_SMALL_MODEL_ID = 1001;
-    private static final int COIN_STACK_MEDIUM_MODEL_ID = 1002;
-    private static final int COIN_STACK_LARGE_MODEL_ID = 1003;
-    private static final Material COIN_BASE_MATERIAL = Material.GOLD_NUGGET;
-    private static final Material ITEM_SPAWN_MARKER_ITEM_MATERIAL = Material.TORCH;
-    private static final Material ENTRY_POINT_MARKER_ITEM_MATERIAL = Material.ARROW; // Item to display for entry points
-
-    // --- PDC Keys (Define consistently) ---
-    private final NamespacedKey TOOL_TYPE_KEY;
-    private final NamespacedKey TOOL_VALUE_KEY; // Used by coin tool
-    private final NamespacedKey MARKER_TYPE_KEY; // Used for the marker entity (ItemDisplay or ArmorStand)
-    private final NamespacedKey DIRECTION_KEY; // Used for entry point marker entity
-    private final NamespacedKey VAULT_COLOR_KEY; // Used for vault/key marker entity
-    private final NamespacedKey BUILD_MARKER_TAG; // Tag identifying ANY build-phase marker entity
-
-    public ToolListener(SoT plugin) {
+    public ToolListener(SoT plugin, BuilderSessionManager sessionManager, SegmentBuilderKeys keys) {
         this.plugin = plugin;
-        // Initialize keys
-        TOOL_TYPE_KEY = new NamespacedKey(plugin, "sot_tool_type");
-        TOOL_VALUE_KEY = new NamespacedKey(plugin, "sot_tool_value");
-        MARKER_TYPE_KEY = new NamespacedKey(plugin, "sot_marker_type");
-        DIRECTION_KEY = new NamespacedKey(plugin, "sot_direction");
-        VAULT_COLOR_KEY = new NamespacedKey(plugin, "sot_vault_color");
-        BUILD_MARKER_TAG = new NamespacedKey(plugin, "sot_build_marker"); // Key for the general build marker tag
+        this.sessionManager = sessionManager;
+        this.keys = keys;
     }
+
+    // -------------------------------------------------------------------------
+    // Main event dispatcher
+    // -------------------------------------------------------------------------
 
     @EventHandler(priority = EventPriority.HIGH)
     public void onPlayerInteract(PlayerInteractEvent event) {
-        if (event.getHand() != EquipmentSlot.HAND) return; // Only handle main hand
+        if (event.getHand() != EquipmentSlot.HAND) return;
 
         Player player = event.getPlayer();
-        ItemStack itemInHand = event.getItem();
+        ItemStack item = event.getItem();
+        if (item == null || item.getType() == Material.AIR) return;
 
-        if (itemInHand == null || itemInHand.getType() == Material.AIR) return;
-        ItemMeta meta = itemInHand.getItemMeta();
+        ItemMeta meta = item.getItemMeta();
         if (meta == null) return;
-        PersistentDataContainer pdc = meta.getPersistentDataContainer();
-        if (!pdc.has(TOOL_TYPE_KEY, PersistentDataType.STRING)) return; // Not one of our tools
+        if (!TOOL_ID.equals(meta.getPersistentDataContainer().get(keys.TOOL_TYPE, PersistentDataType.STRING))) return;
 
-        String toolType = pdc.get(TOOL_TYPE_KEY, PersistentDataType.STRING);
+        event.setCancelled(true);
 
-        // --- Handle Right-Click (Placement or Rotation) ---
-        if (event.getAction() == Action.RIGHT_CLICK_AIR || event.getAction() == Action.RIGHT_CLICK_BLOCK) {
-            if ("COIN_PLACER".equals(toolType)) {
-                handleCoinPlacerTool(event, player, pdc);
-            } else if ("ITEM_SPAWN_PLACER".equals(toolType)) {
-                handleItemSpawnPlacerTool(event, player);
-            } else if ("ENTRY_POINT_PLACER".equals(toolType)) {
-                handleEntryPointPlacerTool(event, player); // Doesn't need tool PDC anymore
+        PlayerBuilderSession session = sessionManager.getSession(player.getUniqueId());
+        Action action = event.getAction();
+
+        if (action == Action.LEFT_CLICK_AIR || action == Action.LEFT_CLICK_BLOCK) {
+            handleRemoval(player, session);
+            return;
+        }
+
+        if (action != Action.RIGHT_CLICK_AIR && action != Action.RIGHT_CLICK_BLOCK) return;
+
+        BuilderMode mode = session.getMode();
+        switch (mode) {
+            case ENTRY_POINT -> handleEntryPoint(event, player, session);
+            case VAULT_DOOR  -> handleBoundCorner(event, player, session, false);
+            case GATE        -> handleBoundCorner(event, player, session, true);
+            default          -> handleSimpleMarker(event, player, mode);
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Entry point handler
+    // -------------------------------------------------------------------------
+
+    private void handleEntryPoint(PlayerInteractEvent event, Player player, PlayerBuilderSession session) {
+        if (!player.hasPermission("sot.builder.place")) {
+            player.sendActionBar(Component.text("No permission.", NamedTextColor.RED));
+            return;
+        }
+
+        // Check if player is looking at an existing entry point marker → rotate it
+        Predicate<Entity> filter = e -> e instanceof BlockDisplay
+                && e.getPersistentDataContainer().has(keys.BUILD_MARKER_TAG, PersistentDataType.BYTE)
+                && MT_ENTRYPOINT.equals(e.getPersistentDataContainer().get(keys.MARKER_TYPE, PersistentDataType.STRING));
+
+        RayTraceResult result = player.getWorld().rayTraceEntities(
+                player.getEyeLocation(), player.getEyeLocation().getDirection(), 5.0, filter);
+
+        if (result != null && result.getHitEntity() instanceof BlockDisplay existing) {
+            rotateEntryPoint(player, existing);
+            return;
+        }
+
+        // Otherwise place a new marker
+        if (event.getAction() != Action.RIGHT_CLICK_BLOCK || event.getClickedBlock() == null) {
+            player.sendActionBar(Component.text("Right-click a wall face to place, or an existing marker to rotate.", NamedTextColor.YELLOW));
+            return;
+        }
+
+        Block clicked = event.getClickedBlock();
+        BlockFace face = event.getBlockFace();
+        Block target = clicked.getRelative(face);
+
+        if (!target.getType().isAir()) {
+            player.sendActionBar(Component.text("Cannot place here — air block required.", NamedTextColor.RED));
+            return;
+        }
+
+        Direction dir = Direction.fromBlockFace(face);
+        if (dir == null || dir == Direction.UP || dir == Direction.DOWN) {
+            dir = Direction.fromYaw(player.getLocation().getYaw());
+        }
+
+        final Direction finalDir = dir;
+        Location spawnLoc = target.getLocation();
+
+        try {
+            player.getWorld().spawn(spawnLoc, BlockDisplay.class, display -> {
+                display.setBlock(Bukkit.createBlockData(Material.LIME_STAINED_GLASS));
+                display.setGravity(false);
+                display.setInvulnerable(true);
+                display.setPersistent(true);
+                display.setGlowing(true);
+                display.setTransformation(fullBlockTransform());
+
+                PersistentDataContainer pdc = display.getPersistentDataContainer();
+                pdc.set(keys.BUILD_MARKER_TAG, PersistentDataType.BYTE, (byte) 1);
+                pdc.set(keys.MARKER_TYPE, PersistentDataType.STRING, MT_ENTRYPOINT);
+                pdc.set(keys.DIRECTION, PersistentDataType.STRING, finalDir.name());
+            });
+            player.sendActionBar(Component.text("Entry Point [" + finalDir.name() + "] placed — right-click to rotate.", NamedTextColor.GREEN));
+        } catch (Exception e) {
+            plugin.getLogger().log(Level.SEVERE, "Failed to spawn entry point marker", e);
+            player.sendMessage(Component.text("Error placing marker.", NamedTextColor.RED));
+        }
+    }
+
+    private void rotateEntryPoint(Player player, BlockDisplay display) {
+        PersistentDataContainer pdc = display.getPersistentDataContainer();
+        String currentStr = pdc.getOrDefault(keys.DIRECTION, PersistentDataType.STRING, Direction.NORTH.name());
+        Direction current;
+        try { current = Direction.valueOf(currentStr); } catch (IllegalArgumentException e) { current = Direction.NORTH; }
+
+        Direction next = switch (current) {
+            case NORTH -> Direction.EAST;
+            case EAST  -> Direction.SOUTH;
+            case SOUTH -> Direction.WEST;
+            default    -> Direction.NORTH;
+        };
+
+        pdc.set(keys.DIRECTION, PersistentDataType.STRING, next.name());
+        player.sendActionBar(Component.text("Entry Point rotated → " + next.name(), NamedTextColor.YELLOW));
+    }
+
+    // -------------------------------------------------------------------------
+    // Bound selection handler (VAULT_DOOR / GATE)
+    // -------------------------------------------------------------------------
+
+    private void handleBoundCorner(PlayerInteractEvent event, Player player, PlayerBuilderSession session, boolean isGate) {
+        if (!player.hasPermission("sot.builder.place")) {
+            player.sendActionBar(Component.text("No permission.", NamedTextColor.RED));
+            return;
+        }
+
+        if (event.getAction() != Action.RIGHT_CLICK_BLOCK || event.getClickedBlock() == null) {
+            String hint = session.hasPendingCorner()
+                    ? "First corner set — right-click a block face to set the second corner."
+                    : "Right-click a block face to set the first corner of the opening.";
+            player.sendActionBar(Component.text(hint, NamedTextColor.YELLOW));
+            return;
+        }
+
+        Block clicked = event.getClickedBlock();
+        Block target = clicked.getRelative(event.getBlockFace());
+
+        if (!target.getType().isAir()) {
+            player.sendActionBar(Component.text(
+                "Corner must be an open (air) block — click the face bordering the opening.", NamedTextColor.RED));
+            return;
+        }
+
+        Location cornerLoc = target.getLocation();
+        Material mat = isGate ? Material.LIGHT_GRAY_STAINED_GLASS : Material.PURPLE_STAINED_GLASS;
+        String label = isGate ? "Gate" : "Vault Door";
+
+        if (!session.hasPendingCorner()) {
+            // First corner: place temp entity and store in session
+            UUID tempId = spawnTempCornerMarker(player, cornerLoc, mat);
+            if (tempId != null) {
+                session.setPendingCorner(cornerLoc, tempId);
+                player.sendActionBar(Component.text(
+                    label + " — first corner set. Right-click the opposite corner.", NamedTextColor.YELLOW));
             }
-            // Add other right-click tool handlers here
-        }
-        // --- Handle Left-Click (Removal) ---
-        else if (event.getAction() == Action.LEFT_CLICK_AIR || event.getAction() == Action.LEFT_CLICK_BLOCK) {
-            // Check if the tool held is *any* of our placement tools
-            if ("COIN_PLACER".equals(toolType) || "ITEM_SPAWN_PLACER".equals(toolType) || "ENTRY_POINT_PLACER".equals(toolType)) {
-                 handleMarkerRemoval(event, player);
-            }
-        }
-    }
-
-    // --- Tool Handlers ---
-
-    private void handleCoinPlacerTool(PlayerInteractEvent event, Player player, PersistentDataContainer toolPdc) {
-        event.setCancelled(true);
-        if (!player.hasPermission("sot.admin.placedisplay")) { /* ... perm msg ... */ return; }
-        if (!toolPdc.has(TOOL_VALUE_KEY, PersistentDataType.INTEGER)) { /* ... missing value msg ... */ return; }
-        int baseValue = toolPdc.get(TOOL_VALUE_KEY, PersistentDataType.INTEGER);
-        spawnCoinDisplayVisual(player, baseValue, event.getClickedBlock(), event.getBlockFace());
-    }
-
-    private void handleItemSpawnPlacerTool(PlayerInteractEvent event, Player player) {
-        event.setCancelled(true);
-        if (!player.hasPermission("sot.admin.placeitemspawn")) { /* ... perm msg ... */ return; }
-        // Require clicking the top face of a block
-        if (event.getAction() != Action.RIGHT_CLICK_BLOCK || event.getClickedBlock() == null || event.getBlockFace() != BlockFace.UP) {
-             player.sendActionBar(Component.text("Right-click on the top face of a block to place marker.", NamedTextColor.YELLOW));
-             return;
-        }
-        placeItemSpawnMarker(player, event.getClickedBlock(), event.getBlockFace());
-    }
-
-    private void handleEntryPointPlacerTool(PlayerInteractEvent event, Player player) {
-        event.setCancelled(true); // Cancel event regardless of outcome below
-        if (!player.hasPermission("sot.admin.placeentrypoint")) {
-             player.sendMessage(Component.text("You don't have permission to use this tool.", NamedTextColor.RED));
-             return;
-        }
-
-        // 1. Check if player is looking at an existing Entry Point marker entity
-        double range = 5.0; // Range to check for existing markers
-        Predicate<Entity> filter = entity -> entity instanceof ItemDisplay // Check type
-                && entity.getPersistentDataContainer().has(BUILD_MARKER_TAG, PersistentDataType.BYTE) // Check general marker tag
-                && "ENTRYPOINT".equals(entity.getPersistentDataContainer().get(MARKER_TYPE_KEY, PersistentDataType.STRING)); // Check specific type
-
-        RayTraceResult result = player.getWorld().rayTraceEntities(player.getEyeLocation(), player.getEyeLocation().getDirection(), range, filter);
-
-        if (result != null && result.getHitEntity() != null && result.getHitEntity() instanceof ItemDisplay) {
-            // Player is looking at an existing entry point marker -> ROTATE IT
-            rotateEntryPointMarker(player, (ItemDisplay) result.getHitEntity());
-        }
-        // 2. If not looking at a marker, check if they right-clicked a block -> PLACE NEW
-        else if (event.getAction() == Action.RIGHT_CLICK_BLOCK && event.getClickedBlock() != null && event.getBlockFace() != null) {
-            // Place a new marker, default direction based on player facing away from block face
-            Direction defaultDirection = Direction.fromBlockFace(event.getBlockFace().getOppositeFace()); // Get direction pointing OUT from block
-             if(defaultDirection == Direction.UP || defaultDirection == Direction.DOWN) {
-                 // If clicked top/bottom, default to player's horizontal facing
-                 defaultDirection = Direction.fromYaw(player.getLocation().getYaw());
-             }
-            placeEntryPointMarker(player, event.getClickedBlock(), event.getBlockFace(), defaultDirection);
-        }
-        // 3. If right-clicked air and not looking at marker -> do nothing or give feedback
-        else if (event.getAction() == Action.RIGHT_CLICK_AIR) {
-             player.sendActionBar(Component.text("Right-click a block face to place, or an existing marker to rotate.", NamedTextColor.YELLOW));
-        }
-    }
-
-
-    /** Handles logic for removing markers (Left-Click) */
-    private void handleMarkerRemoval(PlayerInteractEvent event, Player player) {
-        event.setCancelled(true);
-        if (!player.hasPermission("sot.admin.removemarker")) {
-             player.sendActionBar(Component.text("You don't have permission to remove markers.", NamedTextColor.RED));
-             return;
-        }
-        double range = 6.0;
-        Predicate<Entity> filter = entity -> (entity instanceof ItemDisplay) // Only check ItemDisplays now if ArmorStands aren't used
-                   && entity.getPersistentDataContainer().has(BUILD_MARKER_TAG, PersistentDataType.BYTE);
-
-        RayTraceResult result = player.getWorld().rayTraceEntities(player.getEyeLocation(), player.getEyeLocation().getDirection(), range, filter);
-
-        if (result != null && result.getHitEntity() != null) {
-            Entity hitEntity = result.getHitEntity();
-            // No need to double-check tag if filter is reliable
-            String markerType = hitEntity.getPersistentDataContainer().getOrDefault(MARKER_TYPE_KEY, PersistentDataType.STRING, "Unknown");
-            hitEntity.remove();
-            player.sendActionBar(Component.text("Removed " + markerType + " marker.", NamedTextColor.YELLOW));
         } else {
-            player.sendActionBar(Component.text("No marker found in sight.", NamedTextColor.GRAY));
+            // Second corner: complete the bound
+            Location corner1 = session.getPendingCorner1();
+            UUID tempId = session.getPendingCornerEntityId();
+            if (tempId != null) {
+                Entity temp = Bukkit.getEntity(tempId);
+                if (temp != null) temp.remove();
+            }
+            session.clearPendingBound();
+            completeBound(player, corner1, cornerLoc, isGate ? MT_GATE : MT_VAULT_DOOR, mat, label);
         }
     }
 
+    private UUID spawnTempCornerMarker(Player player, Location loc, Material mat) {
+        UUID[] holder = {null};
+        try {
+            player.getWorld().spawn(loc, BlockDisplay.class, display -> {
+                display.setBlock(Bukkit.createBlockData(mat));
+                display.setGravity(false);
+                display.setInvulnerable(true);
+                display.setPersistent(true);
+                display.setGlowing(true);
+                // Slightly inset so it's visually distinct from permanent corners
+                display.setTransformation(new Transformation(
+                    new Vector3f(0.1f, 0.1f, 0.1f), new AxisAngle4f(0, 0, 0, 1),
+                    new Vector3f(0.8f, 0.8f, 0.8f), new AxisAngle4f(0, 0, 0, 1)
+                ));
+                PersistentDataContainer pdc = display.getPersistentDataContainer();
+                pdc.set(keys.BUILD_MARKER_TAG, PersistentDataType.BYTE, (byte) 1);
+                pdc.set(keys.MARKER_TYPE, PersistentDataType.STRING, MT_BOUND_TEMP);
+                holder[0] = display.getUniqueId();
+            });
+        } catch (Exception e) {
+            plugin.getLogger().log(Level.SEVERE, "Failed to spawn temp corner marker", e);
+        }
+        return holder[0];
+    }
 
-    // --- Spawning and Rotating Methods ---
+    private void completeBound(Player player, Location corner1, Location corner2,
+                               String markerType, Material mat, String label) {
+        int minX = Math.min(corner1.getBlockX(), corner2.getBlockX());
+        int minY = Math.min(corner1.getBlockY(), corner2.getBlockY());
+        int minZ = Math.min(corner1.getBlockZ(), corner2.getBlockZ());
+        int maxX = Math.max(corner1.getBlockX(), corner2.getBlockX());
+        int maxY = Math.max(corner1.getBlockY(), corner2.getBlockY());
+        int maxZ = Math.max(corner1.getBlockZ(), corner2.getBlockZ());
 
-    /** Spawns the visual ItemDisplay for a coin stack. */
-    private void spawnCoinDisplayVisual(Player player, int baseValue, Block clickedBlock, BlockFace clickedFace) {
-        int modelIdToUse;
-        if (baseValue >= 50) modelIdToUse = COIN_STACK_LARGE_MODEL_ID;
-        else if (baseValue >= 20) modelIdToUse = COIN_STACK_MEDIUM_MODEL_ID;
-        else modelIdToUse = COIN_STACK_SMALL_MODEL_ID;
+        String boundId = UUID.randomUUID().toString();
 
-        ItemStack displayStack = new ItemStack(COIN_BASE_MATERIAL);
-        ItemMeta meta = displayStack.getItemMeta();
-        if (meta != null) { meta.setCustomModelData(modelIdToUse); displayStack.setItemMeta(meta); }
-        else { player.sendMessage(Component.text("Error: Could not get ItemMeta for Coin Display.", NamedTextColor.RED)); return; }
+        // Two corner visuals
+        spawnBoundCornerVisual(player, new Location(player.getWorld(), minX, minY, minZ), mat, boundId);
+        spawnBoundCornerVisual(player, new Location(player.getWorld(), maxX, maxY, maxZ), mat, boundId);
 
-        Location spawnLocation = calculatePlacementLocation(player, clickedBlock, clickedFace, 0.1);
+        // Central data entity — stores the absolute min/max for SaveSegmentCommand to read
+        double cx = (minX + maxX + 1) / 2.0;
+        double cy = (minY + maxY + 1) / 2.0;
+        double cz = (minZ + maxZ + 1) / 2.0;
+        Location centerLoc = new Location(player.getWorld(), cx, cy, cz);
 
         try {
-            player.getWorld().spawn(spawnLocation, ItemDisplay.class, display -> {
-                display.setItemStack(displayStack);
-                display.setGravity(false); display.setInvulnerable(true); display.setBillboard(Display.Billboard.CENTER);
-                float scale = 1.5f;
-                Transformation transformation = new Transformation( new Vector3f(0f, 0f, 0f), new AxisAngle4f(0f, 0f, 0f, 1f), new Vector3f(scale, scale, scale), new AxisAngle4f(0f, 0f, 0f, 1f) );
-                display.setTransformation(transformation);
+            player.getWorld().spawn(centerLoc, BlockDisplay.class, display -> {
+                display.setBlock(Bukkit.createBlockData(mat));
+                display.setGravity(false);
+                display.setInvulnerable(true);
+                display.setPersistent(true);
+                display.setGlowing(true);
+                // Small cube to mark the data entity
+                display.setTransformation(new Transformation(
+                    new Vector3f(-0.15f, -0.15f, -0.15f), new AxisAngle4f(0, 0, 0, 1),
+                    new Vector3f(0.3f, 0.3f, 0.3f), new AxisAngle4f(0, 0, 0, 1)
+                ));
                 PersistentDataContainer pdc = display.getPersistentDataContainer();
-                pdc.set(BUILD_MARKER_TAG, PersistentDataType.BYTE, (byte)1);
-                pdc.set(MARKER_TYPE_KEY, PersistentDataType.STRING, "DISPLAY_COIN"); // Add type for removal message
+                pdc.set(keys.BUILD_MARKER_TAG, PersistentDataType.BYTE, (byte) 1);
+                pdc.set(keys.MARKER_TYPE, PersistentDataType.STRING, markerType);
+                pdc.set(keys.BOUND_ID, PersistentDataType.STRING, boundId);
+                pdc.set(keys.BOUND_MIN_X, PersistentDataType.INTEGER, minX);
+                pdc.set(keys.BOUND_MIN_Y, PersistentDataType.INTEGER, minY);
+                pdc.set(keys.BOUND_MIN_Z, PersistentDataType.INTEGER, minZ);
+                pdc.set(keys.BOUND_MAX_X, PersistentDataType.INTEGER, maxX);
+                pdc.set(keys.BOUND_MAX_Y, PersistentDataType.INTEGER, maxY);
+                pdc.set(keys.BOUND_MAX_Z, PersistentDataType.INTEGER, maxZ);
             });
-            player.sendActionBar(Component.text("Placed Coin Display (Value: " + baseValue + ")", NamedTextColor.GREEN));
         } catch (Exception e) {
-             plugin.getLogger().log(Level.SEVERE, "Failed to spawn Coin ItemDisplay via tool", e);
-             player.sendMessage(Component.text("An error occurred while spawning the coin display entity.", NamedTextColor.RED));
+            plugin.getLogger().log(Level.SEVERE, "Failed to spawn bound data entity", e);
+            player.sendMessage(Component.text("Error placing bound.", NamedTextColor.RED));
+            return;
+        }
+
+        int w = maxX - minX + 1;
+        int h = maxY - minY + 1;
+        player.sendActionBar(Component.text(
+            label + " bound placed. " + w + " wide × " + h + " tall.", NamedTextColor.GREEN));
+    }
+
+    private void spawnBoundCornerVisual(Player player, Location loc, Material mat, String boundId) {
+        try {
+            player.getWorld().spawn(loc, BlockDisplay.class, display -> {
+                display.setBlock(Bukkit.createBlockData(mat));
+                display.setGravity(false);
+                display.setInvulnerable(true);
+                display.setPersistent(true);
+                display.setGlowing(true);
+                display.setTransformation(new Transformation(
+                    new Vector3f(0f, 0f, 0f), new AxisAngle4f(0, 0, 0, 1),
+                    new Vector3f(0.5f, 0.5f, 0.5f), new AxisAngle4f(0, 0, 0, 1)
+                ));
+                PersistentDataContainer pdc = display.getPersistentDataContainer();
+                pdc.set(keys.BUILD_MARKER_TAG, PersistentDataType.BYTE, (byte) 1);
+                pdc.set(keys.MARKER_TYPE, PersistentDataType.STRING, MT_BOUND_VISUAL);
+                pdc.set(keys.BOUND_ID, PersistentDataType.STRING, boundId);
+            });
+        } catch (Exception e) {
+            plugin.getLogger().log(Level.SEVERE, "Failed to spawn bound corner visual", e);
         }
     }
 
-    /** Places an ItemDisplay showing a flat torch item, tagged as an item spawn marker. */
-    private void placeItemSpawnMarker(Player player, Block clickedBlock, BlockFace clickedFace) {
-         Block blockToPlaceOn = clickedBlock; // Clicked on top face, place marker above
-         Block targetBlock = blockToPlaceOn.getRelative(BlockFace.UP); // Target air block above
-         Location spawnLocation = targetBlock.getLocation().add(0.5, 0.0, 0.5); // Center of the block space, Y aligned with base
+    // -------------------------------------------------------------------------
+    // Simple single-point marker handler (all other modes)
+    // -------------------------------------------------------------------------
 
-         if (!targetBlock.getType().isAir() && targetBlock.getType() != Material.CAVE_AIR && targetBlock.getType() != Material.VOID_AIR) {
-              player.sendActionBar(Component.text("Cannot place marker here (space occupied).", NamedTextColor.RED));
-              return;
-         }
-
-         try {
-             ItemStack torchItem = new ItemStack(ITEM_SPAWN_MARKER_ITEM_MATERIAL);
-             player.getWorld().spawn(spawnLocation, ItemDisplay.class, display -> {
-                 display.setItemStack(torchItem);
-                 display.setGravity(false); display.setInvulnerable(true); display.setPersistent(true); display.setBillboard(Display.Billboard.FIXED);
-                 float scale = 0.7f;
-                 AxisAngle4f rotation = new AxisAngle4f((float) Math.toRadians(90), 1f, 0f, 0f); // Lay flat on X axis
-                 Vector3f translation = new Vector3f(0f, -0.4f, 0f); // Lower slightly
-                 Transformation transformation = new Transformation( translation, rotation, new Vector3f(scale, scale, scale), new AxisAngle4f(0f, 0f, 0f, 1f) );
-                 display.setTransformation(transformation);
-                 PersistentDataContainer pdc = display.getPersistentDataContainer();
-                 pdc.set(MARKER_TYPE_KEY, PersistentDataType.STRING, "SPAWN_ITEM");
-                 pdc.set(BUILD_MARKER_TAG, PersistentDataType.BYTE, (byte)1);
-             });
-              player.sendActionBar(Component.text("Placed Item Spawn Marker (Torch Item).", NamedTextColor.GREEN));
-         } catch (Exception e) {
-             plugin.getLogger().log(Level.SEVERE, "Failed to spawn marker ItemDisplay for item spawn", e);
-             player.sendMessage(Component.text("Error placing marker entity.", NamedTextColor.RED));
-         }
-    }
-
-    /**
-     * Places a new ItemDisplay showing an arrow pointing in the specified direction,
-     * tagged as an entry point marker.
-     * @param player Player using the tool.
-     * @param clickedBlock The block clicked.
-     * @param clickedFace The face of the block clicked.
-     * @param directionToPlace The initial direction the entry point should face.
-     */
-    private void placeEntryPointMarker(Player player, Block clickedBlock, BlockFace clickedFace, Direction directionToPlace) {
-        Block targetBlock = clickedBlock.getRelative(clickedFace);
-        Location spawnLocation = targetBlock.getLocation().add(0.5, 0.5, 0.5); // Center of the target block
-
-        if (!targetBlock.getType().isAir() && targetBlock.getType() != Material.CAVE_AIR && targetBlock.getType() != Material.VOID_AIR) {
-             player.sendActionBar(Component.text("Cannot place entry marker here (space occupied).", NamedTextColor.RED));
-             return;
+    private void handleSimpleMarker(PlayerInteractEvent event, Player player, BuilderMode mode) {
+        if (!player.hasPermission("sot.builder.place")) {
+            player.sendActionBar(Component.text("No permission.", NamedTextColor.RED));
+            return;
         }
+
+        if (event.getAction() != Action.RIGHT_CLICK_BLOCK || event.getClickedBlock() == null) {
+            player.sendActionBar(Component.text(mode.getHint(), NamedTextColor.YELLOW));
+            return;
+        }
+
+        Block clicked = event.getClickedBlock();
+        Block target = clicked.getRelative(event.getBlockFace());
+
+        if (!target.getType().isAir()) {
+            player.sendActionBar(Component.text("Cannot place here — air block required.", NamedTextColor.RED));
+            return;
+        }
+
+        Material mat;
+        String markerType;
+        String label;
+
+        switch (mode) {
+            case COIN_SPAWN     -> { mat = Material.GOLD_BLOCK;          markerType = MT_COIN_SPAWN;     label = "Coin Spawn"; }
+            case ITEM_SPAWN     -> { mat = Material.CYAN_CONCRETE;       markerType = MT_ITEM_SPAWN;     label = "Item Spawn"; }
+            case SAND_SPAWN     -> { mat = Material.SAND;                markerType = MT_SAND_SPAWN;     label = "Sand Spawn"; }
+            case SAND_SACRIFICE -> { mat = Material.ORANGE_CONCRETE;     markerType = MT_SAND_SACRIFICE; label = "Sand Sacrifice"; }
+            case MOB_SPAWNER    -> { mat = Material.BONE_BLOCK;          markerType = MT_MOB_SPAWNER;    label = "Mob Spawner"; }
+            case LEVER          -> { mat = Material.REDSTONE_BLOCK;      markerType = MT_LEVER;          label = "Lever"; }
+            default             -> { player.sendActionBar(Component.text("Unknown mode.", NamedTextColor.RED)); return; }
+        }
+
+        final String finalMarkerType = markerType;
+        final String finalLabel = label;
+        Location spawnLoc = target.getLocation();
 
         try {
-            ItemStack arrowItem = new ItemStack(ENTRY_POINT_MARKER_ITEM_MATERIAL);
-            AxisAngle4f rotation = calculateRotationForDirection(directionToPlace); // Use helper
-            float scale = 1.0f;
-            Vector3f translation = new Vector3f(0f, 0f, 0f);
-            Transformation transformation = new Transformation(translation, rotation, new Vector3f(scale, scale, scale), new AxisAngle4f());
-
-            player.getWorld().spawn(spawnLocation, ItemDisplay.class, display -> {
-                display.setItemStack(arrowItem);
-                display.setGravity(false); display.setInvulnerable(true); display.setPersistent(true); display.setBillboard(Display.Billboard.FIXED);
-                display.setTransformation(transformation); // Apply calculated rotation
-
+            player.getWorld().spawn(spawnLoc, BlockDisplay.class, display -> {
+                display.setBlock(Bukkit.createBlockData(mat));
+                display.setGravity(false);
+                display.setInvulnerable(true);
+                display.setPersistent(true);
+                display.setGlowing(true);
+                // Small cube sitting on the floor of the target block
+                display.setTransformation(new Transformation(
+                    new Vector3f(0.25f, 0f, 0.25f), new AxisAngle4f(0, 0, 0, 1),
+                    new Vector3f(0.5f, 0.5f, 0.5f), new AxisAngle4f(0, 0, 0, 1)
+                ));
                 PersistentDataContainer pdc = display.getPersistentDataContainer();
-                pdc.set(MARKER_TYPE_KEY, PersistentDataType.STRING, "ENTRYPOINT");
-                pdc.set(DIRECTION_KEY, PersistentDataType.STRING, directionToPlace.name()); // Store initial direction
-                pdc.set(BUILD_MARKER_TAG, PersistentDataType.BYTE, (byte)1);
+                pdc.set(keys.BUILD_MARKER_TAG, PersistentDataType.BYTE, (byte) 1);
+                pdc.set(keys.MARKER_TYPE, PersistentDataType.STRING, finalMarkerType);
             });
-
-            player.sendActionBar(Component.text("Placed Entry Point Marker (" + directionToPlace.name() + ").", NamedTextColor.GREEN));
-
+            player.sendActionBar(Component.text(finalLabel + " marker placed.", NamedTextColor.GREEN));
         } catch (Exception e) {
-            plugin.getLogger().log(Level.SEVERE, "Failed to spawn marker ItemDisplay for entry point", e);
-            player.sendMessage(Component.text("Error placing marker entity.", NamedTextColor.RED));
+            plugin.getLogger().log(Level.SEVERE, "Failed to spawn " + markerType + " marker", e);
+            player.sendMessage(Component.text("Error placing marker.", NamedTextColor.RED));
         }
     }
 
-     /**
-      * Rotates an existing entry point marker entity to the next cardinal direction.
-      * @param player The player triggering the rotation.
-      * @param display The ItemDisplay entity representing the entry point marker.
-      */
-     private void rotateEntryPointMarker(Player player, ItemDisplay display) {
-         PersistentDataContainer pdc = display.getPersistentDataContainer();
-         // Redundant check if filter works, but safe
-         if (!"ENTRYPOINT".equals(pdc.get(MARKER_TYPE_KEY, PersistentDataType.STRING))) return;
+    // -------------------------------------------------------------------------
+    // Removal handler
+    // -------------------------------------------------------------------------
 
-         String currentDirStr = pdc.get(DIRECTION_KEY, PersistentDataType.STRING);
-         Direction currentDirection;
-         try {
-             currentDirection = (currentDirStr != null) ? Direction.valueOf(currentDirStr) : Direction.NORTH;
-         } catch (IllegalArgumentException e) { currentDirection = Direction.NORTH; }
+    private void handleRemoval(Player player, PlayerBuilderSession session) {
+        if (!player.hasPermission("sot.builder.remove")) {
+            player.sendActionBar(Component.text("No permission to remove markers.", NamedTextColor.RED));
+            return;
+        }
 
-         // Cycle through cardinal directions: N -> E -> S -> W -> N
-         Direction nextDirection;
-         switch (currentDirection) {
-             case NORTH: nextDirection = Direction.EAST; break;
-             case EAST:  nextDirection = Direction.SOUTH; break;
-             case SOUTH: nextDirection = Direction.WEST; break;
-             case WEST:
-             default:    nextDirection = Direction.NORTH; break;
-         }
+        // If a bound is in progress, left-click cancels it
+        if (session.hasPendingCorner()) {
+            UUID tempId = session.getPendingCornerEntityId();
+            if (tempId != null) {
+                Entity temp = Bukkit.getEntity(tempId);
+                if (temp != null) temp.remove();
+            }
+            session.clearPendingBound();
+            player.sendActionBar(Component.text("Pending bound selection cancelled.", NamedTextColor.YELLOW));
+            return;
+        }
 
-         // Update PDC
-         pdc.set(DIRECTION_KEY, PersistentDataType.STRING, nextDirection.name());
+        Predicate<Entity> filter = e -> e instanceof BlockDisplay
+                && e.getPersistentDataContainer().has(keys.BUILD_MARKER_TAG, PersistentDataType.BYTE);
 
-         // Update Transformation
-         AxisAngle4f newRotation = calculateRotationForDirection(nextDirection);
-         
-         Transformation currentTransform = display.getTransformation();
-         // Create new transformation keeping scale/translation, only changing rotation
-         Quaternionf quaternionRotation = new Quaternionf(newRotation);
+        RayTraceResult result = player.getWorld().rayTraceEntities(
+                player.getEyeLocation(), player.getEyeLocation().getDirection(), 6.0, filter);
 
-        // Create the new Transformation object
-        Transformation newTransform = new Transformation(
-            currentTransform.getTranslation(),
-            quaternionRotation, // Use the converted Quaternionf
-            currentTransform.getScale(),
-            currentTransform.getRightRotation()
+        if (result == null || result.getHitEntity() == null) {
+            player.sendActionBar(Component.text("No marker in sight.", NamedTextColor.GRAY));
+            return;
+        }
+
+        Entity hit = result.getHitEntity();
+        PersistentDataContainer pdc = hit.getPersistentDataContainer();
+        String markerType = pdc.getOrDefault(keys.MARKER_TYPE, PersistentDataType.STRING, "Unknown");
+        String boundId = pdc.get(keys.BOUND_ID, PersistentDataType.STRING);
+
+        // If the removed entity is the temp first-corner, also clear the session
+        if (MT_BOUND_TEMP.equals(markerType)) {
+            session.clearPendingBound();
+        }
+
+        if (boundId != null) {
+            // Remove all entities belonging to this bound group
+            int count = 0;
+            for (Entity e : player.getWorld().getEntities()) {
+                if (e instanceof BlockDisplay
+                        && boundId.equals(e.getPersistentDataContainer().get(keys.BOUND_ID, PersistentDataType.STRING))) {
+                    e.remove();
+                    count++;
+                }
+            }
+            player.sendActionBar(Component.text("Removed bound (" + count + " entities).", NamedTextColor.YELLOW));
+        } else {
+            hit.remove();
+            player.sendActionBar(Component.text("Removed " + markerType + " marker.", NamedTextColor.YELLOW));
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Transformation helpers
+    // -------------------------------------------------------------------------
+
+    /** A transformation that fills the full 1×1×1 block space starting at the entity origin. */
+    private static Transformation fullBlockTransform() {
+        return new Transformation(
+            new Vector3f(0f, 0f, 0f), new AxisAngle4f(0, 0, 0, 1),
+            new Vector3f(1f, 1f, 1f), new AxisAngle4f(0, 0, 0, 1)
         );
-
-        // Apply the new transformation
-        display.setTransformation(newTransform);
-         display.setTransformation(newTransform);
-
-         player.sendActionBar(Component.text("Rotated Entry Point Marker to " + nextDirection.name(), NamedTextColor.YELLOW));
-     }
-
-     /** Calculates the Y-axis rotation for an ItemDisplay arrow to face a direction. */
-     private AxisAngle4f calculateRotationForDirection(Direction direction) {
-          float yaw = 0f; // Default: South
-          switch (direction) {
-              case NORTH: yaw = 180f; break;
-              case EAST:  yaw = -90f; break;
-              case WEST:  yaw = 90f;  break;
-              case SOUTH: yaw = 0f;   break;
-              // UP/DOWN would need X/Z rotation, not handled here
-            default:
-                break;
-          }
-          // Rotation around Y axis
-          return new AxisAngle4f((float) Math.toRadians(yaw), 0f, 1f, 0f);
-     }
-
-
-     /** Helper to calculate placement location */
-     private Location calculatePlacementLocation(Player player, Block clickedBlock, BlockFace clickedFace, double yOffset) {
-        // ... (Implementation remains the same) ...
-         Location spawnLocation;
-         Location eyeLoc = player.getEyeLocation();
-         if (clickedBlock != null && clickedFace != null) {
-             Block potentialBlock = clickedBlock.getRelative(clickedFace);
-             if (!potentialBlock.getType().isSolid() || potentialBlock.isLiquid()) {
-                 spawnLocation = potentialBlock.getLocation().add(0.5, 0, 0.5);
-                 spawnLocation.setY(potentialBlock.getY() + yOffset);
-             } else {
-                 spawnLocation = eyeLoc.clone().add(player.getFacing().getDirection().multiply(1.5));
-                 spawnLocation.setY(Math.floor(spawnLocation.getY()) + yOffset);
-             }
-         } else {
-             spawnLocation = eyeLoc.clone().add(player.getFacing().getDirection().multiply(1.5));
-             spawnLocation.setY(Math.floor(spawnLocation.getY()) + yOffset);
-         }
-         spawnLocation.setPitch(0);
-         spawnLocation.setYaw(player.getLocation().getYaw());
-         return spawnLocation;
-     }
-
+    }
 }
