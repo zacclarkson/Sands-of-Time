@@ -466,12 +466,13 @@ public class DungeonGenerator {
                  }
              }
          }
-         // Example: Prioritize Gold Key in Lava Parkour
+         // Prioritize Gold Key: the gold key room is the unique segment where containedVaultKey == GOLD.
+         // No type filter needed — the key metadata alone identifies the correct segment.
          if (!keysPlacedInDFS.contains(VaultColor.GOLD)) {
               MinMax range = KEY_DEPTH_RANGES.get(VaultColor.GOLD);
               if (range != null && currentDepth >= range.min && currentDepth <= range.max) {
                   List<Segment> keyCandidates = candidates.stream()
-                          .filter(s -> s.getType() == SegmentType.LAVA_PARKOUR && s.getContainedVaultKey() == VaultColor.GOLD)
+                          .filter(s -> s.getContainedVaultKey() == VaultColor.GOLD)
                           .collect(Collectors.toList());
                   if (!keyCandidates.isEmpty()) {
                       plugin.getLogger().finest("Prioritizing Gold Key placement at depth " + currentDepth);

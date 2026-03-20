@@ -1,11 +1,12 @@
 package com.clarkson.sot.utils;
 
 // Local project imports
-import com.clarkson.sot.dungeon.segment.*; // Import SegmentType if needed by Segment
-import com.clarkson.sot.dungeon.VaultColor; // Import VaultColor if needed by Segment
+import com.clarkson.sot.dungeon.segment.*;
+import com.clarkson.sot.dungeon.VaultColor;
 import com.clarkson.sot.dungeon.segment.PlacedSegment;
 import com.clarkson.sot.dungeon.segment.Segment;
 import com.clarkson.sot.dungeon.segment.Segment.RelativeEntryPoint;
+import com.clarkson.sot.dungeon.segment.SegmentBound;
 
 // WorldEdit imports
 import com.sk89q.worldedit.EditSession;
@@ -343,6 +344,24 @@ public class StructureSaver {
                 json.add("keyLocationOffset", serializeBlockVector3(keyOffset));
             }
 
+            // --- Serialize new door / gate / lever / extra spawn fields ---
+            SegmentBound vaultDoor = segmentTemplate.getVaultDoorBound();
+            if (vaultDoor != null) {
+                json.add("vaultDoorBound", serializeSegmentBound(vaultDoor));
+            }
+
+            json.add("gates", serializeSegmentBoundList(segmentTemplate.getGates()));
+
+            BlockVector3 lever = segmentTemplate.getLeverOffset();
+            if (lever != null) {
+                json.add("leverOffset", serializeBlockVector3(lever));
+            }
+
+            json.add("sandSacrificeLocations", serializeBlockVectorList(
+                    segmentTemplate.getSandSacrificeLocations(), "sandSacrificeLocations", segmentName));
+            json.add("mobSpawnerLocations", serializeBlockVectorList(
+                    segmentTemplate.getMobSpawnerLocations(), "mobSpawnerLocations", segmentName));
+
             return json;
 
         } catch (Exception e) {
@@ -392,6 +411,24 @@ public class StructureSaver {
             }
         }
         return jsonArray;
+    }
+
+    private JsonObject serializeSegmentBound(@Nullable SegmentBound bound) {
+        if (bound == null) return null;
+        JsonObject obj = new JsonObject();
+        obj.add("min", serializeBlockVector3(bound.getMin()));
+        obj.add("max", serializeBlockVector3(bound.getMax()));
+        return obj;
+    }
+
+    private JsonArray serializeSegmentBoundList(@Nullable List<SegmentBound> bounds) {
+        JsonArray arr = new JsonArray();
+        if (bounds != null) {
+            for (SegmentBound b : bounds) {
+                if (b != null) arr.add(serializeSegmentBound(b));
+            }
+        }
+        return arr;
     }
 
     // sanitizeFileName remains the same
