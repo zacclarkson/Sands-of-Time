@@ -1,70 +1,49 @@
 name: SoT
-version: '${project.version}' # Uses version from pom.xml
+version: '${project.version}'
 main: com.clarkson.sot.main.SoT
-api-version: '1.21' # <-- Updated to match target server/Java version
-depend: [WorldEdit] # Declare WorldEdit dependency
-loadbefore: [] # Optional: Add plugins that should load AFTER this one
-authors: [ZacClarkson] # Use list format for authors
+api-version: '1.21'
+depend: [WorldEdit]
+authors: [ZacClarkson]
 description: A minecraft game based on MCC
 
 commands:
-  # --- Builder Tool Commands ---
-  sotplacecoindisplay: # <-- Added definition
-    description: Spawns a visual coin stack display for segment building.
-    usage: /<command> <value>
-    permission: sot.admin.placedisplay
-  sotgetcointool:
-    description: Gives the player a tool to place Coin Displays.
-    usage: /<command> <value>
-    permission: sot.admin.givetool
-  sotgetitemtool: # <-- Added definition
-    description: Gives the player a tool to place Item Spawn markers.
+
+  # --- Segment Builder Tool ---
+  sotbuilder:
+    description: Gives the single master segment builder tool (BLAZE_ROD).
     usage: /<command>
-    permission: sot.admin.givetool # Reusing permission
-  sotgetentrytool: # <-- Added definition
-    description: Gives the player a tool to place Entry Point markers.
-    usage: /<command>
-    permission: sot.admin.givetool # Reusing permission
+    permission: sot.admin.builder
+
+  sotmode:
+    description: Switches the segment builder tool mode.
+    usage: /<command> <mode> [color|value]
+    permission: sot.admin.builder
+
   sotsavesegment:
     description: Saves the selected WorldEdit region as a new SoT segment template.
-    usage: /<command> <name> <type> <schematic_filename> [totalCoins]
+    usage: /<command> <name> <type>
     permission: sot.admin.savesegment
 
-  # --- Game Control Commands (Examples - Implement these) ---
+  # --- Game Control Commands (implement as needed) ---
   # sot:
-    # description: Main command for Sands of Time game control.
-    # usage: /<command> <setup|start|end|set> ...
-    # permission: sot.admin.control
-    # aliases: [sandsoftime] # Optional aliases
-  # team:
-    # description: Command for team assignments.
-    # usage: /<command> assign <player> <TeamID>
-    # permission: sot.admin.team
+  #   description: Main command for Sands of Time game control.
+  #   usage: /<command> <setup|start|end|set> ...
+  #   permission: sot.admin.control
 
 permissions:
-  sot.admin.givetool:
-    description: Allows getting the SoT builder tools (coin, item, entry point). # <-- Updated description
-    default: op
-  sot.admin.placedisplay:
-    description: Allows placing visual coin displays for building using the tool.
-    default: op
-  sot.admin.placeitemspawn:
-    description: Allows placing item spawn markers for building using the tool.
-    default: op
-  sot.admin.placeentrypoint: # <-- Added definition
-    description: Allows placing entry point markers for building using the tool.
-    default: op
-  sot.admin.removemarker:
-    description: Allows removing SoT builder markers with left-click using a tool.
-    default: op
-  sot.admin.savesegment:
-    description: Allows saving new SoT segments.
-    default: op
-  sot.admin.control: # Example permission for game control
-    description: Allows controlling the SoT game state (setup, start, end, set).
-    default: op
-  sot.admin.team: # Example permission for team command
-    description: Allows managing SoT team assignments.
+
+  sot.admin.builder:
+    description: Allows using the segment builder tool and switching modes.
     default: op
 
-# ... potentially other plugin.yml sections like loadbefore/softdepend ...
+  sot.admin.savesegment:
+    description: Allows saving new SoT segment templates.
+    default: op
+
+  sot.admin.control:
+    description: Allows controlling the SoT game state (setup, start, end).
+    default: op
+
+  sot.admin.team:
+    description: Allows managing SoT team assignments.
+    default: op

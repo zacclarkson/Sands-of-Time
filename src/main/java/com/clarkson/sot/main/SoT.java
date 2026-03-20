@@ -21,7 +21,8 @@ import com.clarkson.sot.utils.StructureLoader;
 import com.clarkson.sot.utils.TeamManager;
 // Import Commands
 import com.clarkson.sot.commands.*;
-// Import Listeners
+// Import Listeners / Session management
+import com.clarkson.sot.events.BuilderSessionManager;
 import com.clarkson.sot.events.ToolListener;
 // Import Entities if needed for static init
 import com.clarkson.sot.entities.CoinStack;
@@ -30,7 +31,7 @@ import com.clarkson.sot.entities.CoinStack;
 public class SoT extends JavaPlugin {
 
     // --- Instance Variables for Managers ---
-    private GameManager gameManager; // Must be initialized first
+    private GameManager gameManager;
     private TeamManager teamManager;
     private PlayerStateManager playerStateManager;
     private StructureLoader structureLoader;
@@ -39,7 +40,7 @@ public class SoT extends JavaPlugin {
     private ScoreManager scoreManager;
     private SandManager sandManager;
     private BankingManager bankingManager;
-    // Add others as needed
+    private BuilderSessionManager builderSessionManager;
 
     @Override
     public void onEnable() {
@@ -100,19 +101,21 @@ public class SoT extends JavaPlugin {
         // 4. Initialize static keys if needed
         CoinStack.initializeKeys(this);
 
+        // 5. Builder session manager (shared between ToolListener and SetBuilderModeCommand)
+        builderSessionManager = new BuilderSessionManager();
+
 
         // --- Register Commands ---
-        // Pass necessary managers to commands that need them
-        this.getCommand("sotplacecoindisplay").setExecutor(new PlaceCoinDisplayCommand(this));
-        this.getCommand("sotgetcointool").setExecutor(new GiveCoinToolCommand());
-        this.getCommand("sotgetitemtool").setExecutor(new GiveItemToolCommand(this));
-        this.getCommand("sotgetentrytool").setExecutor(new GiveEntryPointToolCommand(this));
-        // this.getCommand("sotsavesegment").setExecutor(new SaveSegmentCommand(this)); // Needs StructureSaver instance
+        SetBuilderModeCommand modeCmd = new SetBuilderModeCommand(builderSessionManager);
+        this.getCommand("sotbuilder").setExecutor(new GiveBuilderToolCommand(this));
+        this.getCommand("sotmode").setExecutor(modeCmd);
+        this.getCommand("sotmode").setTabCompleter(modeCmd);
+        this.getCommand("sotsavesegment").setExecutor(new SaveSegmentCommand(this));
 
 
         // --- Register Listeners ---
-        getServer().getPluginManager().registerEvents(new ToolListener(this), this);
-        getServer().getPluginManager().registerEvents(vaultManager, this); // VaultManager handles vault interactions
+        getServer().getPluginManager().registerEvents(new ToolListener(this, builderSessionManager), this);
+        getServer().getPluginManager().registerEvents(vaultManager, this);
 
 
         getLogger().info("Sands of Time Enabled Successfully.");
