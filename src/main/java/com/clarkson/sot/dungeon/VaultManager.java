@@ -207,7 +207,7 @@ public class VaultManager implements Listener {
         if (consumeKeyItem(player, keyColor)) {
             markVaultOpen(teamId, clickedVaultColor);
             openVaultEffects(player, clickedVaultColor, clickedBlock.getLocation());
-            // TODO: Trigger reward logic
+            spawnVaultRewards(teamId, clickedVaultColor, clickedBlock.getLocation());
         } else {
             player.sendMessage(Component.text("Error: Could not consume the key from your inventory!", NamedTextColor.RED));
             plugin.getLogger().warning("Failed to consume key " + keyColor + " from " + player.getName() + " even after checks passed.");
@@ -350,6 +350,42 @@ public class VaultManager implements Listener {
             case GOLD: return NamedTextColor.GOLD;
             default: return NamedTextColor.WHITE;
         }
+    }
+
+    /**
+     * Spawns high-value coin rewards near the opened vault.
+     * Harder vaults give bigger rewards.
+     */
+    private void spawnVaultRewards(UUID teamId, VaultColor color, Location vaultLocation) {
+        // Reward values scale by vault difficulty
+        int baseRewardValue;
+        int coinCount;
+        switch (color) {
+            case BLUE:  baseRewardValue = 30;  coinCount = 5;  break;
+            case GREEN: baseRewardValue = 40;  coinCount = 6;  break;
+            case RED:   baseRewardValue = 60;  coinCount = 8;  break;
+            case GOLD:  baseRewardValue = 100; coinCount = 10; break;
+            default:    baseRewardValue = 20;  coinCount = 4;  break;
+        }
+
+        var floorItemManager = gameManager.getFloorItemManager();
+        if (floorItemManager == null) {
+            plugin.getLogger().warning("Cannot spawn vault rewards: FloorItemManager is null");
+            return;
+        }
+
+        // Spawn coins in a small area around the vault
+        Random random = new Random();
+        UUID instanceId = UUID.randomUUID(); // Use a dummy segment ID for vault rewards
+        for (int i = 0; i < coinCount; i++) {
+            double offsetX = (random.nextDouble() - 0.5) * 4; // Spread within 4 blocks
+            double offsetZ = (random.nextDouble() - 0.5) * 4;
+            Location coinLoc = vaultLocation.clone().add(offsetX, 0, offsetZ);
+            int value = baseRewardValue + random.nextInt(baseRewardValue / 2);
+            floorItemManager.spawnCoinStack(coinLoc, value, teamId, instanceId, 0);
+        }
+
+        plugin.getLogger().info("Spawned " + coinCount + " reward coins for " + color + " vault (team " + teamId + ")");
     }
 
     /**

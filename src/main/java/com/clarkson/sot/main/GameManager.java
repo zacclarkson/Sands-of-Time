@@ -1,7 +1,7 @@
 package com.clarkson.sot.main;
 
 // Required Imports (ensure all needed imports are present)
-import com.clarkson.sot.dungeon.*; // Includes Dungeon, DungeonBlueprint, VaultColor, VaultManager
+import com.clarkson.sot.dungeon.*; // Includes Dungeon, DungeonBlueprint, DeathCage, VaultColor, VaultManager
 import com.clarkson.sot.dungeon.DoorManager; // Import DoorManager
 import com.clarkson.sot.events.FloorItemManager; // Import FloorItemManager
 import com.clarkson.sot.scoring.BankingManager;
@@ -72,8 +72,8 @@ public class GameManager {
         this.playerStateManager = new PlayerStateManager();
         this.teamManager = new TeamManager(this); // Pass self
         this.scoreManager = new ScoreManager(teamManager, this, plugin);
-        this.bankingManager = new BankingManager(scoreManager);
-        this.sandManager = new SandManager(this); // Pass self
+        this.bankingManager = new BankingManager(scoreManager, this, plugin);
+        this.sandManager = new SandManager(this, plugin); // Pass self and plugin
         this.vaultManager = new VaultManager((SoT) plugin, this); // Pass SoT plugin, GameManager
         this.floorItemManager = new FloorItemManager((SoT) plugin, this, scoreManager); // Pass SoT plugin, GameManager, ScoreManager
         this.doorManager = new DoorManager((SoT) plugin, this); // Pass SoT plugin, GameManager
@@ -187,7 +187,10 @@ public class GameManager {
             }
             teamDungeonManagers.put(teamId, teamDungeon); // Store the manager
 
-            // 3. Teleport Team Members to their specific Hub
+            // 3. Assign each player to their own death cage
+            assignPlayerCages(teamId, team);
+
+            // 4. Teleport Team Members to their specific Hub
             Location teamHubLocation = getTeamHubLocation(teamId); // Get instance-specific hub
             if (teamHubLocation != null) {
                  for (UUID memberId : team.getMemberUUIDs()) {
@@ -271,9 +274,22 @@ public class GameManager {
 
         for (SoTTeam team : activeTeamsInGame.values()) { if (team.isTimerRunning()) team.stopTimer(); }
 
-        // TODO: Final score calculations & display
+        // --- Final score calculations & display ---
+        displayFinalScores();
 
-        // TODO: Teleport remaining players out
+        // Teleport remaining players to lobby
+        for (SoTTeam team : activeTeamsInGame.values()) {
+            for (UUID memberId : team.getMemberUUIDs()) {
+                Player player = Bukkit.getPlayer(memberId);
+                if (player != null && player.isOnline()) {
+                    Bukkit.getScheduler().runTask(plugin, () -> {
+                        if (player.isValid() && lobbyLocation != null) {
+                            player.teleport(lobbyLocation);
+                        }
+                    });
+                }
+            }
+        }
 
         // Cleanup dungeon instances and manager states
         for (DungeonManager dm : teamDungeonManagers.values()) {
@@ -292,12 +308,154 @@ public class GameManager {
 
 
     // --- Player Action Handlers ---
-    public void handlePlayerDeath(Player player) { /* ... (Implementation mostly same, ensure getTeamDeathCageLocation works) ... */ }
-    public void handlePlayerRevive(Player deadPlayer, Player reviver) { /* ... (Implementation mostly same, ensure getTeamHubLocation works) ... */ }
-    public void handlePlayerLeave(Player player) { /* ... (Implementation mostly same, ensure getTeamSafeExitLocation works) ... */ }
+
+    /**
+     * Handles a player dying in the dungeon.
+     * - Clears unbanked coins (items drop naturally at death location)
+     * - Updates status to DEAD_AWAITING_REVIVE
+     * - Teleports to death cage
+     */
+    public void handlePlayerDeath(Player player) {
+        if (player == null) return;
+        UUID playerUUID = player.getUniqueId();
+        UUID teamId = teamManager.getPlayerTeamId(player);
+        if (teamId == null) return;
+
+        // Apply death penalty — clears unbanked score (items already drop at death location)
+        int lostCoins = scoreManager.applyDeathPenalty(playerUUID);
+
+        // Update state
+        playerStateManager.updateStatus(playerUUID, PlayerStatus.DEAD_AWAITING_REVIVE);
+
+        // Teleport to player's assigned death cage
+        Location cageLocation = getPlayerDeathCageLocation(teamId, playerUUID);
+        if (cageLocation != null) {
+            Bukkit.getScheduler().runTask(plugin, () -> {
+                if (player.isValid()) {
+                    player.teleport(cageLocation.clone().add(0.5, 0.1, 0.5));
+                    player.sendMessage(Component.text("You died! A teammate must sacrifice sand to free you.", NamedTextColor.RED));
+                }
+            });
+        }
+
+        // Notify team
+        NamedTextColor teamColor = teamManager.getTeamColor(teamId);
+        Component deathMsg = Component.text(player.getName(), teamColor)
+                .append(Component.text(" has died!", NamedTextColor.RED));
+        SoTTeam team = activeTeamsInGame.get(teamId);
+        if (team != null) {
+            for (UUID memberId : team.getMemberUUIDs()) {
+                Player member = Bukkit.getPlayer(memberId);
+                if (member != null && member.isOnline()) {
+                    member.sendMessage(deathMsg);
+                }
+            }
+        }
+
+        if (lostCoins > 0) {
+            plugin.getLogger().info(player.getName() + " died, lost " + lostCoins + " unbanked coins");
+        }
+    }
+
+    /**
+     * Handles reviving a dead player (called from SandManager after sand is consumed).
+     */
+    public void handlePlayerRevive(Player deadPlayer, Player reviver) {
+        if (deadPlayer == null || reviver == null) return;
+        UUID teamId = teamManager.getPlayerTeamId(deadPlayer);
+        if (teamId == null) return;
+
+        playerStateManager.updateStatus(deadPlayer, PlayerStatus.ALIVE_IN_DUNGEON);
+
+        Location hubLocation = getTeamHubLocation(teamId);
+        if (hubLocation != null) {
+            Bukkit.getScheduler().runTask(plugin, () -> {
+                if (deadPlayer.isValid()) {
+                    deadPlayer.teleport(hubLocation.clone().add(0.5, 0.1, 0.5));
+                }
+            });
+        }
+
+        plugin.getLogger().info(reviver.getName() + " revived " + deadPlayer.getName());
+    }
+
+    /**
+     * Handles a player escaping the dungeon safely.
+     */
+    public void handlePlayerLeave(Player player) {
+        if (player == null) return;
+        UUID playerUUID = player.getUniqueId();
+        UUID teamId = teamManager.getPlayerTeamId(player);
+        if (teamId == null) return;
+
+        playerStateManager.updateStatus(playerUUID, PlayerStatus.ESCAPED_SAFE);
+        scoreManager.playerEscaped(playerUUID);
+
+        // Teleport to safe exit
+        Location safeExit = getTeamSafeExitLocation(teamId);
+        if (safeExit != null) {
+            Bukkit.getScheduler().runTask(plugin, () -> {
+                if (player.isValid()) {
+                    player.teleport(safeExit.clone().add(0.5, 0.1, 0.5));
+                    player.sendMessage(Component.text("You escaped safely!", NamedTextColor.GREEN));
+                }
+            });
+        }
+
+        // Notify team
+        NamedTextColor teamColor = teamManager.getTeamColor(teamId);
+        Component escapeMsg = Component.text(player.getName(), teamColor)
+                .append(Component.text(" has escaped the dungeon!", NamedTextColor.GREEN));
+        Bukkit.getServer().broadcast(escapeMsg);
+
+        plugin.getLogger().info(player.getName() + " escaped the dungeon safely");
+    }
+
+    // --- Final Scores ---
+
+    /**
+     * Calculates and broadcasts final scores. The team with the highest banked score wins.
+     */
+    private void displayFinalScores() {
+        Bukkit.getServer().broadcast(Component.text(""));
+        Bukkit.getServer().broadcast(Component.text("=== FINAL SCORES ===", NamedTextColor.GOLD, TextDecoration.BOLD));
+
+        // Sort teams by banked score descending
+        List<SoTTeam> sortedTeams = new ArrayList<>(activeTeamsInGame.values());
+        sortedTeams.sort(Comparator.comparingInt(SoTTeam::getBankedScore).reversed());
+
+        int rank = 1;
+        for (SoTTeam team : sortedTeams) {
+            NamedTextColor teamColor = teamManager.getTeamColor(team.getTeamId());
+            Component line = Component.text("#" + rank + " ", NamedTextColor.WHITE)
+                    .append(Component.text(team.getTeamName(), teamColor))
+                    .append(Component.text(" - " + team.getBankedScore() + " coins", NamedTextColor.YELLOW));
+            Bukkit.getServer().broadcast(line);
+            rank++;
+        }
+
+        // Announce winner
+        if (!sortedTeams.isEmpty()) {
+            SoTTeam winner = sortedTeams.get(0);
+            if (winner.getBankedScore() > 0) {
+                NamedTextColor winnerColor = teamManager.getTeamColor(winner.getTeamId());
+                Bukkit.getServer().broadcast(Component.text(""));
+                Bukkit.getServer().broadcast(
+                        Component.text(winner.getTeamName(), winnerColor, TextDecoration.BOLD)
+                                .append(Component.text(" wins Sands of Time!", NamedTextColor.GOLD, TextDecoration.BOLD)));
+            }
+        }
+        Bukkit.getServer().broadcast(Component.text("====================", NamedTextColor.GOLD, TextDecoration.BOLD));
+    }
 
     // --- Utility Methods & Getters ---
-    public SoTTeam getActiveTeamForPlayer(Player player) { /* ... */ return null;}
+
+    public SoTTeam getActiveTeamForPlayer(Player player) {
+        if (player == null) return null;
+        UUID teamId = teamManager.getPlayerTeamId(player);
+        if (teamId == null) return null;
+        return activeTeamsInGame.get(teamId);
+    }
     public Map<UUID, SoTTeam> getActiveTeams() { return Collections.unmodifiableMap(activeTeamsInGame); }
 
     /** Gets the absolute world location of the Hub for a specific team's instance. */
@@ -331,21 +489,62 @@ public class GameManager {
         return teamDungeonData.getHubLocation(); // Placeholder: return hub for now
     }
 
-    /** Placeholder method to get the instance-specific Death Cage location. */
-     @Nullable
-     private Location getTeamDeathCageLocation(UUID teamId) {
-         DungeonManager teamDungeonManager = teamDungeonManagers.get(teamId);
-         if (teamDungeonManager == null) return null;
-         Dungeon teamDungeonData = teamDungeonManager.getDungeonData();
-         if (teamDungeonData == null) return null;
-         List<Location> cages = teamDungeonData.getDeathCageLocations();
-         if (cages == null || cages.isEmpty()) {
-             plugin.getLogger().warning("No death cage locations defined in Dungeon data for team " + teamId);
-             // Fallback to universal trapped location if no specific cage found
-             return this.configTrappedLocation;
-         }
-         return cages.get(new Random().nextInt(cages.size()));
-     }
+    /**
+     * Assigns each player on a team to their own death cage.
+     * Called during startGame() after dungeon instances are created.
+     */
+    private void assignPlayerCages(UUID teamId, SoTTeam team) {
+        DungeonManager teamDungeonManager = teamDungeonManagers.get(teamId);
+        if (teamDungeonManager == null || teamDungeonManager.getDungeonData() == null) return;
+
+        List<DeathCage> cages = teamDungeonManager.getDungeonData().getDeathCages();
+        int cageIndex = 0;
+        for (UUID memberId : team.getMemberUUIDs()) {
+            if (cageIndex >= cages.size()) {
+                plugin.getLogger().warning("Not enough death cages for team " + team.getTeamName()
+                    + " (have " + cages.size() + ", need more). Player " + memberId + " unassigned.");
+                break;
+            }
+            cages.get(cageIndex).assignPlayer(memberId);
+            plugin.getLogger().fine("Assigned player " + memberId + " to death cage " + cageIndex + " for team " + teamId);
+            cageIndex++;
+        }
+    }
+
+    /**
+     * Gets the death cage location assigned to a specific player.
+     * @return The cage location, or the universal trapped location as fallback.
+     */
+    @Nullable
+    private Location getPlayerDeathCageLocation(UUID teamId, UUID playerUUID) {
+        DungeonManager teamDungeonManager = teamDungeonManagers.get(teamId);
+        if (teamDungeonManager == null || teamDungeonManager.getDungeonData() == null) {
+            return this.configTrappedLocation;
+        }
+        for (DeathCage cage : teamDungeonManager.getDungeonData().getDeathCages()) {
+            if (playerUUID.equals(cage.getAssignedPlayerUUID())) {
+                return cage.getCageLocation();
+            }
+        }
+        plugin.getLogger().warning("No death cage assigned to player " + playerUUID + " on team " + teamId);
+        return this.configTrappedLocation;
+    }
+
+    /**
+     * Finds the DeathCage whose sacrifice point is at the given location for a team.
+     * @return The DeathCage, or null if no match.
+     */
+    @Nullable
+    public DeathCage getDeathCageAtSacrificePoint(UUID teamId, Location location) {
+        DungeonManager teamDungeonManager = teamDungeonManagers.get(teamId);
+        if (teamDungeonManager == null || teamDungeonManager.getDungeonData() == null) return null;
+        for (DeathCage cage : teamDungeonManager.getDungeonData().getDeathCages()) {
+            if (cage.isSacrificePointAt(location)) {
+                return cage;
+            }
+        }
+        return null;
+    }
 
     /** Finds the team ID associated with a given world location. */
     @Nullable

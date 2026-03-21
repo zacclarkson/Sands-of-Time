@@ -2,7 +2,7 @@ package com.clarkson.sot.events; // Or a more suitable package like com.clarkson
 
 import com.clarkson.sot.entities.CoinStack;
 import com.clarkson.sot.entities.FloorItem;
-// Import other FloorItem implementations like FloorLoot, Key, SandPile when created
+import com.clarkson.sot.entities.FloorLoot;
 import com.clarkson.sot.main.GameManager;
 import com.clarkson.sot.main.GameState;
 import com.clarkson.sot.main.SoT;
@@ -78,19 +78,29 @@ public class FloorItemManager implements Listener {
      * @param segmentInstanceId Owning segment instance.
      * @param depth Dungeon depth.
      */
+    private static final double ITEM_SPAWN_CHANCE = 0.30; // 30% chance per location
+    private static final Random random = new Random();
+    private static final Material[] LOOT_TABLE = {
+        Material.TORCH, Material.TORCH, Material.TORCH,           // Common
+        Material.ARROW, Material.ARROW,                            // Common
+        Material.BREAD, Material.BREAD,                            // Common
+        Material.IRON_SWORD,                                       // Uncommon
+        Material.LEATHER_CHESTPLATE,                               // Uncommon
+        Material.SHIELD,                                           // Rare
+    };
+
     public void spawnGenericItem(@NotNull Location location, @NotNull UUID teamId, @NotNull UUID segmentInstanceId, int depth) {
-        // TODO: Implement spawn rate logic (e.g., 30% chance to spawn anything here)
-        // Example: if (random.nextDouble() > ITEM_SPAWN_CHANCE) return;
+        // 30% chance to spawn anything at this location
+        if (random.nextDouble() > ITEM_SPAWN_CHANCE) return;
 
-        // TODO: Implement loot table logic to decide *what* item to spawn
-        // Example: Randomly choose between TORCH, IRON_SWORD, LEATHER_CHESTPLATE...
-        ItemStack itemToSpawn = new ItemStack(Material.TORCH, 4); // Placeholder
+        // Pick a random item from the loot table
+        Material lootMaterial = LOOT_TABLE[random.nextInt(LOOT_TABLE.length)];
+        int amount = (lootMaterial == Material.TORCH || lootMaterial == Material.ARROW) ? 2 + random.nextInt(3) : 1;
+        ItemStack itemToSpawn = new ItemStack(lootMaterial, amount);
 
-        // TODO: Create a FloorLoot class implementing FloorItem
-        // FloorLoot floorLoot = new FloorLoot(plugin, location, itemToSpawn, teamId, segmentInstanceId, depth);
-        // trackItem(floorLoot);
-        // plugin.getLogger().finer("Spawned FloorLoot " + floorLoot.getUniqueId() + " for team " + teamId);
-        plugin.getLogger().warning("spawnGenericItem logic not yet implemented!");
+        FloorLoot floorLoot = new FloorLoot(plugin, location, itemToSpawn, teamId, segmentInstanceId, depth);
+        trackItem(floorLoot);
+        plugin.getLogger().finer("Spawned FloorLoot " + floorLoot.getUniqueId() + " (" + lootMaterial + ") for team " + teamId);
     }
 
      /**
@@ -102,15 +112,14 @@ public class FloorItemManager implements Listener {
       * @param segmentInstanceId Owning segment instance.
       * @param depth Dungeon depth.
       */
+     /**
+      * Sand spawning is handled by DungeonManager as actual SAND blocks placed in the world.
+      * Players break them with a shovel to collect sand (handled by SandManager).
+      * This method is kept for API compatibility but does nothing.
+      */
      public void spawnSandPile(@NotNull Location location, int amount, @NotNull UUID teamId, @NotNull UUID segmentInstanceId, int depth) {
-         // TODO: Implement spawn rate logic for sand piles if desired
-         // Example: if (random.nextDouble() > SAND_SPAWN_CHANCE) return;
-
-         // TODO: Create a SandPile class implementing FloorItem
-         // SandPile sandPile = new SandPile(plugin, location, amount, teamId, segmentInstanceId, depth);
-         // trackItem(sandPile);
-         // plugin.getLogger().finer("Spawned SandPile " + sandPile.getUniqueId() + " for team " + teamId);
-         plugin.getLogger().warning("spawnSandPile logic not yet implemented!");
+         // Sand is placed as real SAND blocks by DungeonManager.populateFloorItems()
+         // Collection is handled by SandManager.onBlockBreak()
      }
 
 
@@ -232,8 +241,10 @@ public class FloorItemManager implements Listener {
     }
 
     public void clearAllTeamStates() {
-        // TODO Auto-generated method stub
-        throw new UnsupportedOperationException("Unimplemented method 'clearAllTeamStates'");
+        plugin.getLogger().info("Clearing all floor items for " + itemsByTeamInstance.size() + " teams.");
+        for (UUID teamId : new ArrayList<>(itemsByTeamInstance.keySet())) {
+            clearTeamState(teamId);
+        }
     }
 
 }

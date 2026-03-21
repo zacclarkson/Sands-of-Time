@@ -1,13 +1,17 @@
-package com.clarkson.sot.dungeon; // Or com.clarkson.sot.dungeon
+package com.clarkson.sot.dungeon;
 
-import com.clarkson.sot.entities.Area; // Needed for init logic later
-import com.clarkson.sot.entities.Door; // Import the interface/abstract class
+import com.clarkson.sot.dungeon.segment.Direction;
+import com.clarkson.sot.dungeon.segment.EntryPoint;
+import com.clarkson.sot.dungeon.segment.PlacedSegment;
+import com.clarkson.sot.entities.Area;
+import com.clarkson.sot.entities.Door;
+import com.clarkson.sot.entities.SegmentDoor;
 import com.clarkson.sot.entities.VaultDoor;
 import com.clarkson.sot.main.GameManager;
 import com.clarkson.sot.main.GameState;
 import com.clarkson.sot.main.SoT;
 
-import net.kyori.adventure.text.Component; // Adventure API
+import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
 
 import org.bukkit.Location;
@@ -21,6 +25,7 @@ import org.bukkit.event.Listener;
 import org.bukkit.event.block.Action;
 import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.inventory.ItemStack;
+import org.bukkit.util.Vector;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -59,18 +64,41 @@ public class DoorManager implements Listener {
         Map<Location, Door> teamDoors = new ConcurrentHashMap<>();
 
         // --- Create Segment Doors (Between segments) ---
-        // TODO: Implement logic to find adjacent segments and create doors at entry points.
-        // This requires iterating through placedSegments in dungeonData.getBlueprintData(),
-        // finding connections between adjacent segments based on their relative origins and entry points,
-        // calculating the absolute location of the entry point block(s) (potential lock location / bounds),
-        // determining the bounds (e.g., 1x2 or 2x2 area around the entry point),
-        // and choosing a door material (e.g., IRON_BARS or from segment metadata).
-        plugin.getLogger().warning("SegmentDoor initialization logic is not yet implemented in DoorManager!");
-        // Example Placeholder:
-        // Location exampleLockLoc = dungeonData.getHubLocation().clone().add(5, 0, 0); // Totally fake location
-        // Area exampleBounds = new Area(exampleLockLoc.clone().add(0,0,0), exampleLockLoc.clone().add(0,1,0)); // Fake 1x2 bounds
-        // SegmentDoor exampleDoor = new SegmentDoor(plugin, teamId, exampleBounds, exampleLockLoc, Material.IRON_BARS);
-        // teamDoors.put(exampleLockLoc, exampleDoor);
+        // Iterate placed segments and create doors at entry points that connect to other segments.
+        // Entry points are 3 wide x 4 tall. The marker is at bottom center.
+        DungeonManager teamDungeonManager = gameManager.getTeamDungeonManager(teamId);
+        if (teamDungeonManager != null) {
+            List<PlacedSegment> placedSegments = teamDungeonManager.getPlacedSegmentsInWorld();
+            Set<String> processedConnections = new HashSet<>(); // Avoid duplicate doors
+
+            for (PlacedSegment segment : placedSegments) {
+                for (EntryPoint ep : segment.getAbsoluteEntryPoints()) {
+                    Location epLoc = ep.getLocation();
+                    Direction dir = ep.getDirection();
+                    if (epLoc == null || dir == null) continue;
+
+                    // Create a unique key for this connection to avoid duplicates
+                    // (two segments share the same connection point)
+                    String connectionKey = epLoc.getBlockX() + "," + epLoc.getBlockY() + "," + epLoc.getBlockZ();
+                    if (processedConnections.contains(connectionKey)) continue;
+                    processedConnections.add(connectionKey);
+
+                    // Build door bounds: 3 wide x 4 tall centered on the entry point marker (bottom center)
+                    // The marker is at bottom center of the 3x4 opening
+                    Vector perpendicular = getPerpendicular(dir);
+                    Location min = epLoc.clone().add(perpendicular.clone().multiply(-1)); // One block left
+                    Location max = epLoc.clone().add(perpendicular).add(0, 3, 0); // One block right, 3 blocks up
+
+                    Area doorBounds = new Area(min, max);
+                    Location lockLoc = epLoc.clone().add(0, 1, 0); // Lock at eye level (1 above marker)
+
+                    SegmentDoor segDoor = new SegmentDoor(plugin, teamId, doorBounds, lockLoc, Material.DARK_OAK_PLANKS);
+                    teamDoors.put(lockLoc, segDoor);
+                    plugin.getLogger().finer("Created SegmentDoor at " + lockLoc.toVector() + " for team " + teamId);
+                }
+            }
+            plugin.getLogger().info("Created " + processedConnections.size() + " segment doors for team " + teamId);
+        }
 
 
         // --- Create Vault Doors ---
@@ -207,11 +235,25 @@ public class DoorManager implements Listener {
     }
 
     public void clearAllTeamStates() {
-        // TODO Auto-generated method stub
-        throw new UnsupportedOperationException("Unimplemented method 'clearAllTeamStates'");
+        int count = doorsByTeamAndLockLocation.size();
+        doorsByTeamAndLockLocation.clear();
+        plugin.getLogger().info("Cleared door states for " + count + " teams.");
     }
 
-    // TODO: Add method to create Rusty Key ItemStack using ItemManager
-    // public ItemStack createRustyKey() { return ItemManager.createRustyKey(); }
-
+    /**
+     * Gets a perpendicular horizontal vector for a given direction.
+     * Used to calculate door width across an entry point.
+     */
+    private Vector getPerpendicular(Direction dir) {
+        switch (dir) {
+            case NORTH:
+            case SOUTH:
+                return new Vector(1, 0, 0); // Door spans along X axis
+            case EAST:
+            case WEST:
+                return new Vector(0, 0, 1); // Door spans along Z axis
+            default:
+                return new Vector(1, 0, 0); // Fallback
+        }
+    }
 }

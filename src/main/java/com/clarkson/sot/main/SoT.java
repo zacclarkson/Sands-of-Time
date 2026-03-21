@@ -23,9 +23,13 @@ import com.clarkson.sot.utils.TeamManager;
 import com.clarkson.sot.commands.*;
 // Import Listeners / Session management
 import com.clarkson.sot.events.BuilderSessionManager;
+import com.clarkson.sot.events.DeathListener;
+import com.clarkson.sot.events.EscapeListener;
 import com.clarkson.sot.events.ToolListener;
 // Import Entities if needed for static init
 import com.clarkson.sot.entities.CoinStack;
+import com.clarkson.sot.entities.FloorLoot;
+import com.clarkson.sot.entities.Key;
 
 
 public class SoT extends JavaPlugin {
@@ -87,8 +91,8 @@ public class SoT extends JavaPlugin {
         playerStateManager = new PlayerStateManager();
         teamManager = new TeamManager(gameManager); // Now gameManager is not null
         scoreManager = new ScoreManager(teamManager, gameManager, this);
-        bankingManager = new BankingManager(scoreManager);
-        sandManager = new SandManager(gameManager);
+        bankingManager = new BankingManager(scoreManager, gameManager, this);
+        sandManager = new SandManager(gameManager, this);
         vaultManager = new VaultManager(this, gameManager);
         structureLoader = new StructureLoader(this);
         dungeonGenerator = new DungeonGenerator(this);
@@ -100,6 +104,8 @@ public class SoT extends JavaPlugin {
 
         // 4. Initialize static keys if needed
         CoinStack.initializeKeys(this);
+        Key.initializeKeys(this);
+        FloorLoot.initializeKeys(this);
 
         // 5. Builder session manager (shared between ToolListener and SetBuilderModeCommand)
         builderSessionManager = new BuilderSessionManager();
@@ -116,6 +122,10 @@ public class SoT extends JavaPlugin {
         // --- Register Listeners ---
         getServer().getPluginManager().registerEvents(new ToolListener(this, builderSessionManager), this);
         getServer().getPluginManager().registerEvents(vaultManager, this);
+        getServer().getPluginManager().registerEvents(bankingManager, this);
+        getServer().getPluginManager().registerEvents(sandManager, this);
+        getServer().getPluginManager().registerEvents(new DeathListener(gameManager), this);
+        getServer().getPluginManager().registerEvents(new EscapeListener(gameManager), this);
 
 
         getLogger().info("Sands of Time Enabled Successfully.");

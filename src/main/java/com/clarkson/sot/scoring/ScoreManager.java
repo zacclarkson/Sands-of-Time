@@ -1,84 +1,86 @@
-package com.clarkson.sot.scoring; // Example package
+package com.clarkson.sot.scoring;
 
-import com.clarkson.sot.main.GameManager; // Need GameManager access
-import com.clarkson.sot.dungeon.segment.PlacedSegment; // Need PlacedSegment
-import com.clarkson.sot.dungeon.segment.Segment; // Need Segment template
+import com.clarkson.sot.entities.CoinStack;
 import com.clarkson.sot.entities.FloorItem;
-import com.clarkson.sot.utils.SoTTeam;
-import com.clarkson.sot.utils.TeamManager; // Assuming dependency
+import com.clarkson.sot.main.GameManager;
+import com.clarkson.sot.utils.TeamManager;
 
-import org.bukkit.Bukkit;
-import org.bukkit.NamespacedKey;
-import org.bukkit.entity.Item; // If using dropped items
-import org.bukkit.entity.Player; // Import Player
+import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.format.NamedTextColor;
+
+import org.bukkit.entity.Item;
+import org.bukkit.entity.Player;
 import org.bukkit.inventory.ItemStack;
-import org.bukkit.inventory.meta.ItemMeta;
-import org.bukkit.persistence.PersistentDataContainer;
-import org.bukkit.persistence.PersistentDataType;
-import org.bukkit.plugin.Plugin; // ScoreManager might not need Plugin directly anymore
-import org.jetbrains.annotations.NotNull;
+import org.bukkit.plugin.Plugin;
 
-import java.util.Optional;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.UUID;
-import java.util.logging.Level;
-import java.util.HashMap; // Import HashMap
-import java.util.Map; // Import Map
 
 
 public class ScoreManager {
     private final TeamManager teamManager;
-    private final GameManager gameManager; // Dependency to access dungeon layout and the key
-    private final Plugin plugin; // Still useful for logging
+    private final GameManager gameManager;
+    private final Plugin plugin;
 
+    private final Map<UUID, Integer> playerUnbankedScores = new HashMap<>();
 
-    // TODO: Add tracking for player unbanked scores
-    private Map<UUID, Integer> playerUnbankedScores = new HashMap<>();
+    // Depth scaling: 100% at depth 0, up to 120% at max depth
+    private static final int MAX_DUNGEON_DEPTH = 10;
+    private static final double MAX_DEPTH_MULTIPLIER = 1.20;
 
     public ScoreManager(TeamManager teamManager, GameManager gameManager, Plugin plugin) {
         this.teamManager = teamManager;
         this.gameManager = gameManager;
-        this.plugin = plugin; // Keep for logging
+        this.plugin = plugin;
     }
 
     /**
-     * Processes a collected coin, calculates its scaled value based on its origin segment,
-     * and updates the player's unbanked score.
-     *
-     * @param player The player who collected the coin.
-     * @param coinItem The ItemStack representing the collected coin.
-     * @param baseCoinValue The base value of this coin type before scaling.
+     * Main entry point: called by FloorItemManager when a player picks up a floor item.
+     * Dispatches to the appropriate handler based on item type.
+     */
+    public void collectFloorItem(Player player, FloorItem item) {
+        if (item instanceof CoinStack) {
+            CoinStack coin = (CoinStack) item;
+            int scaledValue = calculateScaledCoinValue(coin.getBaseValue(), coin.getDepth());
+            updatePlayerUnbankedScore(player.getUniqueId(), scaledValue);
+            player.sendActionBar(Component.text("+" + scaledValue + " coins", NamedTextColor.GOLD));
+            plugin.getLogger().fine(player.getName() + " collected coin worth " + scaledValue
+                    + " (base: " + coin.getBaseValue() + ", depth: " + coin.getDepth() + ")");
+        }
+        // Future: handle FloorLoot (add to inventory), SandPile (add sand to team), etc.
+    }
+
+    /**
+     * Processes a collected coin from an ItemStack (e.g., recovering dropped coins).
      */
     public void playerCollectedCoin(Player player, ItemStack coinItem, int baseCoinValue) {
+        // When recovering dropped coins, no depth scaling — use base value directly
+        updatePlayerUnbankedScore(player.getUniqueId(), baseCoinValue);
+        player.sendActionBar(Component.text("+" + baseCoinValue + " coins", NamedTextColor.GOLD));
+        plugin.getLogger().fine(player.getName() + " recovered coin worth " + baseCoinValue);
     }
 
-     /**
-      * Processes a collected coin from a dropped Item entity.
-      * Extracts the ItemStack and calls the primary method.
-      *
-      * @param player The player who collected the coin.
-      * @param itemEntity The Item entity that was picked up.
-      * @param baseCoinValue The base value of this coin type.
-      */
-     public void playerCollectedCoin(Player player, Item itemEntity, int baseCoinValue) {
-
-     }
-
+    /**
+     * Processes a collected coin from a dropped Item entity.
+     */
+    public void playerCollectedCoin(Player player, Item itemEntity, int baseCoinValue) {
+        if (itemEntity == null) return;
+        playerCollectedCoin(player, itemEntity.getItemStack(), baseCoinValue);
+    }
 
     /**
-     * Calculates the scaled value of a coin based on metadata attached to the ItemStack.
-     * It retrieves the originating PlacedSegment ID from the item's metadata,
-     * finds that segment via GameManager, and uses the segment's coinMultiplier.
-     *
-     * @param coinItem The coin ItemStack containing the segment ID in its PDC.
-     * @param baseValue The base value of the coin before scaling.
-     * @return The calculated scaled value, or the baseValue if scaling fails.
+     * Calculates the depth-scaled value of a coin.
+     * Multiplier ranges from 100% (depth 0) to 120% (max depth).
      */
-    private int calculateScaledValue(ItemStack coinItem, int baseValue) {
-        return -1;
+    private int calculateScaledCoinValue(int baseValue, int depth) {
+        double depthRatio = Math.min((double) depth / MAX_DUNGEON_DEPTH, 1.0);
+        double multiplier = 1.0 + depthRatio * (MAX_DEPTH_MULTIPLIER - 1.0);
+        return (int) Math.round(baseValue * multiplier);
     }
 
     // --- Unbanked Score Tracking ---
-    // Basic implementation - consider thread safety if accessed async
+
     public void updatePlayerUnbankedScore(UUID playerUUID, int delta) {
         playerUnbankedScores.put(playerUUID, getPlayerUnbankedScore(playerUUID) + delta);
     }
@@ -88,7 +90,7 @@ public class ScoreManager {
     }
 
     public void setPlayerUnbankedScore(UUID playerUUID, int amount) {
-         playerUnbankedScores.put(playerUUID, Math.max(0, amount)); // Ensure score doesn't go below 0
+        playerUnbankedScores.put(playerUUID, Math.max(0, amount));
     }
 
     public void clearPlayerUnbankedScore(UUID playerUUID) {
@@ -99,27 +101,44 @@ public class ScoreManager {
         playerUnbankedScores.clear();
     }
 
+    // --- Penalty & Escape Methods ---
 
-    // --- Other ScoreManager methods ---
-
-    /** Applies death penalty (e.g., lose 20% of unbanked coins) */
-    public void applyDeathPenalty(UUID playerUUID) {
-
+    /**
+     * Death penalty: all unbanked coins are dropped at the death location.
+     * The score is cleared here; the actual item drop is handled by the death event listener.
+     * Returns the amount lost so the caller can create the drop.
+     */
+    public int applyDeathPenalty(UUID playerUUID) {
+        int lostCoins = getPlayerUnbankedScore(playerUUID);
+        clearPlayerUnbankedScore(playerUUID);
+        if (lostCoins > 0) {
+            plugin.getLogger().info("Death penalty: " + playerUUID + " lost " + lostCoins + " unbanked coins");
+        }
+        return lostCoins;
     }
 
-    /** Finalizes score when player escapes safely (adds all unbanked to team score) */
+    /**
+     * Player escaped safely. Unbanked coins are kept but only banked coins count
+     * toward the team's final score. No score changes needed here.
+     */
     public void playerEscaped(UUID playerUUID) {
-
+        plugin.getLogger().info("Player " + playerUUID + " escaped safely with "
+                + getPlayerUnbankedScore(playerUUID) + " unbanked coins (must bank to count)");
     }
 
-    /** Clears unbanked score when player is trapped by timer */
+    /**
+     * Timer expiry: ALL unbanked coins are lost — complete wipeout.
+     */
     public void applyTimerEndPenalty(UUID playerUUID) {
-
-    }
-
-    public void collectFloorItem(Player player, FloorItem item) {
-        // TODO Auto-generated method stub
-        throw new UnsupportedOperationException("Unimplemented method 'collectFloorItem'");
+        int lostCoins = getPlayerUnbankedScore(playerUUID);
+        clearPlayerUnbankedScore(playerUUID);
+        if (lostCoins > 0) {
+            plugin.getLogger().info("Timer expiry: " + playerUUID + " lost " + lostCoins + " unbanked coins (trapped)");
+            Player player = org.bukkit.Bukkit.getPlayer(playerUUID);
+            if (player != null && player.isOnline()) {
+                player.sendMessage(Component.text("You lost " + lostCoins + " unbanked coins!", NamedTextColor.RED));
+            }
+        }
     }
 
 }

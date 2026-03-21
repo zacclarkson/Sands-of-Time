@@ -30,7 +30,7 @@ public class Dungeon {
     private final List<Location> sandSpawnLocations;
     private final List<Location> coinSpawnLocations;
     private final List<Location> itemSpawnLocations;
-    // TODO: Add List<Location> deathCageLocations;
+    private final List<DeathCage> deathCages;
 
     /**
      * Constructor for the Dungeon data object.
@@ -46,21 +46,23 @@ public class Dungeon {
      * @param sandSpawnLocations List of absolute sand spawn locations.
      * @param coinSpawnLocations List of absolute coin spawn locations.
      * @param itemSpawnLocations List of absolute general item spawn locations.
+     * @param deathCages List of death cage + sacrifice point pairs (max 4).
      */
     public Dungeon(@NotNull UUID teamId, @NotNull World world, @NotNull Location origin, @NotNull DungeonBlueprint blueprint,
-                   @Nullable Location hubLocation, // Hub location might technically fail to calculate?
+                   @Nullable Location hubLocation,
                    @NotNull Map<VaultColor, Location> vaultMarkerLocations,
                    @NotNull Map<VaultColor, Location> keySpawnLocations,
                    @NotNull List<Location> sandSpawnLocations,
                    @NotNull List<Location> coinSpawnLocations,
-                   @NotNull List<Location> itemSpawnLocations) {
+                   @NotNull List<Location> itemSpawnLocations,
+                   @NotNull List<DeathCage> deathCages) {
 
-        this.instanceId = UUID.randomUUID(); // Generate unique ID for this run
+        this.instanceId = UUID.randomUUID();
         this.teamId = Objects.requireNonNull(teamId, "Team ID cannot be null");
         this.world = Objects.requireNonNull(world, "Dungeon world cannot be null");
         this.origin = Objects.requireNonNull(origin, "Dungeon origin cannot be null");
-        this.blueprint = Objects.requireNonNull(blueprint, "Blueprint cannot be null"); // Store the blueprint reference
-        this.hubLocation = hubLocation; // Allow null? Or ensure generator guarantees it?
+        this.blueprint = Objects.requireNonNull(blueprint, "Blueprint cannot be null");
+        this.hubLocation = hubLocation;
 
         // Store immutable copies of maps/lists containing ABSOLUTE locations
         this.vaultMarkerLocations = Collections.unmodifiableMap(new HashMap<>(vaultMarkerLocations));
@@ -68,6 +70,7 @@ public class Dungeon {
         this.sandSpawnLocations = Collections.unmodifiableList(new ArrayList<>(sandSpawnLocations));
         this.coinSpawnLocations = Collections.unmodifiableList(new ArrayList<>(coinSpawnLocations));
         this.itemSpawnLocations = Collections.unmodifiableList(new ArrayList<>(itemSpawnLocations));
+        this.deathCages = Collections.unmodifiableList(new ArrayList<>(deathCages));
     }
 
     // --- Getters ---
@@ -84,11 +87,8 @@ public class Dungeon {
     @NotNull public List<Location> getCoinSpawnLocations() { return coinSpawnLocations; } // Already unmodifiable
     @NotNull public List<Location> getItemSpawnLocations() { return itemSpawnLocations; } // Already unmodifiable
 
-    // TODO: Implement getDeathCageLocations() - needs data from blueprint/segments
-    @NotNull public List<Location> getDeathCageLocations() {
-        // Placeholder - Needs logic to find death cage segments in blueprint
-        // and calculate their absolute locations based on dungeon origin.
-        return Collections.emptyList();
+    @NotNull public List<DeathCage> getDeathCages() {
+        return deathCages; // Already unmodifiable
     }
 
     /**

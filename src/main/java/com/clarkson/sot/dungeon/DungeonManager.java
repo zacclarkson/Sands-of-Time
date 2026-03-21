@@ -130,13 +130,29 @@ public class DungeonManager {
 
 
         // --- 3. Create Dungeon Data Object ---
-        // Now created *after* pasting. Uses the calculated absolute locations.
-        // The Dungeon constructor no longer takes the PlacedSegment list.
+        // Create 4 death cage + sacrifice point pairs near the hub (one per player, max 4)
+        List<DeathCage> deathCages = new ArrayList<>();
+        if (absHubLocation != null) {
+            // Cages are placed in a row offset from the hub center
+            // Each cage has a paired sacrifice point 2 blocks in front of it
+            int[][] cageOffsets = { {3, 0, 3}, {3, 0, -3}, {-3, 0, 3}, {-3, 0, -3} };
+            for (int[] offset : cageOffsets) {
+                Location cageLoc = absHubLocation.clone().add(offset[0], offset[1], offset[2]);
+                // Sacrifice point is 2 blocks toward hub center from the cage
+                Location sacrificeLoc = cageLoc.clone().add(
+                    offset[0] > 0 ? -2 : 2, 0,
+                    offset[2] > 0 ? -2 : 2
+                );
+                deathCages.add(new DeathCage(cageLoc, sacrificeLoc));
+            }
+        }
+
          try {
             this.dungeonData = new Dungeon(
-                teamId, world, dungeonOrigin, blueprintData, // Pass blueprint ref
+                teamId, world, dungeonOrigin, blueprintData,
                 absHubLocation, absVaultMarkers, absKeySpawns,
-                absSandSpawns, absCoinSpawns, absItemSpawns
+                absSandSpawns, absCoinSpawns, absItemSpawns,
+                deathCages
             );
              plugin.getLogger().info("Created Dungeon data object for team " + teamId);
          } catch (Exception e) {
