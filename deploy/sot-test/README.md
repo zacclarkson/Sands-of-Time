@@ -4,7 +4,7 @@ An always-on Paper 1.21.1 + WorldEdit server on the debian box that runs the cur
 SoT plugin, so you can log in from a real Minecraft client and test the UX (builder tools and, via
 `/sot`, a full game round).
 
-- **Connect:** `100.125.118.2:25580` (Tailscale) or `192.168.1.250:25580` (LAN). Game port only —
+- **Connect:** `100.125.118.2:25700` (Tailscale) or `192.168.1.250:25700` (LAN). Game port only —
   not behind Cloudflare/Authentik.
 - **Requires:** Paper 1.21.1, Java 21, WorldEdit 7.3.x (auto-installed). All provided by the
   `itzg/minecraft-server:java21` image + `MODRINTH_PROJECTS: worldedit`.
