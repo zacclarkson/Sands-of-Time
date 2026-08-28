@@ -105,14 +105,14 @@ This plugin implements (or plans to implement) the following core features of th
 
 ### Prerequisites
 
-* A Minecraft server running **Paper (or a compatible fork)** version 1.21+ (for Java 21 support).
-* **WorldEdit** plugin installed (check compatibility with MC 1.21+).
-* **Java 21** or higher installed on the server.
+* A Minecraft server running **Paper (or a compatible fork)** version **26.2** or newer.
+* **WorldEdit** 7.4.5 or newer (the first release line covering 26.2).
+* **Java 25** or newer installed on the server.
 
 ### Build
 
 * Clone the repository.
-* Ensure your local environment (JDK, Maven) is set up for Java 21.
+* Ensure your local environment (JDK, Maven) is set up for Java 25.
 * Build the project using Apache Maven: `mvn clean package`
 
 ### Install
@@ -143,8 +143,10 @@ This plugin implements (or plans to implement) the following core features of th
 
 ## Dependencies
 
-* **Paper API**: 1.21+ required (uses Java 21).
-* **WorldEdit**: Required for dungeon schematic pasting and segment saving. Version compatible with MC 1.21+ needed.
+* **Paper API**: 26.2 required (uses Java 25). Paper moved to calendar versioning, so 26.2 is
+  newer than the old 1.21 line.
+* **WorldEdit**: Required for dungeon schematic pasting and segment saving. 7.4.5 or newer, to
+  match MC 26.2.
 * **Adventure API**: Provided by modern Paper versions.
 
 ---

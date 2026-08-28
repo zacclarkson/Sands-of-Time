@@ -1,13 +1,13 @@
 # Test/dev server (`sot-test`)
 
-An always-on Paper 1.21.1 + WorldEdit server, running on a Docker host, that runs the current build of
+An always-on Paper 26.2 + WorldEdit server, running on a Docker host, that runs the current build of
 the SoT plugin so you can log in from a real Minecraft client and test the UX (builder tools and, via
 `/sot`, a full game round).
 
 - **Connect:** `<SERVER_HOST>:25700` from your Minecraft client. This is a raw game port (not HTTP),
   so expose it only on a trusted network (LAN/VPN), not the public internet.
-- **Requires:** Paper 1.21.1, Java 21, WorldEdit 7.3.x (auto-installed). All provided by the
-  `itzg/minecraft-server:java21` image + `MODRINTH_PROJECTS: worldedit`.
+- **Requires:** Paper 26.2, Java 25, WorldEdit 7.4.5+ (auto-installed). All provided by the
+  `itzg/minecraft-server:java25` image + `MODRINTH_PROJECTS: worldedit`.
 
 `compose.yml` here is the version-controlled reference; deploy a copy to a working directory on the
 host (referred to below as `<server-dir>`, e.g. `~/servers/sot-test/`).
