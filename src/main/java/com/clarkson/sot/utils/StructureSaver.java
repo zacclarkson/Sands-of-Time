@@ -357,6 +357,11 @@ public class StructureSaver {
                 json.add("leverOffset", serializeBlockVector3(lever));
             }
 
+            BlockVector3 safeExit = segmentTemplate.getSafeExitOffset();
+            if (safeExit != null) {
+                json.add("safeExitOffset", serializeBlockVector3(safeExit));
+            }
+
             json.add("sandSacrificeLocations", serializeBlockVectorList(
                     segmentTemplate.getSandSacrificeLocations(), "sandSacrificeLocations", segmentName));
             json.add("mobSpawnerLocations", serializeBlockVectorList(

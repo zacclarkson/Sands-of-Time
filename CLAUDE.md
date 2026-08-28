@@ -64,6 +64,11 @@ manually (see `integration-test/README.md`); it is **not** part of CI.
   (`plugins/SoT/<name>.json` + `schematics/<name>.schem`). Build one in-game with the builder tools +
   `/sotsavesegment <name> HUB`, then **restart** the server — there is no live reload. Until a HUB
   exists, the plugin enables fine but `/sot start` aborts.
+- **The safe exit is a segment marker.** The escape point comes from a `SAFE_EXIT` marker on a
+  segment template; a marker on the HUB segment wins over one on any other segment. Templates saved
+  before that marker existed carry none, so `GameManager.getTeamSafeExitLocation` falls back to the
+  hub and `EscapeListener` falls back to accepting any `END_PORTAL_FRAME` within 30 blocks of the
+  hub. Generation logs a warning once when no template defines an exit.
 - **Game locations come from `config.yml`.** `locations.lobby` and `locations.trapped` are stored as
   plain `world/x/y/z/yaw/pitch` scalars and read by `SoTConfig` (deliberately *not* Bukkit's
   `config.getLocation()`, whose serialized form needs a `==: org.bukkit.Location` marker and is not

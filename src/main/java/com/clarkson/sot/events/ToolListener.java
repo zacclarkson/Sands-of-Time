@@ -88,6 +88,7 @@ public class ToolListener implements Listener {
     private static final String MT_LEVER            = "LEVER";
     private static final String MT_SAND_SPAWN       = "SAND_SPAWN";
     private static final String MT_SAND_SACRIFICE   = "SAND_SACRIFICE";
+    private static final String MT_SAFE_EXIT        = "SAFE_EXIT";
     private static final String MT_COIN_SPAWN       = "COIN_SPAWN";
     private static final String MT_ITEM_SPAWN       = "ITEM_SPAWN";
     private static final String MT_MOB_SPAWNER      = "MOB_SPAWNER";
@@ -220,6 +221,10 @@ public class ToolListener implements Listener {
             case SAND_SACRIFICE:
                 placeBlockMarker(event, player, MT_SAND_SACRIFICE, SACRIFICE_MATERIAL, 0.5f, null, -1,
                         null, Component.text("Sacrifice", NamedTextColor.GOLD));
+                break;
+            case SAFE_EXIT:
+                placeBlockMarker(event, player, MT_SAFE_EXIT, Material.END_PORTAL_FRAME, 0.5f, null, -1,
+                        new ItemStack(Material.ENDER_PEARL), Component.text("Safe Exit", NamedTextColor.GREEN));
                 break;
             case COIN_SPAWN: {
                 int val = session.getCoinValue();

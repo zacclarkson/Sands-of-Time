@@ -222,6 +222,12 @@ public class DungeonGenerator {
         // Consolidate features (this populates the maps based on placed segments)
         consolidateFeatureLocations(placedSegments, vaultMarkerRelativeLocations, keySpawnRelativeLocations, sandSpawnRelativeLocations, coinSpawnRelativeLocations, itemSpawnRelativeLocations);
 
+        Vector safeExitRelativeLocation = selectSafeExitRelativeLocation(placedSegments);
+        if (safeExitRelativeLocation == null) {
+            plugin.getLogger().warning("No SAFE_EXIT marker in any segment template; escaping will fall back to "
+                    + "the hub location. Add a SAFE_EXIT marker to your HUB segment and re-save it.");
+        }
+
         // Calculate Bounds
         Vector relativeMinVec = calculateRelativeMinBounds(placedSegments);
         Vector relativeMaxVec = calculateRelativeMaxBounds(placedSegments);
@@ -256,7 +262,7 @@ public class DungeonGenerator {
         return new DungeonBlueprint(
                 placedSegments, hubRelativeLocation, vaultMarkerRelativeLocations, keySpawnRelativeLocations,
                 sandSpawnRelativeLocations, coinSpawnRelativeLocations, itemSpawnRelativeLocations,
-                blueprintBounds
+                blueprintBounds, safeExitRelativeLocation
         );
     }
 
@@ -668,6 +674,37 @@ public class DungeonGenerator {
         return new Vector(maxX, maxY, maxZ);
     }
 
+
+    /**
+     * Picks the blueprint-relative safe exit from the placed segments.
+     *
+     * <p>A marker on a {@link SegmentType#HUB} template wins over one on any other segment, since the
+     * exit belongs in the hub by convention. Among equally-ranked segments the first found wins, the
+     * same first-wins rule {@link #consolidateFeatureLocations} applies to vault and key markers.
+     *
+     * @param placedSegments The segments making up the blueprint.
+     * @return The relative safe exit location, or null if no template defines one.
+     */
+    @Nullable
+    static Vector selectSafeExitRelativeLocation(@NotNull List<PlacedSegment> placedSegments) {
+        Vector best = null;
+        boolean bestFromHub = false;
+
+        for (PlacedSegment placedSegment : placedSegments) {
+            Segment template = placedSegment.getSegmentTemplate();
+            if (template == null) continue;
+            BlockVector3 offset = template.getSafeExitOffset();
+            if (offset == null) continue;
+
+            boolean fromHub = template.getType() == SegmentType.HUB;
+            if (best != null && !(fromHub && !bestFromHub)) continue;
+
+            best = placedSegment.getWorldOrigin().toVector().clone()
+                    .add(new Vector(offset.x(), offset.y(), offset.z()));
+            bestFromHub = fromHub;
+        }
+        return best;
+    }
 
     /**
      * Iterates through all placed segments in the completed blueprint layout and consolidates

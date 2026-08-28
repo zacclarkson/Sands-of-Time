@@ -513,17 +513,46 @@ public class GameManager {
         return (hubRelative != null) ? teamOrigin.clone().add(hubRelative) : null;
     }
 
-    /** Placeholder method to get the instance-specific Safe Exit location. */
+    /**
+     * Gets the instance-specific Safe Exit location for a team.
+     * Falls back to the hub when the segment templates define no SAFE_EXIT marker; the generator
+     * has already warned about that once, so this path stays quiet.
+     */
     @Nullable
-    private Location getTeamSafeExitLocation(UUID teamId) {
+    public Location getTeamSafeExitLocation(UUID teamId) {
         DungeonManager teamDungeonManager = teamDungeonManagers.get(teamId);
         if (teamDungeonManager == null) return null;
         Dungeon teamDungeonData = teamDungeonManager.getDungeonData();
         if (teamDungeonData == null) return null;
-        // TODO: Implement logic in Dungeon.java to store/retrieve the absolute safe exit location.
-        // return teamDungeonData.getSafeExitLocation();
-        plugin.getLogger().warning("getTeamSafeExitLocation: Needs implementation in Dungeon.java");
-        return teamDungeonData.getHubLocation(); // Placeholder: return hub for now
+
+        Location safeExit = teamDungeonData.getSafeExitLocation();
+        if (safeExit != null) return safeExit;
+
+        plugin.getLogger().fine("No safe exit defined for team " + teamId + "; using the hub location.");
+        return teamDungeonData.getHubLocation();
+    }
+
+    /**
+     * Checks whether a team's dungeon defines a safe exit at all.
+     * Callers use this to decide whether to fall back to the legacy escape behaviour.
+     */
+    public boolean hasTeamSafeExit(UUID teamId) {
+        DungeonManager teamDungeonManager = teamDungeonManagers.get(teamId);
+        if (teamDungeonManager == null) return false;
+        Dungeon teamDungeonData = teamDungeonManager.getDungeonData();
+        return teamDungeonData != null && teamDungeonData.getSafeExitLocation() != null;
+    }
+
+    /**
+     * Checks whether a location is a team's safe exit block.
+     * Returns false when the team's dungeon defines no safe exit, so callers can fall back.
+     */
+    public boolean isTeamSafeExitAt(UUID teamId, Location location) {
+        if (location == null) return false;
+        DungeonManager teamDungeonManager = teamDungeonManagers.get(teamId);
+        if (teamDungeonManager == null) return false;
+        Dungeon teamDungeonData = teamDungeonManager.getDungeonData();
+        return teamDungeonData != null && teamDungeonData.isSafeExitAt(location);
     }
 
     /**

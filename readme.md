@@ -125,13 +125,14 @@ This plugin implements (or plans to implement) the following core features of th
 * **Segment Schematics & Metadata**:
   * Build segments in-game.
   * Use marker tools (`/sotgetcointool`, `/sotgetitemtool`, etc. - *Need implementation for entry points, vaults, keys*) to place markers within the segment build.
+  * Take the master builder tool with `/sotbuilder` and switch marker type with `/sotmode <mode>`. `SAFE_EXIT` marks the block players interact with to escape - place one in your HUB segment, clicking its top face.
   * Select the segment region with WorldEdit.
   * Use `/sotsavesegment <name> <type> <filename.schem>` to save both the schematic to `plugins/SoT/schematics/` and the metadata JSON to `plugins/SoT/`.
   * The plugin will load these templates on startup from the `plugins/SoT/` directory. Default templates can be bundled in `src/main/resources/default_segments/` and copied out on first run.
 * **Game Locations**:
   * Use `/sot set lobby` while standing at the desired main world anchor point (e.g., pre-game lobby).
   * Use `/sot set trapped` while standing at the location where players trapped by the timer should be sent.
-  * (Hub, Safe Exit, Death Cage are now generated per-instance based on segment metadata and are not set globally).
+  * (Hub, Safe Exit, Death Cage are now generated per-instance based on segment metadata and are not set globally). The safe exit comes from the `SAFE_EXIT` marker; a dungeon with no such marker falls back to accepting any End Portal Frame near the hub.
   * Both live in `plugins/SoT/config.yml` and can be edited by hand instead, followed by a restart:
 
     ```yaml
