@@ -92,6 +92,11 @@ public class ToolListener implements Listener {
     private static final float  EP_BARB_SCALE   = 0.45f;
     private static final double EP_TIP_DIST      = 0.45; // shaft-centre -> arrow tip
     private static final double EP_BARB_DIST     = 0.22; // tip -> barb centre
+    // A stick's item texture runs diagonally (bottom-left to top-right) within its sprite, so its
+    // visible long axis sits ~45 deg off the sprite's vertical. Pre-roll about the sprite normal to
+    // align that art with the axis the flatten+yaw math expects. Flip the sign if it points the
+    // wrong way across the diagonal.
+    private static final float  EP_STICK_ROLL   = (float) Math.toRadians(-45);
 
     public ToolListener(@NotNull SoT plugin, @NotNull BuilderSessionManager sessionManager) {
         this.plugin = plugin;
@@ -331,10 +336,12 @@ public class ToolListener implements Listener {
     private void spawnStick(World world, double x, double y, double z,
                             float yaw, float scale, String groupId) {
         Location loc = new Location(world, x, y, z);
-        // Lay the stick flat (pitch +90 deg about X: its vertical long axis maps to +Z),
-        // then yaw about Y so +Z rotates onto the requested direction.
+        // Rotation is applied right-to-left: first roll about the sprite normal (Z) to bring the
+        // stick's diagonal art onto the sprite's vertical, then pitch +90 about X to lay it flat
+        // (vertical long axis maps to +Z), then yaw about Y so +Z rotates onto the facing direction.
         Quaternionf rot = new Quaternionf(new AxisAngle4f(yaw, 0f, 1f, 0f))
-                .mul(new Quaternionf(new AxisAngle4f((float) Math.toRadians(90), 1f, 0f, 0f)));
+                .mul(new Quaternionf(new AxisAngle4f((float) Math.toRadians(90), 1f, 0f, 0f)))
+                .mul(new Quaternionf(new AxisAngle4f(EP_STICK_ROLL, 0f, 0f, 1f)));
         try {
             world.spawn(loc, ItemDisplay.class, disp -> {
                 disp.setItemStack(new ItemStack(Material.STICK));
