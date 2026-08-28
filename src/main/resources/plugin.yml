@@ -24,6 +24,16 @@ commands:
     usage: /<command> <name> <type>
     permission: sot.admin.savesegment
 
+  sotclearmarkers:
+    description: Removes all segment builder markers in your current world.
+    usage: /<command>
+    permission: sot.admin.builder
+
+  sotundo:
+    description: Removes the most recently placed segment builder marker.
+    usage: /<command>
+    permission: sot.admin.builder
+
   # --- Game Control Commands ---
   sot:
     description: Main command for Sands of Time game control and location setup.
