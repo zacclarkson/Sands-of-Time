@@ -253,7 +253,8 @@ public class DungeonManager {
         }
 
         try {
-            ClipboardFormat format = ClipboardFormats.findByFile(schematicFile);
+            // findByFile(File) is deprecated in WorldEdit 7.4; it just delegates to this.
+            ClipboardFormat format = ClipboardFormats.findByPath(schematicFile.toPath());
             if (format == null) {
                  plugin.getLogger().severe("Unknown schematic format: " + schematicFile.getName());
                  return false;
