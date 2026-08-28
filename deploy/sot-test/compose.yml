@@ -28,6 +28,10 @@ services:
       # SoT hard-depends on WorldEdit (plugin.yml `depend: [WorldEdit]`). itzg auto-downloads it
       # from Modrinth into plugins/ on first boot and it then persists in ./data/plugins/.
       MODRINTH_PROJECTS: worldedit
+      # PlugManX (SpigotMC resource 88135) lets the CD deploy hot-reload just the SoT plugin via
+      # `plugman reload SoT` over RCON instead of restarting the whole container and kicking players.
+      # Auto-downloaded on first boot; then persists in ./data/plugins/.
+      SPIGET_RESOURCES: "88135"
       # Grant yourself op so all sot.admin.* perms apply. REPLACE with your Minecraft username.
       OPS: "REPLACE_WITH_MC_USERNAME"
       # A superflat world makes building segments and watching game UX easiest. Remove for normal.
