@@ -1,0 +1,37 @@
+# Sands of Time configuration.
+#
+# Both locations below start unset. The plugin still enables without them, but
+# /sot start will refuse to run until the lobby is set, so that a round is never
+# generated somewhere nobody chose.
+#
+# To set them, either fill in the values here and restart, or stand where you
+# want each one in-game and run:
+#
+#   /sot set lobby
+#   /sot set trapped
+#
+# The command writes back to this file and applies immediately, so no restart is
+# needed when you use it.
+
+locations:
+
+  # Where players are teleported when a round ends. This is also the anchor for
+  # the visual sand timers, and its world is the world the team dungeons are
+  # generated in.
+  lobby:
+    world: ''
+    x: 0.0
+    y: 0.0
+    z: 0.0
+    yaw: 0.0
+    pitch: 0.0
+
+  # Where a player is sent when their team's sand timer runs out. Also the
+  # fallback destination when a player has no death cage assigned.
+  trapped:
+    world: ''
+    x: 0.0
+    y: 0.0
+    z: 0.0
+    yaw: 0.0
+    pitch: 0.0

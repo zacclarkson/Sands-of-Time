@@ -29,7 +29,7 @@ import org.bukkit.NamespacedKey;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.CommandSender;
-import org.bukkit.entity.BlockDisplay;
+import org.bukkit.entity.Display;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.Player;
 import org.bukkit.persistence.PersistentDataContainer;
@@ -150,7 +150,7 @@ public class SaveSegmentCommand implements CommandExecutor {
                 selMin.x() + size.x(), selMin.y() + size.y(), selMin.z() + size.z()
         );
         Collection<Entity> entities = player.getWorld().getNearbyEntities(bbox,
-                e -> e instanceof BlockDisplay
+                e -> e instanceof Display
                   && e.getPersistentDataContainer().has(BUILD_MARKER_TAG, PersistentDataType.BYTE));
 
         // --- Parse markers into Segment fields ---
@@ -175,9 +175,11 @@ public class SaveSegmentCommand implements CommandExecutor {
             PersistentDataContainer pdc = entity.getPersistentDataContainer();
             String type = pdc.getOrDefault(MARKER_TYPE_KEY, PersistentDataType.STRING, "");
 
-            // Skip frame entities — data is on the anchor only
+            // Skip cosmetic entities — data lives on the anchor only. ENTRY_FRAME/BOUND_FRAME/
+            // BOUND_CORNER1 are frame pieces; ICON/LABEL are the themed icons and floating labels.
             if ("ENTRY_FRAME".equals(type) || "BOUND_FRAME".equals(type)
-                    || "BOUND_CORNER1".equals(type)) {
+                    || "BOUND_CORNER1".equals(type)
+                    || "ICON".equals(type) || "LABEL".equals(type)) {
                 continue;
             }
 
