@@ -24,11 +24,11 @@ commands:
     usage: /<command> <name> <type>
     permission: sot.admin.savesegment
 
-  # --- Game Control Commands (implement as needed) ---
-  # sot:
-  #   description: Main command for Sands of Time game control.
-  #   usage: /<command> <setup|start|end|set> ...
-  #   permission: sot.admin.control
+  # --- Game Control Commands ---
+  sot:
+    description: Main command for Sands of Time game control.
+    usage: /<command> <setup|start|end>
+    permission: sot.admin.control
 
 permissions:
 

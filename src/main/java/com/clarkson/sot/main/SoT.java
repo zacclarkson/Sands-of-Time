@@ -10,15 +10,6 @@ import org.bukkit.World;
 
 import org.bukkit.plugin.java.JavaPlugin;
 
-// Import Managers
-import com.clarkson.sot.dungeon.DungeonGenerator;
-import com.clarkson.sot.dungeon.VaultManager;
-import com.clarkson.sot.scoring.BankingManager;
-import com.clarkson.sot.scoring.ScoreManager;
-import com.clarkson.sot.utils.PlayerStateManager;
-import com.clarkson.sot.utils.SandManager;
-import com.clarkson.sot.utils.StructureLoader;
-import com.clarkson.sot.utils.TeamManager;
 // Import Commands
 import com.clarkson.sot.commands.*;
 // Import Listeners / Session management
@@ -34,16 +25,11 @@ import com.clarkson.sot.entities.Key;
 
 public class SoT extends JavaPlugin {
 
-    // --- Instance Variables for Managers ---
+    // --- Instance Variables ---
+    // GameManager owns the single set of gameplay managers; retrieve them via its getters
+    // rather than building a parallel set here (that previously left listeners bound to
+    // instances that did not hold the live game state).
     private GameManager gameManager;
-    private TeamManager teamManager;
-    private PlayerStateManager playerStateManager;
-    private StructureLoader structureLoader;
-    private DungeonGenerator dungeonGenerator;
-    private VaultManager vaultManager;
-    private ScoreManager scoreManager;
-    private SandManager sandManager;
-    private BankingManager bankingManager;
     private BuilderSessionManager builderSessionManager;
 
     @Override
@@ -87,27 +73,16 @@ public class SoT extends JavaPlugin {
              return;
         }
 
-        // 2. Initialize other managers that need GameManager
-        playerStateManager = new PlayerStateManager();
-        teamManager = new TeamManager(gameManager); // Now gameManager is not null
-        scoreManager = new ScoreManager(teamManager, gameManager, this);
-        bankingManager = new BankingManager(scoreManager, gameManager, this);
-        sandManager = new SandManager(gameManager, this);
-        vaultManager = new VaultManager(this, gameManager);
-        structureLoader = new StructureLoader(this);
-        dungeonGenerator = new DungeonGenerator(this);
+        // 2. Managers are owned and constructed by GameManager (which also loads the dungeon
+        //    segment templates in its constructor). We register GameManager's instances as
+        //    listeners below so events act on the objects that hold the live game state.
 
-        // 3. Load segment templates (needs StructureLoader)
-        if (!dungeonGenerator.loadSegmentTemplates(getDataFolder())) {
-             getLogger().warning("Could not load any segment templates from " + getDataFolder().getPath() + ". Dungeon generation may fail.");
-        }
-
-        // 4. Initialize static keys if needed
+        // 3. Initialize static keys if needed
         CoinStack.initializeKeys(this);
         Key.initializeKeys(this);
         FloorLoot.initializeKeys(this);
 
-        // 5. Builder session manager (shared between ToolListener and SetBuilderModeCommand)
+        // 4. Builder session manager (shared between ToolListener and SetBuilderModeCommand)
         builderSessionManager = new BuilderSessionManager();
 
 
@@ -118,12 +93,20 @@ public class SoT extends JavaPlugin {
         this.getCommand("sotmode").setTabCompleter(modeCmd);
         this.getCommand("sotsavesegment").setExecutor(new SaveSegmentCommand(this));
 
+        GameCommand gameCmd = new GameCommand(gameManager);
+        this.getCommand("sot").setExecutor(gameCmd);
+        this.getCommand("sot").setTabCompleter(gameCmd);
+
 
         // --- Register Listeners ---
+        // All gameplay listeners are the GameManager-owned instances so they operate on the
+        // live game state. FloorItemManager and DoorManager were previously never registered.
         getServer().getPluginManager().registerEvents(new ToolListener(this, builderSessionManager), this);
-        getServer().getPluginManager().registerEvents(vaultManager, this);
-        getServer().getPluginManager().registerEvents(bankingManager, this);
-        getServer().getPluginManager().registerEvents(sandManager, this);
+        getServer().getPluginManager().registerEvents(gameManager.getVaultManager(), this);
+        getServer().getPluginManager().registerEvents(gameManager.getBankingManager(), this);
+        getServer().getPluginManager().registerEvents(gameManager.getSandManager(), this);
+        getServer().getPluginManager().registerEvents(gameManager.getFloorItemManager(), this);
+        getServer().getPluginManager().registerEvents(gameManager.getDoorManager(), this);
         getServer().getPluginManager().registerEvents(new DeathListener(gameManager), this);
         getServer().getPluginManager().registerEvents(new EscapeListener(gameManager), this);
 
@@ -150,7 +133,7 @@ public class SoT extends JavaPlugin {
      // TODO: Implement helper method to load locations from config.yml safely
      // private Location getConfigLocation(String path) { ... }
 
-     // --- Getters for Managers (Optional) ---
-     // public GameManager getGameManager() { return gameManager; }
+     // --- Getters ---
+     public GameManager getGameManager() { return gameManager; }
 
 }

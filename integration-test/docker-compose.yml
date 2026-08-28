@@ -1,0 +1,55 @@
+# Integration/E2E test harness: a real Paper 1.21.1 server running the built plugin.
+#
+# Usage (from the repo root):
+#   mvn package                       # builds target/SoT-1.0-SNAPSHOT.jar
+#   cd integration-test
+#   docker compose up -d server       # boot the server with the plugin
+#   docker compose logs -f server     # watch it enable the plugin, wait for "Done"
+#   docker compose run --rm bot        # run the Mineflayer bot scenario
+#   docker compose down                # tear everything down
+#
+# Runs on the homelab or any Docker host. online-mode is FALSE so the bot can
+# join without a Mojang/Microsoft account.
+
+services:
+  server:
+    image: itzg/minecraft-server:java21
+    tty: true
+    stdin_open: true
+    ports:
+      - "25565:25565"
+    environment:
+      EULA: "TRUE"
+      TYPE: PAPER
+      VERSION: "1.21.1"
+      ONLINE_MODE: "FALSE"
+      MEMORY: "2G"
+      # SoT hard-depends on WorldEdit (plugin.yml `depend: [WorldEdit]`); without it the plugin
+      # never enables. itzg auto-downloads it from Modrinth into plugins/ on boot.
+      MODRINTH_PROJECTS: worldedit
+      # Auto-op the bot so it can run admin/debug commands during scenarios.
+      OPS: "Tester"
+    volumes:
+      - ./data:/data
+      # Mount the freshly built plugin jar read-only into the plugins folder.
+      - ../target/SoT-1.0-SNAPSHOT.jar:/data/plugins/SoT.jar:ro
+    healthcheck:
+      test: [ "CMD", "mc-health" ]
+      start_period: 2m
+      interval: 5s
+      retries: 20
+
+  bot:
+    image: node:22-alpine
+    working_dir: /bot
+    depends_on:
+      server:
+        condition: service_healthy
+    environment:
+      MC_HOST: server
+      MC_PORT: "25565"
+      MC_VERSION: "1.21.1"
+      MC_USERNAME: Tester
+    volumes:
+      - ./bot:/bot
+    command: sh -c "npm install --no-audit --no-fund && node smoke-test.js"

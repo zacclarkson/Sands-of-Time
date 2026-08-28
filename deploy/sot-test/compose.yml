@@ -1,0 +1,42 @@
+# Persistent Sands of Time test/dev server for the homelab.
+#
+# This is the version-controlled REFERENCE copy. Deploy a copy to a working directory on your
+# Docker host (see deploy/sot-test/README.md) and `docker compose up -d`. A real Minecraft client
+# connects to this to test the plugin's UX. Fill in OPS with your Minecraft username.
+#
+# Unlike integration-test/ (a throwaway offline harness driven by a bot), this server is
+# always-on, online-mode, and keeps its world so segments/state persist between sessions.
+
+services:
+  sot-test:
+    image: itzg/minecraft-server:java21
+    container_name: sot-test
+    tty: true
+    stdin_open: true
+    restart: unless-stopped
+    ports:
+      # Host port -> MC port. A raw game port (not HTTP) — expose only on a trusted network.
+      # Join at <SERVER_HOST>:25700. Pick a host port that is free on your Docker host.
+      - "25700:25565"
+    environment:
+      EULA: "TRUE"
+      TYPE: PAPER
+      VERSION: "1.21.1"
+      MEMORY: "3G"
+      # Real login: only you (an authenticated account) can join.
+      ONLINE_MODE: "TRUE"
+      # SoT hard-depends on WorldEdit (plugin.yml `depend: [WorldEdit]`). itzg auto-downloads it
+      # from Modrinth into plugins/ on first boot and it then persists in ./data/plugins/.
+      MODRINTH_PROJECTS: worldedit
+      # Grant yourself op so all sot.admin.* perms apply. REPLACE with your Minecraft username.
+      OPS: "REPLACE_WITH_MC_USERNAME"
+      # A superflat world makes building segments and watching game UX easiest. Remove for normal.
+      LEVEL_TYPE: "minecraft:flat"
+    volumes:
+      # World + config + plugins persist here. CI/scp drops the built jar at ./data/plugins/SoT.jar.
+      - ./data:/data
+    healthcheck:
+      test: [ "CMD", "mc-health" ]
+      start_period: 2m
+      interval: 10s
+      retries: 20

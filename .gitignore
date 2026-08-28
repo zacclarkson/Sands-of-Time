@@ -58,6 +58,14 @@ release.properties
 .gradle/
 build/
 
+# Integration test harness (generated)
+integration-test/data/
+integration-test/bot/node_modules/
+integration-test/bot/package-lock.json
+
+# Homelab dev-server world/plugins (generated; reference compose.yml is tracked)
+deploy/sot-test/data/
+
 # Other
 .DS_Store
 Thumbs.db
