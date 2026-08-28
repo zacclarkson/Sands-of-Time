@@ -92,6 +92,7 @@ public class ToolListener implements Listener {
     private static final float  EP_BARB_SCALE   = 0.45f;
     private static final double EP_TIP_DIST      = 0.45; // shaft-centre -> arrow tip
     private static final double EP_BARB_DIST     = 0.22; // tip -> barb centre
+    private static final double EP_BARB_LATERAL  = 0.12; // shift both barbs left of the shaft (- = right)
     // A stick's item texture runs diagonally (bottom-left to top-right) within its sprite, so its
     // visible long axis sits ~45 deg off the sprite's vertical. Pre-roll about the sprite normal to
     // align that art with the axis the flatten+yaw math expects. Flip the sign if it points the
@@ -318,9 +319,10 @@ public class ToolListener implements Listener {
         // Shaft, centred over the glass, long axis along the facing direction.
         spawnStick(world, cx, y, cz, yaw, EP_SHAFT_SCALE, groupId);
 
-        // Two barbs at the tip, swept back 135 deg either side to form the arrowhead.
-        double tx = cx + fx * EP_TIP_DIST;
-        double tz = cz + fz * EP_TIP_DIST;
+        // Two barbs at the tip, swept back 135 deg either side to form the arrowhead. The tip is
+        // also nudged sideways along the arrow's left vector (fz, -fx) so the head sits centred.
+        double tx = cx + fx * EP_TIP_DIST + fz * EP_BARB_LATERAL;
+        double tz = cz + fz * EP_TIP_DIST - fx * EP_BARB_LATERAL;
         float leftYaw  = yaw + (float) Math.toRadians(135);
         float rightYaw = yaw - (float) Math.toRadians(135);
         spawnStick(world, tx + Math.sin(leftYaw)  * EP_BARB_DIST, y,
