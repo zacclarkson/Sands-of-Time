@@ -152,7 +152,7 @@ Segments are the building blocks of the dungeon:
 
 ### Segment Features
 Each segment template can contain any combination of:
-- **Entry points** — 3-wide x 4-tall openings that connect segments (cardinal directions: N/S/E/W). The entry point marker is placed at the bottom center block of the opening.
+- **Entry points** — 3-wide x 4-tall openings that connect segments (cardinal directions: N/S/E/W). In the builder tool the marker is a single block with a **directional arrow that must point OUT of the segment** (toward where the neighbouring segment attaches). Two segments connect only when their entry points face **opposite** directions — the generator matches a neighbour via `direction.getOpposite()` (`DungeonGenerator.generatePathRecursive`), placing them so the two entries meet at the shared boundary.
 - **Coin spawns** — locations where coins appear, with configurable base values
 - **Sand spawns** — locations where sand items may appear
 - **Item spawns** — locations for generic loot items
@@ -163,6 +163,7 @@ Each segment template can contain any combination of:
 - **Gates** — openings blocked until a lever is pulled
 - **Vault doors** — openings blocked until the matching vault is opened
 - **Levers** — interact to open all gates in the segment
+- **Safe exit** — at most one per dungeon, where escaping players are teleported (see [Escaping](#escaping))
 - **Color marking placeholder** — every segment needs a placeholder location for a color marking on the wall, used to indicate which vault branch the segment belongs to
 
 ### Depth & Difficulty
@@ -502,11 +503,12 @@ Puzzle rooms are accessible from the hub exits (not on the vault branches). They
 
 ### Entry Point Frame
 
-| Constant        | Value         |
-|-----------------|---------------|
-| Width           | 3 blocks      |
-| Height          | 4 blocks      |
-| Marker position | Bottom center |
+| Constant        | Value                          |
+|-----------------|--------------------------------|
+| Width           | 3 blocks                       |
+| Height          | 4 blocks                       |
+| Marker position | Bottom center                  |
+| Marker facing   | Outward (away from segment)    |
 
 ### Player States
 | Status | Description |

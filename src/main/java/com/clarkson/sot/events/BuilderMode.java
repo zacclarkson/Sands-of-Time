@@ -8,7 +8,7 @@ package com.clarkson.sot.events;
 public enum BuilderMode {
 
     ENTRY_POINT("Entry Point",
-            "Right-click a wall face to place. Click existing anchor to rotate.",
+            "Right-click a wall face to place; the arrow must point OUT of the segment (toward the neighbour). Right-click the marker to rotate.",
             false),
     VAULT_DOOR("Vault Door",
             "Click two air blocks to define the vault door opening. Requires /sotmode VAULT_DOOR <color>.",
