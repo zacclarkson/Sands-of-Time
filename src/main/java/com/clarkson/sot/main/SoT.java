@@ -1,10 +1,12 @@
 package com.clarkson.sot.main;
 
 import java.io.File;
+import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Consumer;
 import java.util.logging.Level;
 
-// Import Bukkit classes needed for placeholder locations
+// Import Bukkit classes needed for the configured game locations
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.NamespacedKey;
@@ -64,23 +66,22 @@ public class SoT extends JavaPlugin {
 
 
         // --- Load Required Config/Locations FIRST ---
-        // TODO: Replace these placeholders with actual loading from config.yml or command storage
-        World mainWorld = Bukkit.getWorlds().get(0); // Get default world as placeholder
-        if (mainWorld == null) {
-             getLogger().severe("Could not get a default world for placeholder locations! Disabling plugin.");
+        // Every unset location falls back to the main world's spawn so the plugin still enables and
+        // /sot set stays reachable; GameManager refuses to set up or start a round until both have
+        // actually been configured.
+        List<World> worlds = Bukkit.getWorlds();
+        if (worlds.isEmpty()) {
+             getLogger().severe("No worlds are loaded, so game locations cannot be resolved! Disabling plugin.");
              getServer().getPluginManager().disablePlugin(this);
              return;
         }
-        Location placeholderLobby = new Location(mainWorld, 0, 100, 0); // Example placeholder
-        Location placeholderTrapped = new Location(mainWorld, 10, 100, 10); // Example placeholder
-        // Add proper null checks after loading from config
+        Location fallback = worlds.get(0).getSpawnLocation();
 
 
         // --- Initialize Core Managers (Correct Order) ---
         // 1. Initialize GameManager (as others depend on it)
         try {
-             // Use placeholder locations for now
-             gameManager = new GameManager(this, placeholderLobby, placeholderTrapped);
+             gameManager = new GameManager(this, fallback, fallback);
         } catch (NullPointerException e) {
              getLogger().log(Level.SEVERE, "Failed to initialize GameManager - lobby or trapped location might be null!", e);
              getServer().getPluginManager().disablePlugin(this);
@@ -89,6 +90,15 @@ public class SoT extends JavaPlugin {
              getLogger().log(Level.SEVERE, "An unexpected error occurred initializing GameManager!", e);
              getServer().getPluginManager().disablePlugin(this);
              return;
+        }
+
+        // 1b. Apply the locations from config.yml, if they are set.
+        applyConfiguredLocation(SoTConfig.LOBBY_PATH, "lobby", gameManager::setLobbyLocation, fallback);
+        applyConfiguredLocation(SoTConfig.TRAPPED_PATH, "trapped", gameManager::setTrappedLocation, fallback);
+        if (!gameManager.areLocationsConfigured()) {
+            getLogger().warning("Sands of Time is not fully configured: "
+                    + gameManager.getUnconfiguredLocationNames()
+                    + " unset. /sot setup and /sot start will refuse to run until they are.");
         }
 
         // 2. Managers are owned and constructed by GameManager (which also loads the dungeon
@@ -116,7 +126,7 @@ public class SoT extends JavaPlugin {
         this.getCommand("sotclearmarkers").setExecutor(new ClearMarkersCommand(this, builderSessionManager));
         this.getCommand("sotundo").setExecutor(new UndoMarkerCommand(this, builderSessionManager));
 
-        GameCommand gameCmd = new GameCommand(gameManager);
+        GameCommand gameCmd = new GameCommand(this, gameManager);
         this.getCommand("sot").setExecutor(gameCmd);
         this.getCommand("sot").setTabCompleter(gameCmd);
 
@@ -189,8 +199,21 @@ public class SoT extends JavaPlugin {
          }
      }
 
-     // TODO: Implement helper method to load locations from config.yml safely
-     // private Location getConfigLocation(String path) { ... }
+     /**
+      * Reads one location from config.yml and hands it to {@code apply}. When it is unset or
+      * unusable the game manager keeps the fallback it was constructed with and stays flagged
+      * unconfigured, so the plugin still enables and the admin can fix it with {@code /sot set}.
+      */
+     private void applyConfiguredLocation(String path, String name, Consumer<Location> apply, Location fallback) {
+         Location configured = SoTConfig.readLocation(getConfig(), path, Bukkit::getWorld, getLogger());
+         if (configured != null) {
+             apply.accept(configured);
+             getLogger().info("Loaded " + name + " location: " + SoTConfig.describe(configured));
+         } else {
+             getLogger().warning("No " + name + " location set ('" + path + "' in config.yml). Using "
+                     + SoTConfig.describe(fallback) + " until an admin runs /sot set " + name + ".");
+         }
+     }
 
      // --- Getters ---
      public GameManager getGameManager() { return gameManager; }
