@@ -6,6 +6,7 @@ import com.clarkson.sot.dungeon.DoorManager; // Import DoorManager
 import com.clarkson.sot.events.FloorItemManager; // Import FloorItemManager
 import com.clarkson.sot.scoring.BankingManager;
 import com.clarkson.sot.scoring.ScoreManager;
+import com.clarkson.sot.timer.VisualTimerLayout;
 import com.clarkson.sot.utils.*; // PlayerStateManager, PlayerStatus, SandManager, SoTTeam, TeamDefinition, TeamManager
 
 import org.bukkit.Bukkit;
@@ -121,12 +122,14 @@ public class GameManager {
         // ... (Validate player assignments - same as before) ...
 
         // Create SoTTeam instances for each participating team
+        int visualTimerIndex = 0; // Column slot in the lobby, one per participating team
         for (UUID teamId : participatingTeamIds) {
             TeamDefinition definition = teamManager.getTeamDefinition(teamId);
             if (definition == null) { /* ... warning ... */ continue; }
 
-            Location visualTimerBottom = determineVisualTimerBottomLocation(definition, this.lobbyLocation);
-            Location visualTimerTop = determineVisualTimerTopLocation(definition, this.lobbyLocation);
+            Location visualTimerBottom = determineVisualTimerBottomLocation(definition, this.lobbyLocation, visualTimerIndex);
+            Location visualTimerTop = determineVisualTimerTopLocation(definition, this.lobbyLocation, visualTimerIndex);
+            visualTimerIndex++;
 
             SoTTeam activeTeam = new SoTTeam(definition, plugin, this, visualTimerBottom, visualTimerTop);
             activeTeamsInGame.put(teamId, activeTeam);
@@ -551,10 +554,32 @@ public class GameManager {
     public UUID getTeamIdForLocation(Location location) { /* ... (Implementation remains the same) ... */ return null;}
     /** Gets the DungeonManager instance for a specific team. */
     @Nullable public DungeonManager getTeamDungeonManager(UUID teamId) { return teamDungeonManagers.get(teamId); }
-    /** Determines the bottom location for a team's visual timer. */
-    private Location determineVisualTimerBottomLocation(TeamDefinition teamDef, Location anchorLocation) { /* ... Placeholder ... */ return anchorLocation; }
-    /** Determines the top location for a team's visual timer. */
-    private Location determineVisualTimerTopLocation(TeamDefinition teamDef, Location anchorLocation) { /* ... Placeholder ... */ return anchorLocation; }
+    /**
+     * Determines the bottom location (the block below the sand column) for a team's visual timer.
+     * Returns null if the anchor has no loaded world, which disables that team's display.
+     */
+    @Nullable
+    private Location determineVisualTimerBottomLocation(TeamDefinition teamDef, Location anchorLocation, int teamIndex) {
+        if (!hasVisualTimerWorld(teamDef, anchorLocation)) return null;
+        return VisualTimerLayout.bottomLocation(anchorLocation, teamIndex);
+    }
+
+    /**
+     * Determines the top location (the highest sand block) for a team's visual timer.
+     * Returns null if the anchor has no loaded world, which disables that team's display.
+     */
+    @Nullable
+    private Location determineVisualTimerTopLocation(TeamDefinition teamDef, Location anchorLocation, int teamIndex) {
+        if (!hasVisualTimerWorld(teamDef, anchorLocation)) return null;
+        return VisualTimerLayout.topLocation(anchorLocation, teamIndex);
+    }
+
+    private boolean hasVisualTimerWorld(TeamDefinition teamDef, Location anchorLocation) {
+        if (anchorLocation != null && anchorLocation.getWorld() != null) return true;
+        plugin.getLogger().warning("Lobby anchor has no loaded world; visual timer disabled for team "
+                + (teamDef != null ? teamDef.getName() : "unknown"));
+        return false;
+    }
 
     // --- Standard Getters ---
     public GameState getCurrentState() { return currentState; }
