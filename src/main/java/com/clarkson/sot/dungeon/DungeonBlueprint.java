@@ -5,6 +5,7 @@ import com.clarkson.sot.entities.Area; // Import the Area class
 import org.bukkit.Location; // Needed for Area's internal representation
 import org.bukkit.util.Vector;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
 import java.util.*;
 
@@ -29,6 +30,9 @@ public class DungeonBlueprint {
     private final List<Vector> coinSpawnRelativeLocations;
     private final List<Vector> itemSpawnRelativeLocations;
 
+    // Where players escape the dungeon. Null when no segment template carries a SAFE_EXIT marker.
+    @Nullable private final Vector safeExitRelativeLocation;
+
     // --- Changed: Use Area for Relative Bounding Box ---
     private final Area relativeBounds; // Represents bounds using relative Locations (null world)
 
@@ -43,7 +47,8 @@ public class DungeonBlueprint {
                             @NotNull List<Vector> sandSpawnRelativeLocations,
                             @NotNull List<Vector> coinSpawnRelativeLocations,
                             @NotNull List<Vector> itemSpawnRelativeLocations,
-                            @NotNull Area relativeBounds // Changed parameter
+                            @NotNull Area relativeBounds, // Changed parameter
+                            @Nullable Vector safeExitRelativeLocation
                            ) {
 
         // Validate inputs
@@ -70,6 +75,8 @@ public class DungeonBlueprint {
         this.coinSpawnRelativeLocations = Collections.unmodifiableList(new ArrayList<>(coinSpawnRelativeLocations));
         this.itemSpawnRelativeLocations = Collections.unmodifiableList(new ArrayList<>(itemSpawnRelativeLocations));
         this.relativeBounds = relativeBounds; // Store the Area object (Area itself is effectively immutable once constructed)
+        // Deliberately not null-checked: segment templates predating the SAFE_EXIT marker have none.
+        this.safeExitRelativeLocation = (safeExitRelativeLocation != null) ? safeExitRelativeLocation.clone() : null;
     }
 
     // --- Getters ---
@@ -81,6 +88,13 @@ public class DungeonBlueprint {
     @NotNull public List<Vector> getSandSpawnRelativeLocations() { return sandSpawnRelativeLocations; }
     @NotNull public List<Vector> getCoinSpawnRelativeLocations() { return coinSpawnRelativeLocations; }
     @NotNull public List<Vector> getItemSpawnRelativeLocations() { return itemSpawnRelativeLocations; }
+
+    /**
+     * Gets the relative location of the safe exit, or null if no segment template defines one.
+     */
+    @Nullable public Vector getSafeExitRelativeLocation() {
+        return safeExitRelativeLocation != null ? safeExitRelativeLocation.clone() : null;
+    }
 
     // --- Changed: Getter for Relative Bounds ---
     /**

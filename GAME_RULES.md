@@ -85,6 +85,7 @@ The hub has approximately **10 exits** leading into the dungeon. These exits fal
 - **Sphinx** — the banking NPC/location where players deposit coins
 - **Death cage** — where dead players respawn, awaiting rescue
 - **Sand sacrifice points** — one per player on the team, used to free teammates from the death cage
+- **Safe exit** — the block players interact with to leave the dungeon permanently
 - **Blue key spawn** — the blue vault key is always available in the hub (every hub must have a blue key spawn location)
 - **Green vault** — located near the hub for easy access (but its key must be found in the dungeon)
 - **Puzzle rooms** — accessible from the hub, including one containing the Red vault key (see [Puzzle Rooms](#puzzle-rooms))
@@ -164,6 +165,7 @@ Each segment template can contain any combination of:
 - **Vault doors** — openings blocked until the matching vault is opened
 - **Levers** — interact to open all gates in the segment
 - **Color marking placeholder** — every segment needs a placeholder location for a color marking on the wall, used to indicate which vault branch the segment belongs to
+- **Safe exit** — the block players interact with to escape. One per dungeon; a marker on the HUB segment takes priority over one on any other segment
 
 ### Depth & Difficulty
 
@@ -362,7 +364,9 @@ When a team's timer reaches zero:
 
 ## Escaping
 
-- Players can escape the dungeon by reaching the **safe exit** location
+- Players escape by right-clicking the **safe exit** block, marked in a segment template with the `SAFE_EXIT` builder marker
+- The exit location is per-instance: each team's copy of the dungeon has its own
+- A dungeon whose segment templates carry no safe-exit marker falls back to the older behaviour, where any End Portal Frame within 30 blocks of the hub works
 - Escaping changes the player's status to **ESCAPED_SAFE**
 - Escaped players keep their unbanked coins (still need to be banked before escaping for them to count as team score)
 - Once escaped, a player cannot re-enter the dungeon

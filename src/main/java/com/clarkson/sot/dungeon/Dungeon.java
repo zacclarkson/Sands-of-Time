@@ -31,6 +31,7 @@ public class Dungeon {
     private final List<Location> coinSpawnLocations;
     private final List<Location> itemSpawnLocations;
     private final List<DeathCage> deathCages;
+    private final Location safeExitLocation; // Null when no segment template defined one
 
     /**
      * Constructor for the Dungeon data object.
@@ -47,6 +48,7 @@ public class Dungeon {
      * @param coinSpawnLocations List of absolute coin spawn locations.
      * @param itemSpawnLocations List of absolute general item spawn locations.
      * @param deathCages List of death cage + sacrifice point pairs (max 4).
+     * @param safeExitLocation The absolute location players interact with to escape, or null if undefined.
      */
     public Dungeon(@NotNull UUID teamId, @NotNull World world, @NotNull Location origin, @NotNull DungeonBlueprint blueprint,
                    @Nullable Location hubLocation,
@@ -55,7 +57,8 @@ public class Dungeon {
                    @NotNull List<Location> sandSpawnLocations,
                    @NotNull List<Location> coinSpawnLocations,
                    @NotNull List<Location> itemSpawnLocations,
-                   @NotNull List<DeathCage> deathCages) {
+                   @NotNull List<DeathCage> deathCages,
+                   @Nullable Location safeExitLocation) {
 
         this.instanceId = UUID.randomUUID();
         this.teamId = Objects.requireNonNull(teamId, "Team ID cannot be null");
@@ -63,6 +66,7 @@ public class Dungeon {
         this.origin = Objects.requireNonNull(origin, "Dungeon origin cannot be null");
         this.blueprint = Objects.requireNonNull(blueprint, "Blueprint cannot be null");
         this.hubLocation = hubLocation;
+        this.safeExitLocation = safeExitLocation;
 
         // Store immutable copies of maps/lists containing ABSOLUTE locations
         this.vaultMarkerLocations = Collections.unmodifiableMap(new HashMap<>(vaultMarkerLocations));
@@ -89,6 +93,25 @@ public class Dungeon {
 
     @NotNull public List<DeathCage> getDeathCages() {
         return deathCages; // Already unmodifiable
+    }
+
+    /**
+     * Gets the absolute safe exit location, or null if no segment template defined one.
+     */
+    @Nullable public Location getSafeExitLocation() {
+        return safeExitLocation != null ? safeExitLocation.clone() : null;
+    }
+
+    /**
+     * Checks if the given location is this instance's safe exit block (block coordinates).
+     * Always false when this dungeon has no safe exit defined.
+     */
+    public boolean isSafeExitAt(@NotNull Location location) {
+        return safeExitLocation != null
+            && safeExitLocation.getBlockX() == location.getBlockX()
+            && safeExitLocation.getBlockY() == location.getBlockY()
+            && safeExitLocation.getBlockZ() == location.getBlockZ()
+            && Objects.equals(safeExitLocation.getWorld(), location.getWorld());
     }
 
     /**

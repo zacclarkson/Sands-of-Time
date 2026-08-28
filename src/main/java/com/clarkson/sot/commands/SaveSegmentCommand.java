@@ -166,6 +166,7 @@ public class SaveSegmentCommand implements CommandExecutor {
         BlockVector3 vaultOffset               = null;
         BlockVector3 keyOffset                 = null;
         BlockVector3 leverOffset               = null;
+        BlockVector3 safeExitOffset            = null;
         VaultColor containedVault              = null;
         VaultColor containedVaultKey           = null;
 
@@ -261,6 +262,14 @@ public class SaveSegmentCommand implements CommandExecutor {
                 case "SAND_SACRIFICE":
                     sandSacrifices.add(relPos);
                     break;
+                case "SAFE_EXIT": {
+                    if (safeExitOffset != null) {
+                        warn(player, "Multiple SAFE_EXIT markers — only one allowed. Using first.");
+                    } else {
+                        safeExitOffset = relPos;
+                    }
+                    break;
+                }
                 case "COIN_SPAWN": {
                     coinSpawns.add(relPos);
                     Integer val = pdc.get(COIN_VALUE_KEY, PersistentDataType.INTEGER);
@@ -319,6 +328,16 @@ public class SaveSegmentCommand implements CommandExecutor {
                         ? (containedVaultKey != null ? containedVaultKey.name() : "color unknown")
                         : "none",
                         keyOffset != null ? NamedTextColor.AQUA : NamedTextColor.GRAY)));
+        player.sendMessage(Component.text("  Safe Exit: ", NamedTextColor.WHITE)
+                .append(Component.text(safeExitOffset != null ? "yes" : "none",
+                        safeExitOffset != null ? NamedTextColor.GREEN : NamedTextColor.GRAY)));
+
+        // A hub without an exit still saves; escaping just falls back to the hub location.
+        if (segmentType == SegmentType.HUB && safeExitOffset == null) {
+            warn(player, "HUB segment has no SAFE_EXIT marker — escaping will fall back to the hub.");
+        } else if (segmentType != SegmentType.HUB && safeExitOffset != null) {
+            warn(player, "SAFE_EXIT on a non-HUB segment — a HUB segment's marker takes priority.");
+        }
 
         // --- Build Segment ---
         String schematicFileName = segmentName + ".schem";
@@ -330,7 +349,8 @@ public class SaveSegmentCommand implements CommandExecutor {
                     totalCoins, containedVault, containedVaultKey,
                     vaultOffset, keyOffset,
                     vaultDoorBound, gates, leverOffset,
-                    sandSacrifices, mobSpawners
+                    sandSacrifices, mobSpawners,
+                    safeExitOffset
             );
         } catch (Exception e) {
             plugin.getLogger().log(Level.SEVERE, "Error constructing Segment for " + segmentName, e);

@@ -119,6 +119,8 @@ public class DungeonManager {
         List<Location> absCoinSpawns = calculateAbsoluteLocations(blueprintData.getCoinSpawnRelativeLocations());
         List<Location> absItemSpawns = calculateAbsoluteLocations(blueprintData.getItemSpawnRelativeLocations());
         Location absHubLocation = dungeonOrigin.clone().add(blueprintData.getHubRelativeLocation());
+        Vector safeExitRelative = blueprintData.getSafeExitRelativeLocation();
+        Location absSafeExitLocation = (safeExitRelative != null) ? dungeonOrigin.clone().add(safeExitRelative) : null;
 
 
         // --- 2. Paste Schematics (Populates placedSegmentsInWorld) ---
@@ -152,7 +154,7 @@ public class DungeonManager {
                 teamId, world, dungeonOrigin, blueprintData,
                 absHubLocation, absVaultMarkers, absKeySpawns,
                 absSandSpawns, absCoinSpawns, absItemSpawns,
-                deathCages
+                deathCages, absSafeExitLocation
             );
              plugin.getLogger().info("Created Dungeon data object for team " + teamId);
          } catch (Exception e) {

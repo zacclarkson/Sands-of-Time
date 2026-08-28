@@ -78,6 +78,7 @@ public class ToolListener implements Listener {
     private static final String MT_LEVER            = "LEVER";
     private static final String MT_SAND_SPAWN       = "SAND_SPAWN";
     private static final String MT_SAND_SACRIFICE   = "SAND_SACRIFICE";
+    private static final String MT_SAFE_EXIT        = "SAFE_EXIT";
     private static final String MT_COIN_SPAWN       = "COIN_SPAWN";
     private static final String MT_ITEM_SPAWN       = "ITEM_SPAWN";
     private static final String MT_MOB_SPAWNER      = "MOB_SPAWNER";
@@ -169,6 +170,10 @@ public class ToolListener implements Listener {
             case SAND_SACRIFICE:
                 placePointMarker(event, player, MT_SAND_SACRIFICE,
                         Material.GOLD_BLOCK, 0.5f, null, -1);
+                break;
+            case SAFE_EXIT:
+                placePointMarker(event, player, MT_SAFE_EXIT,
+                        Material.END_PORTAL_FRAME, 0.5f, null, -1);
                 break;
             case COIN_SPAWN:
                 placePointMarker(event, player, MT_COIN_SPAWN,
