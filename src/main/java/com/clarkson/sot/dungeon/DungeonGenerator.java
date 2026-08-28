@@ -222,6 +222,9 @@ public class DungeonGenerator {
         // Consolidate features (this populates the maps based on placed segments)
         consolidateFeatureLocations(placedSegments, vaultMarkerRelativeLocations, keySpawnRelativeLocations, sandSpawnRelativeLocations, coinSpawnRelativeLocations, itemSpawnRelativeLocations);
 
+        // Locate the safe exit escaping players are teleported to (normally in the hub)
+        Vector safeExitRelativeLocation = findSafeExitRelativeLocation(placedSegments);
+
         // Calculate Bounds
         Vector relativeMinVec = calculateRelativeMinBounds(placedSegments);
         Vector relativeMaxVec = calculateRelativeMaxBounds(placedSegments);
@@ -256,7 +259,7 @@ public class DungeonGenerator {
         return new DungeonBlueprint(
                 placedSegments, hubRelativeLocation, vaultMarkerRelativeLocations, keySpawnRelativeLocations,
                 sandSpawnRelativeLocations, coinSpawnRelativeLocations, itemSpawnRelativeLocations,
-                blueprintBounds
+                safeExitRelativeLocation, blueprintBounds
         );
     }
 
@@ -766,6 +769,39 @@ public class DungeonGenerator {
              }
         }
         plugin.getLogger().fine("Feature consolidation complete.");
+    }
+
+    /**
+     * Finds the safe exit location relative to the blueprint origin.
+     * The hub is always the first placed segment, so its marker wins when several
+     * segments define one; any extras are logged and ignored.
+     *
+     * @param placedSegments The final list of segments placed in the blueprint.
+     * @return The relative safe exit location, or null if no segment defines one.
+     */
+    @Nullable
+    private Vector findSafeExitRelativeLocation(@NotNull List<PlacedSegment> placedSegments) {
+        Vector safeExit = null;
+        for (PlacedSegment placedSegment : placedSegments) {
+            BlockVector3 offset = placedSegment.getSegmentTemplate().getSafeExitOffset();
+            if (offset == null) continue;
+
+            Vector relative = placedSegment.getWorldOrigin().toVector()
+                    .add(new Vector(offset.x(), offset.y(), offset.z()));
+            if (safeExit == null) {
+                safeExit = relative;
+                plugin.getLogger().fine("Consolidated safe exit location: " + relative
+                        + " (segment " + placedSegment.getSegmentTemplate().getName() + ")");
+            } else {
+                plugin.getLogger().warning("Duplicate safe exit marker in segment "
+                        + placedSegment.getSegmentTemplate().getName() + ". Keeping first one found.");
+            }
+        }
+        if (safeExit == null) {
+            plugin.getLogger().warning("No segment in the layout defines a safe exit marker."
+                    + " Escaping players will fall back to the hub.");
+        }
+        return safeExit;
     }
 
     // Helper class for depth ranges

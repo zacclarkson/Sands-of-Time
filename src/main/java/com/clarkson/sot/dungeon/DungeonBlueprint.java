@@ -5,6 +5,7 @@ import com.clarkson.sot.entities.Area; // Import the Area class
 import org.bukkit.Location; // Needed for Area's internal representation
 import org.bukkit.util.Vector;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
 import java.util.*;
 
@@ -29,6 +30,10 @@ public class DungeonBlueprint {
     private final List<Vector> coinSpawnRelativeLocations;
     private final List<Vector> itemSpawnRelativeLocations;
 
+    // Relative location of the safe exit escaping players are sent to (null if no
+    // segment in the layout carries a safe-exit marker).
+    @Nullable private final Vector safeExitRelativeLocation;
+
     // --- Changed: Use Area for Relative Bounding Box ---
     private final Area relativeBounds; // Represents bounds using relative Locations (null world)
 
@@ -43,6 +48,7 @@ public class DungeonBlueprint {
                             @NotNull List<Vector> sandSpawnRelativeLocations,
                             @NotNull List<Vector> coinSpawnRelativeLocations,
                             @NotNull List<Vector> itemSpawnRelativeLocations,
+                            @Nullable Vector safeExitRelativeLocation,
                             @NotNull Area relativeBounds // Changed parameter
                            ) {
 
@@ -69,6 +75,7 @@ public class DungeonBlueprint {
         this.sandSpawnRelativeLocations = Collections.unmodifiableList(new ArrayList<>(sandSpawnRelativeLocations));
         this.coinSpawnRelativeLocations = Collections.unmodifiableList(new ArrayList<>(coinSpawnRelativeLocations));
         this.itemSpawnRelativeLocations = Collections.unmodifiableList(new ArrayList<>(itemSpawnRelativeLocations));
+        this.safeExitRelativeLocation = (safeExitRelativeLocation != null) ? safeExitRelativeLocation.clone() : null;
         this.relativeBounds = relativeBounds; // Store the Area object (Area itself is effectively immutable once constructed)
     }
 
@@ -81,6 +88,14 @@ public class DungeonBlueprint {
     @NotNull public List<Vector> getSandSpawnRelativeLocations() { return sandSpawnRelativeLocations; }
     @NotNull public List<Vector> getCoinSpawnRelativeLocations() { return coinSpawnRelativeLocations; }
     @NotNull public List<Vector> getItemSpawnRelativeLocations() { return itemSpawnRelativeLocations; }
+
+    /**
+     * Gets the safe exit location relative to the blueprint origin, or null if no
+     * segment in this layout defined one.
+     */
+    @Nullable public Vector getSafeExitRelativeLocation() {
+        return (safeExitRelativeLocation != null) ? safeExitRelativeLocation.clone() : null;
+    }
 
     // --- Changed: Getter for Relative Bounds ---
     /**

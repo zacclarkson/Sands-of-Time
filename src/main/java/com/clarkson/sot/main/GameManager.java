@@ -476,17 +476,24 @@ public class GameManager {
         return (hubRelative != null) ? teamOrigin.clone().add(hubRelative) : null;
     }
 
-    /** Placeholder method to get the instance-specific Safe Exit location. */
+    /**
+     * Gets the instance-specific Safe Exit location for a team, i.e. where escaping
+     * players are teleported. Falls back to the hub when the dungeon's segments define
+     * no safe exit marker.
+     */
     @Nullable
     private Location getTeamSafeExitLocation(UUID teamId) {
         DungeonManager teamDungeonManager = teamDungeonManagers.get(teamId);
         if (teamDungeonManager == null) return null;
         Dungeon teamDungeonData = teamDungeonManager.getDungeonData();
         if (teamDungeonData == null) return null;
-        // TODO: Implement logic in Dungeon.java to store/retrieve the absolute safe exit location.
-        // return teamDungeonData.getSafeExitLocation();
-        plugin.getLogger().warning("getTeamSafeExitLocation: Needs implementation in Dungeon.java");
-        return teamDungeonData.getHubLocation(); // Placeholder: return hub for now
+
+        Location safeExit = teamDungeonData.getSafeExitLocation();
+        if (safeExit != null) return safeExit;
+
+        plugin.getLogger().warning("No safe exit defined for team " + teamId
+                + " (no SAFE_EXIT marker in its segments) — falling back to the hub.");
+        return teamDungeonData.getHubLocation();
     }
 
     /**

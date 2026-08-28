@@ -25,6 +25,7 @@ public class Dungeon {
 
     // Consolidated ABSOLUTE locations within this specific instance
     private final Location hubLocation; // Can be null if blueprint had no hub? (Shouldn't happen)
+    private final Location safeExitLocation; // Null if no segment defined a safe exit marker
     private final Map<VaultColor, Location> vaultMarkerLocations;
     private final Map<VaultColor, Location> keySpawnLocations;
     private final List<Location> sandSpawnLocations;
@@ -41,6 +42,7 @@ public class Dungeon {
      * @param origin The absolute world origin of this instance.
      * @param blueprint The blueprint used to generate this dungeon.
      * @param hubLocation The absolute location of the hub within this instance.
+     * @param safeExitLocation The absolute location escaping players are teleported to, or null if undefined.
      * @param vaultMarkerLocations Map of vault colors to their absolute marker locations.
      * @param keySpawnLocations Map of vault colors to their absolute key spawn locations.
      * @param sandSpawnLocations List of absolute sand spawn locations.
@@ -50,6 +52,7 @@ public class Dungeon {
      */
     public Dungeon(@NotNull UUID teamId, @NotNull World world, @NotNull Location origin, @NotNull DungeonBlueprint blueprint,
                    @Nullable Location hubLocation,
+                   @Nullable Location safeExitLocation,
                    @NotNull Map<VaultColor, Location> vaultMarkerLocations,
                    @NotNull Map<VaultColor, Location> keySpawnLocations,
                    @NotNull List<Location> sandSpawnLocations,
@@ -63,6 +66,7 @@ public class Dungeon {
         this.origin = Objects.requireNonNull(origin, "Dungeon origin cannot be null");
         this.blueprint = Objects.requireNonNull(blueprint, "Blueprint cannot be null");
         this.hubLocation = hubLocation;
+        this.safeExitLocation = safeExitLocation;
 
         // Store immutable copies of maps/lists containing ABSOLUTE locations
         this.vaultMarkerLocations = Collections.unmodifiableMap(new HashMap<>(vaultMarkerLocations));
@@ -81,6 +85,13 @@ public class Dungeon {
     @NotNull public World getWorld() { return world; }
     @NotNull public DungeonBlueprint getBlueprintData() { return blueprint; } // Allow access to original blueprint if needed
     @Nullable public Location getHubLocation() { return hubLocation != null ? hubLocation.clone() : null; }
+
+    /**
+     * Gets the absolute location escaping players are teleported to in this instance.
+     * Null when no segment in the layout carried a safe exit marker; callers should
+     * fall back to the hub in that case.
+     */
+    @Nullable public Location getSafeExitLocation() { return safeExitLocation != null ? safeExitLocation.clone() : null; }
     @NotNull public Map<VaultColor, Location> getVaultMarkerLocations() { return vaultMarkerLocations; } // Already unmodifiable
     @NotNull public Map<VaultColor, Location> getKeySpawnLocations() { return keySpawnLocations; } // Already unmodifiable
     @NotNull public List<Location> getSandSpawnLocations() { return sandSpawnLocations; } // Already unmodifiable

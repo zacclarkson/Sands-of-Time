@@ -119,6 +119,12 @@ public class DungeonManager {
         List<Location> absCoinSpawns = calculateAbsoluteLocations(blueprintData.getCoinSpawnRelativeLocations());
         List<Location> absItemSpawns = calculateAbsoluteLocations(blueprintData.getItemSpawnRelativeLocations());
         Location absHubLocation = dungeonOrigin.clone().add(blueprintData.getHubRelativeLocation());
+        Vector safeExitRelative = blueprintData.getSafeExitRelativeLocation();
+        // Null when no segment in the layout carried a SAFE_EXIT marker; GameManager then
+        // falls back to the hub (the generator already warns once per blueprint).
+        Location absSafeExitLocation = (safeExitRelative != null)
+                ? dungeonOrigin.clone().add(safeExitRelative)
+                : null;
 
 
         // --- 2. Paste Schematics (Populates placedSegmentsInWorld) ---
@@ -150,7 +156,7 @@ public class DungeonManager {
          try {
             this.dungeonData = new Dungeon(
                 teamId, world, dungeonOrigin, blueprintData,
-                absHubLocation, absVaultMarkers, absKeySpawns,
+                absHubLocation, absSafeExitLocation, absVaultMarkers, absKeySpawns,
                 absSandSpawns, absCoinSpawns, absItemSpawns,
                 deathCages
             );

@@ -81,6 +81,7 @@ public class ToolListener implements Listener {
     private static final String MT_COIN_SPAWN       = "COIN_SPAWN";
     private static final String MT_ITEM_SPAWN       = "ITEM_SPAWN";
     private static final String MT_MOB_SPAWNER      = "MOB_SPAWNER";
+    private static final String MT_SAFE_EXIT        = "SAFE_EXIT";
 
     // Entry point frame: 2 wide x 3 tall (all 6 positions are border)
     private static final int EP_WIDTH  = 2;
@@ -181,6 +182,12 @@ public class ToolListener implements Listener {
             case MOB_SPAWNER:
                 placePointMarker(event, player, MT_MOB_SPAWNER,
                         Material.SPAWNER, 0.5f, null, -1);
+                break;
+            case SAFE_EXIT:
+                // Deliberately not END_PORTAL_FRAME: that block is the in-game escape
+                // trigger EscapeListener looks for, and a marker shaped like it would confuse builders.
+                placePointMarker(event, player, MT_SAFE_EXIT,
+                        Material.LIME_CONCRETE, 0.5f, null, -1);
                 break;
         }
     }

@@ -221,6 +221,13 @@ public class StructureMetadataSaver {
                 json.add("keyLocationOffset", serializeBlockVector3(keyOffset));
             }
 
+            // --- Serialize Escape Metadata ---
+            // Only present on segments that carry a safe exit (normally the HUB).
+            BlockVector3 safeExitOffset = segmentTemplate.getSafeExitOffset();
+            if (safeExitOffset != null) {
+                json.add("safeExitOffset", serializeBlockVector3(safeExitOffset));
+            }
+
             // Return the completed JSON object
             return json;
 

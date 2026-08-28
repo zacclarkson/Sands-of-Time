@@ -186,6 +186,12 @@ public class StructureLoader {
             List<BlockVector3> mobSpawners = deserializeBlockVectorList(
                     json.getAsJsonArray("mobSpawnerLocations"), "mobSpawnerLocations", name, sourceFileName);
 
+            BlockVector3 safeExitOffset = null;
+            if (json.has("safeExitOffset") && json.get("safeExitOffset").isJsonObject()) {
+                safeExitOffset = deserializeBlockVector3(
+                        json.getAsJsonObject("safeExitOffset"), "safeExitOffset", name, sourceFileName);
+            }
+
             // --- Construct the Segment Template Object ---
             return new Segment(
                     name,
@@ -206,7 +212,8 @@ public class StructureLoader {
                     gates  != null ? gates  : new ArrayList<>(),
                     leverOffset,
                     sandSacrifices != null ? sandSacrifices : new ArrayList<>(),
-                    mobSpawners    != null ? mobSpawners    : new ArrayList<>()
+                    mobSpawners    != null ? mobSpawners    : new ArrayList<>(),
+                    safeExitOffset
             );
 
         } catch (JsonParseException | IllegalStateException | ClassCastException | NullPointerException e) {

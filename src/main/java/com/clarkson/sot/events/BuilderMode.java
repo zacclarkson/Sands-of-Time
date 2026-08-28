@@ -39,6 +39,9 @@ public enum BuilderMode {
             false),
     MOB_SPAWNER("Mob Spawner",
             "Right-click to mark a mob spawner position.",
+            false),
+    SAFE_EXIT("Safe Exit",
+            "Right-click to mark where escaped players are teleported. Usually placed in the HUB segment.",
             false);
 
     private final String displayName;

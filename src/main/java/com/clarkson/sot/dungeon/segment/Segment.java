@@ -48,6 +48,10 @@ public class Segment {
     /** Lever position; must be present when {@code gates} is non-empty. */
     @Nullable private final BlockVector3 leverOffset;
 
+    // --- Escape ---
+    /** Safe-exit position players are sent to when they escape, null if this segment has none. */
+    @Nullable private final BlockVector3 safeExitOffset;
+
     /**
      * Full constructor. Called by SaveSegmentCommand and StructureLoader.
      */
@@ -70,7 +74,8 @@ public class Segment {
             @NotNull  List<SegmentBound> gates,
             @Nullable BlockVector3 leverOffset,
             @NotNull  List<BlockVector3> sandSacrificeLocations,
-            @NotNull  List<BlockVector3> mobSpawnerLocations
+            @NotNull  List<BlockVector3> mobSpawnerLocations,
+            @Nullable BlockVector3 safeExitOffset
     ) {
         Objects.requireNonNull(name, "name");
         Objects.requireNonNull(schematicFileName, "schematicFileName");
@@ -96,6 +101,7 @@ public class Segment {
         this.leverOffset            = leverOffset;
         this.sandSacrificeLocations = new ArrayList<>(sandSacrificeLocations);
         this.mobSpawnerLocations    = new ArrayList<>(mobSpawnerLocations);
+        this.safeExitOffset         = safeExitOffset;
     }
 
     // --- Core getters ---
@@ -133,6 +139,13 @@ public class Segment {
     @Nullable public SegmentBound getVaultDoorBound()  { return vaultDoorBound; }
     @NotNull  public List<SegmentBound> getGates()     { return Collections.unmodifiableList(gates); }
     @Nullable public BlockVector3 getLeverOffset()     { return leverOffset; }
+
+    // --- Escape getter ---
+    /**
+     * Offset of the safe exit relative to this segment's origin, or null if this
+     * segment does not define one. Normally only the HUB segment carries it.
+     */
+    @Nullable public BlockVector3 getSafeExitOffset()  { return safeExitOffset; }
 
     // --- Entry-point helpers ---
     public boolean hasEntryPointInDirection(@NotNull Direction dir) {

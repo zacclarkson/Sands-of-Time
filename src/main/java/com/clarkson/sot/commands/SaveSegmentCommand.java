@@ -166,6 +166,7 @@ public class SaveSegmentCommand implements CommandExecutor {
         BlockVector3 vaultOffset               = null;
         BlockVector3 keyOffset                 = null;
         BlockVector3 leverOffset               = null;
+        BlockVector3 safeExitOffset            = null;
         VaultColor containedVault              = null;
         VaultColor containedVaultKey           = null;
 
@@ -273,6 +274,13 @@ public class SaveSegmentCommand implements CommandExecutor {
                 case "MOB_SPAWNER":
                     mobSpawners.add(relPos);
                     break;
+                case "SAFE_EXIT":
+                    if (safeExitOffset != null) {
+                        warn(player, "Multiple SAFE_EXIT markers — only one allowed. Using first.");
+                    } else {
+                        safeExitOffset = relPos;
+                    }
+                    break;
                 default:
                     if (!type.isEmpty()) {
                         plugin.getLogger().fine("[SaveSegment] Unknown marker type '" + type + "' — skipped.");
@@ -282,6 +290,11 @@ public class SaveSegmentCommand implements CommandExecutor {
         }
 
         // --- Validate ---
+        if (segmentType == SegmentType.HUB && safeExitOffset == null) {
+            player.sendMessage(Component.text(
+                    "Warning: HUB segment has no SAFE_EXIT marker — escaping players will fall back to the hub.",
+                    NamedTextColor.YELLOW));
+        }
         if (!gates.isEmpty() && leverOffset == null) {
             player.sendMessage(Component.text(
                     "Save failed: segment has " + gates.size() + " gate(s) but no LEVER marker.",
@@ -306,6 +319,9 @@ public class SaveSegmentCommand implements CommandExecutor {
         player.sendMessage(Component.text("  Lever: ", NamedTextColor.WHITE)
                 .append(Component.text(leverOffset != null ? "yes" : "none",
                         leverOffset != null ? NamedTextColor.GREEN : NamedTextColor.GRAY)));
+        player.sendMessage(Component.text("  Safe Exit: ", NamedTextColor.WHITE)
+                .append(Component.text(safeExitOffset != null ? "yes" : "none",
+                        safeExitOffset != null ? NamedTextColor.GREEN : NamedTextColor.GRAY)));
         player.sendMessage(Component.text("  Vault Door: ", NamedTextColor.WHITE)
                 .append(Component.text(vaultDoorBound != null
                         ? (containedVault != null ? containedVault.name() : "color unknown")
@@ -330,7 +346,7 @@ public class SaveSegmentCommand implements CommandExecutor {
                     totalCoins, containedVault, containedVaultKey,
                     vaultOffset, keyOffset,
                     vaultDoorBound, gates, leverOffset,
-                    sandSacrifices, mobSpawners
+                    sandSacrifices, mobSpawners, safeExitOffset
             );
         } catch (Exception e) {
             plugin.getLogger().log(Level.SEVERE, "Error constructing Segment for " + segmentName, e);

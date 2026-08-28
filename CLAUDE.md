@@ -63,7 +63,8 @@ manually (see `integration-test/README.md`); it is **not** part of CI.
 - **No segment templates are bundled.** Dungeon generation needs at least one `HUB` segment on disk
   (`plugins/SoT/<name>.json` + `schematics/<name>.schem`). Build one in-game with the builder tools +
   `/sotsavesegment <name> HUB`, then **restart** the server — there is no live reload. Until a HUB
-  exists, the plugin enables fine but `/sot start` aborts.
+  exists, the plugin enables fine but `/sot start` aborts. Mark the safe exit in that HUB with
+  `/sotmode SAFE_EXIT`, otherwise escaping players are teleported to the hub instead.
 - **Placeholder locations.** `onEnable` passes placeholder lobby/trapped locations (TODO: load from
   `config.yml`), which affects visual-timer placement and the trapped-player destination.
 

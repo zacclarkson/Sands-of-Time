@@ -366,6 +366,9 @@ When a team's timer reaches zero:
 - Escaping changes the player's status to **ESCAPED_SAFE**
 - Escaped players keep their unbanked coins (still need to be banked before escaping for them to count as team score)
 - Once escaped, a player cannot re-enter the dungeon
+- The safe exit is a per-instance location, marked in a segment with the `SAFE_EXIT` builder mode
+  (normally in the HUB segment). Escaping players are teleported to their own team's copy of it.
+  Without such a marker the game falls back to teleporting them to the hub.
 
 ---
 
