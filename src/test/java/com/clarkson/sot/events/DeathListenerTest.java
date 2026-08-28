@@ -54,9 +54,13 @@ class DeathListenerTest {
 
     /** Builds a real death event for the given player with a non-zero dropped-XP value. */
     private PlayerDeathEvent deathEventFor(PlayerMock player) {
-        // Args: player, damageSource, drops, droppedExp, newExp, newTotalExp, newLevel, deathMessage
+        // Args: player, damageSource, drops, droppedExp, newExp, newTotalExp, newLevel,
+        // deathMessage, showDeathMessages.
+        // The trailing boolean is required from Paper 26: the eight-argument form that took a
+        // Component is gone, and the remaining eight-argument constructor takes a String and is
+        // deprecated, so dropping the boolean silently selects the wrong overload.
         return new PlayerDeathEvent(player, mock(DamageSource.class), new ArrayList<ItemStack>(), 10, 0, 0,
-                0, Component.text("died"));
+                0, Component.text("died"), true);
     }
 
     @Test
