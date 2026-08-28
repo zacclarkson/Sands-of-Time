@@ -24,6 +24,9 @@ services:
       VERSION: "1.21.1"
       ONLINE_MODE: "FALSE"
       MEMORY: "2G"
+      # SoT hard-depends on WorldEdit (plugin.yml `depend: [WorldEdit]`); without it the plugin
+      # never enables. itzg auto-downloads it from Modrinth into plugins/ on boot.
+      MODRINTH_PROJECTS: worldedit
       # Auto-op the bot so it can run admin/debug commands during scenarios.
       OPS: "Tester"
     volumes:
