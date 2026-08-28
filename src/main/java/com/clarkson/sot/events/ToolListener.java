@@ -13,9 +13,11 @@ import org.bukkit.NamespacedKey;
 import org.bukkit.block.Block;
 import org.bukkit.block.BlockFace;
 import org.bukkit.block.data.BlockData;
+import org.bukkit.World;
 import org.bukkit.entity.BlockDisplay;
 import org.bukkit.entity.Display;
 import org.bukkit.entity.Entity;
+import org.bukkit.entity.ItemDisplay;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
@@ -82,9 +84,14 @@ public class ToolListener implements Listener {
     private static final String MT_ITEM_SPAWN       = "ITEM_SPAWN";
     private static final String MT_MOB_SPAWNER      = "MOB_SPAWNER";
 
-    // Entry point frame: 2 wide x 3 tall (all 6 positions are border)
-    private static final int EP_WIDTH  = 2;
-    private static final int EP_HEIGHT = 3;
+    // Entry point marker: one centered glass block with a flat stick arrow floating above it.
+    private static final Material EP_GLASS   = Material.LIME_STAINED_GLASS;
+    private static final float  EP_GLASS_SCALE = 0.9f;  // sub-block so it reads as a marker
+    private static final double EP_ARROW_HEIGHT = 1.4;  // arrow plane, blocks above the glass base
+    private static final float  EP_SHAFT_SCALE  = 0.7f;
+    private static final float  EP_BARB_SCALE   = 0.45f;
+    private static final double EP_TIP_DIST      = 0.45; // shaft-centre -> arrow tip
+    private static final double EP_BARB_DIST     = 0.22; // tip -> barb centre
 
     public ToolListener(@NotNull SoT plugin, @NotNull BuilderSessionManager sessionManager) {
         this.plugin = plugin;
@@ -231,68 +238,128 @@ public class ToolListener implements Listener {
             dir = Direction.fromYaw(player.getLocation().getYaw());
         }
 
-        spawnEntryPointFrame(player, airBlock.getLocation(), dir);
+        spawnEntryPointMarker(player, airBlock.getLocation(), dir);
     }
 
     /**
-     * Spawns a 2x3 frame of LIME_STAINED_GLASS BlockDisplays at the given bottom-left anchor location.
-     * One entity is tagged as the ENTRY_POINT anchor; the rest as ENTRY_FRAME. All share a group ID.
+     * Spawns the entry point marker: a single centered LIME_STAINED_GLASS block (the ENTRY_POINT
+     * anchor) with a flat stick arrow floating above it, pointing in {@code dir}. The arrow sticks
+     * are ItemDisplay entities tagged ENTRY_FRAME so SaveSegmentCommand skips them. All entities
+     * share a group ID so left-click removes them together.
+     *
+     * @param airBlockLoc the (integer) corner location of the air block the marker occupies.
      */
-    private void spawnEntryPointFrame(Player player, Location anchorBlockLoc, Direction dir) {
+    private void spawnEntryPointMarker(Player player, Location airBlockLoc, Direction dir) {
         String groupId = UUID.randomUUID().toString();
-        BlockData glass = Material.LIME_STAINED_GLASS.createBlockData();
+        World world = player.getWorld();
 
-        // Calculate frame offsets based on facing direction.
-        // "anchor" is the bottom-left block of the opening from the outside perspective.
-        List<int[]> offsets = getEntryPointOffsets(dir); // list of [dx, dy, dz]
-
-        boolean firstEntity = true;
-        UUID anchorEntityId = null;
-
-        for (int[] off : offsets) {
-            Location spawnLoc = anchorBlockLoc.clone().add(off[0], off[1], off[2]);
-            // Spawn at block center
-            Location entityLoc = spawnLoc.clone().add(0.5, 0.0, 0.5);
-
-            int[] capturedOff = off;
-            boolean isAnchor = firstEntity;
-            try {
-                BlockDisplay bd = player.getWorld().spawn(entityLoc, BlockDisplay.class, display -> {
-                    display.setBlock(glass);
-                    display.setGravity(false);
-                    display.setInvulnerable(true);
-                    display.setPersistent(true);
-                    // Scale slightly sub-block to show individual blocks clearly
-                    display.setTransformation(new Transformation(
-                            new Vector3f(0f, 0f, 0f),
-                            new AxisAngle4f(0f, 0f, 0f, 1f),
-                            new Vector3f(0.9f, 0.9f, 0.9f),
-                            new AxisAngle4f(0f, 0f, 0f, 1f)
-                    ));
-                    PersistentDataContainer pdc = display.getPersistentDataContainer();
-                    pdc.set(BUILD_MARKER_TAG, PersistentDataType.BYTE, (byte) 1);
-                    pdc.set(BOUND_GROUP_KEY, PersistentDataType.STRING, groupId);
-                    if (isAnchor) {
-                        pdc.set(MARKER_TYPE_KEY, PersistentDataType.STRING, MT_ENTRY_POINT);
-                        pdc.set(DIRECTION_KEY, PersistentDataType.STRING, dir.name());
-                    } else {
-                        pdc.set(MARKER_TYPE_KEY, PersistentDataType.STRING, MT_ENTRY_FRAME);
-                    }
-                });
-                if (isAnchor) {
-                    anchorEntityId = bd.getUniqueId();
-                }
-            } catch (Exception e) {
-                plugin.getLogger().log(Level.SEVERE, "Failed to spawn entry point frame entity", e);
-            }
-            firstEntity = false;
+        // 1. Centered glass block (the anchor). A BlockDisplay's position is its corner, so spawn
+        //    at the block's integer corner and centre the sub-block via the transform translation.
+        float off = (1.0f - EP_GLASS_SCALE) / 2.0f;
+        Location glassLoc = new Location(world,
+                airBlockLoc.getBlockX(), airBlockLoc.getBlockY(), airBlockLoc.getBlockZ());
+        BlockData glass = EP_GLASS.createBlockData();
+        try {
+            world.spawn(glassLoc, BlockDisplay.class, display -> {
+                display.setBlock(glass);
+                display.setGravity(false);
+                display.setInvulnerable(true);
+                display.setPersistent(true);
+                display.setTransformation(new Transformation(
+                        new Vector3f(off, off, off),
+                        new AxisAngle4f(0f, 0f, 0f, 1f),
+                        new Vector3f(EP_GLASS_SCALE, EP_GLASS_SCALE, EP_GLASS_SCALE),
+                        new AxisAngle4f(0f, 0f, 0f, 1f)
+                ));
+                PersistentDataContainer pdc = display.getPersistentDataContainer();
+                pdc.set(BUILD_MARKER_TAG, PersistentDataType.BYTE, (byte) 1);
+                pdc.set(BOUND_GROUP_KEY, PersistentDataType.STRING, groupId);
+                pdc.set(MARKER_TYPE_KEY, PersistentDataType.STRING, MT_ENTRY_POINT);
+                pdc.set(DIRECTION_KEY, PersistentDataType.STRING, dir.name());
+            });
+        } catch (Exception e) {
+            plugin.getLogger().log(Level.SEVERE, "Failed to spawn entry point glass anchor", e);
         }
+
+        // 2. Flat stick arrow floating above the glass, pointing in `dir`.
+        spawnArrow(world, airBlockLoc, dir, groupId);
 
         player.sendActionBar(Component.text(
                 "Placed Entry Point (" + dir.name() + ")", NamedTextColor.GREEN));
     }
 
-    /** Rotates an existing entry point frame to the next cardinal direction. */
+    /**
+     * Spawns a flat, horizontal arrow made of three sticks (shaft + two barbs) in the XZ plane
+     * above the glass block, its point aimed in {@code dir} (the direction a player walks through).
+     */
+    private void spawnArrow(World world, Location airBlockLoc, Direction dir, String groupId) {
+        double cx = airBlockLoc.getBlockX() + 0.5;
+        double cz = airBlockLoc.getBlockZ() + 0.5;
+        double y  = airBlockLoc.getBlockY() + EP_ARROW_HEIGHT;
+
+        float yaw = yawFor(dir);
+        double fx = Math.sin(yaw), fz = Math.cos(yaw); // forward unit vector in XZ
+
+        // Shaft, centred over the glass, long axis along the facing direction.
+        spawnStick(world, cx, y, cz, yaw, EP_SHAFT_SCALE, groupId);
+
+        // Two barbs at the tip, swept back 135 deg either side to form the arrowhead.
+        double tx = cx + fx * EP_TIP_DIST;
+        double tz = cz + fz * EP_TIP_DIST;
+        float leftYaw  = yaw + (float) Math.toRadians(135);
+        float rightYaw = yaw - (float) Math.toRadians(135);
+        spawnStick(world, tx + Math.sin(leftYaw)  * EP_BARB_DIST, y,
+                          tz + Math.cos(leftYaw)  * EP_BARB_DIST, leftYaw,  EP_BARB_SCALE, groupId);
+        spawnStick(world, tx + Math.sin(rightYaw) * EP_BARB_DIST, y,
+                          tz + Math.cos(rightYaw) * EP_BARB_DIST, rightYaw, EP_BARB_SCALE, groupId);
+    }
+
+    /**
+     * Spawns one stick as an ItemDisplay lying flat in the XZ plane, its long axis pointing along
+     * the horizontal direction given by {@code yaw} (0 = +Z / SOUTH, increasing toward +X / EAST).
+     */
+    private void spawnStick(World world, double x, double y, double z,
+                            float yaw, float scale, String groupId) {
+        Location loc = new Location(world, x, y, z);
+        // Lay the stick flat (pitch +90 deg about X: its vertical long axis maps to +Z),
+        // then yaw about Y so +Z rotates onto the requested direction.
+        Quaternionf rot = new Quaternionf(new AxisAngle4f(yaw, 0f, 1f, 0f))
+                .mul(new Quaternionf(new AxisAngle4f((float) Math.toRadians(90), 1f, 0f, 0f)));
+        try {
+            world.spawn(loc, ItemDisplay.class, disp -> {
+                disp.setItemStack(new ItemStack(Material.STICK));
+                disp.setItemDisplayTransform(ItemDisplay.ItemDisplayTransform.FIXED);
+                disp.setGravity(false);
+                disp.setInvulnerable(true);
+                disp.setPersistent(true);
+                disp.setTransformation(new Transformation(
+                        new Vector3f(0f, 0f, 0f),
+                        rot,
+                        new Vector3f(scale, scale, scale),
+                        new Quaternionf()
+                ));
+                PersistentDataContainer pdc = disp.getPersistentDataContainer();
+                pdc.set(BUILD_MARKER_TAG, PersistentDataType.BYTE, (byte) 1);
+                pdc.set(BOUND_GROUP_KEY, PersistentDataType.STRING, groupId);
+                pdc.set(MARKER_TYPE_KEY, PersistentDataType.STRING, MT_ENTRY_FRAME);
+            });
+        } catch (Exception e) {
+            plugin.getLogger().log(Level.WARNING, "Failed to spawn entry point arrow stick", e);
+        }
+    }
+
+    /** Yaw (radians) that rotates the canonical +Z axis onto the given cardinal direction. */
+    private float yawFor(Direction dir) {
+        switch (dir) {
+            case SOUTH: return 0f;
+            case EAST:  return (float) Math.toRadians(90);
+            case NORTH: return (float) Math.toRadians(180);
+            case WEST:  return (float) Math.toRadians(-90);
+            default:    return (float) Math.toRadians(180);
+        }
+    }
+
+    /** Rotates an existing entry point marker to the next cardinal direction. */
     private void rotateEntryPointFrame(BlockDisplay anchor, Player player) {
         PersistentDataContainer pdc = anchor.getPersistentDataContainer();
         String dirStr = pdc.get(DIRECTION_KEY, PersistentDataType.STRING);
@@ -313,32 +380,15 @@ public class ToolListener implements Listener {
 
         String groupId = pdc.getOrDefault(BOUND_GROUP_KEY, PersistentDataType.STRING, "");
 
-        // Remove all existing frame entities (anchor + frames)
-        Location anchorBlockLoc = anchor.getLocation().clone().subtract(0.5, 0, 0.5);
+        // The glass anchor spawns at the block's integer corner, so its location is the air block.
+        Location airBlockLoc = new Location(anchor.getWorld(),
+                anchor.getLocation().getBlockX(),
+                anchor.getLocation().getBlockY(),
+                anchor.getLocation().getBlockZ());
         removeGroupEntities(groupId, anchor.getWorld());
 
-        // Respawn frame at the same anchor block location with new direction
-        spawnEntryPointFrame(player, anchorBlockLoc, next);
-    }
-
-    /**
-     * Returns the list of [dx, dy, dz] offsets for a 2-wide x 3-tall entry point frame,
-     * oriented for the given facing direction. The anchor (index 0) is always included.
-     */
-    private List<int[]> getEntryPointOffsets(Direction dir) {
-        List<int[]> offsets = new ArrayList<>();
-        // For NORTH/SOUTH: frame spans X and Y; Z = 0
-        // For EAST/WEST:   frame spans Z and Y; X = 0
-        for (int row = 0; row < EP_HEIGHT; row++) {
-            for (int col = 0; col < EP_WIDTH; col++) {
-                if (dir == Direction.NORTH || dir == Direction.SOUTH) {
-                    offsets.add(new int[]{col, row, 0});
-                } else { // EAST / WEST
-                    offsets.add(new int[]{0, row, col});
-                }
-            }
-        }
-        return offsets;
+        // Respawn at the same block with the new direction.
+        spawnEntryPointMarker(player, airBlockLoc, next);
     }
 
     // -------------------------------------------------------------------------
@@ -606,7 +656,7 @@ public class ToolListener implements Listener {
 
     private void handleLeftClick(Player player) {
         Predicate<Entity> filter = e ->
-                e instanceof BlockDisplay
+                e instanceof Display
                 && e.getPersistentDataContainer().has(BUILD_MARKER_TAG, PersistentDataType.BYTE);
 
         RayTraceResult ray = player.getWorld().rayTraceEntities(
@@ -645,7 +695,7 @@ public class ToolListener implements Listener {
     private int removeGroupEntities(String groupId, org.bukkit.World world) {
         List<Entity> toRemove = new ArrayList<>();
         for (Entity e : world.getEntities()) {
-            if (e instanceof BlockDisplay
+            if (e instanceof Display
                     && e.getPersistentDataContainer().has(BUILD_MARKER_TAG, PersistentDataType.BYTE)
                     && groupId.equals(e.getPersistentDataContainer().get(BOUND_GROUP_KEY, PersistentDataType.STRING))) {
                 toRemove.add(e);
