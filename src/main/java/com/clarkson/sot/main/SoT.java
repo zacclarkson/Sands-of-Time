@@ -1,12 +1,21 @@
 package com.clarkson.sot.main;
 
 import java.io.File;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.logging.Level;
 
 // Import Bukkit classes needed for placeholder locations
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
+import org.bukkit.NamespacedKey;
 import org.bukkit.World;
+import org.bukkit.entity.ItemDisplay;
+import org.bukkit.persistence.PersistentDataType;
+import org.bukkit.scheduler.BukkitTask;
+import org.bukkit.util.Transformation;
+
+import org.joml.AxisAngle4f;
+import org.joml.Quaternionf;
 
 import org.bukkit.plugin.java.JavaPlugin;
 
@@ -16,6 +25,7 @@ import com.clarkson.sot.commands.*;
 import com.clarkson.sot.events.BuilderSessionManager;
 import com.clarkson.sot.events.DeathListener;
 import com.clarkson.sot.events.EscapeListener;
+import com.clarkson.sot.events.SegmentBuilderKeys;
 import com.clarkson.sot.events.ToolListener;
 // Import Entities if needed for static init
 import com.clarkson.sot.entities.CoinStack;
@@ -33,6 +43,12 @@ public class SoT extends JavaPlugin {
     // instances that did not hold the live game state).
     private GameManager gameManager;
     private BuilderSessionManager builderSessionManager;
+
+    // --- Builder marker animation (spinning coin markers) ---
+    private static final float SPIN_STEP_DEG = 18f; // degrees advanced per interval
+    private static final long  SPIN_INTERVAL = 2L;  // ticks between updates
+    private final AtomicInteger spinTick = new AtomicInteger();
+    private BukkitTask markerSpinTask;
 
     @Override
     public void onEnable() {
@@ -97,6 +113,8 @@ public class SoT extends JavaPlugin {
         this.getCommand("sotmode").setExecutor(modeCmd);
         this.getCommand("sotmode").setTabCompleter(modeCmd);
         this.getCommand("sotsavesegment").setExecutor(new SaveSegmentCommand(this));
+        this.getCommand("sotclearmarkers").setExecutor(new ClearMarkersCommand(this, builderSessionManager));
+        this.getCommand("sotundo").setExecutor(new UndoMarkerCommand(this, builderSessionManager));
 
         GameCommand gameCmd = new GameCommand(gameManager);
         this.getCommand("sot").setExecutor(gameCmd);
@@ -115,6 +133,9 @@ public class SoT extends JavaPlugin {
         getServer().getPluginManager().registerEvents(new DeathListener(gameManager), this);
         getServer().getPluginManager().registerEvents(new EscapeListener(gameManager), this);
 
+        // Animate spinnable builder markers (e.g. coin markers). Cancelled in onDisable so a
+        // plugin hot-reload does not orphan the task.
+        markerSpinTask = startMarkerSpinTask();
 
         getLogger().info("Sands of Time Enabled Successfully.");
     }
@@ -122,8 +143,41 @@ public class SoT extends JavaPlugin {
     @Override
     public void onDisable() {
         getLogger().info("Sands of Time Disabling...");
-        // Plugin shutdown logic
+        if (markerSpinTask != null) {
+            markerSpinTask.cancel();
+            markerSpinTask = null;
+        }
         getLogger().info("Sands of Time Disabled.");
+    }
+
+    /**
+     * Starts a repeating task that spins every builder marker ItemDisplay tagged as spinnable.
+     * A single global angle keeps all markers in sync; no per-entity state is stored. Iterates
+     * loaded worlds' ItemDisplays every {@link #SPIN_INTERVAL} ticks — cheap on a builder/dev
+     * server; would want tightening if used on a heavily-populated production world.
+     */
+    private BukkitTask startMarkerSpinTask() {
+        final NamespacedKey spinKey = new NamespacedKey(this, SegmentBuilderKeys.SPINNABLE);
+        return getServer().getScheduler().runTaskTimer(this, () -> {
+            int t = spinTick.incrementAndGet();
+            float angle = (float) Math.toRadians((t * SPIN_STEP_DEG) % 360.0);
+            for (World world : Bukkit.getWorlds()) {
+                for (ItemDisplay disp : world.getEntitiesByClass(ItemDisplay.class)) {
+                    if (!disp.getPersistentDataContainer().has(spinKey, PersistentDataType.BYTE)) {
+                        continue;
+                    }
+                    Transformation cur = disp.getTransformation();
+                    disp.setInterpolationDelay(0);
+                    disp.setInterpolationDuration((int) SPIN_INTERVAL);
+                    disp.setTransformation(new Transformation(
+                            cur.getTranslation(),
+                            new Quaternionf(new AxisAngle4f(angle, 0f, 1f, 0f)),
+                            cur.getScale(),
+                            new Quaternionf()
+                    ));
+                }
+            }
+        }, SPIN_INTERVAL, SPIN_INTERVAL);
     }
 
     // Method to ensure schematics sub-directory exists

@@ -27,7 +27,14 @@ services:
       ONLINE_MODE: "TRUE"
       # SoT hard-depends on WorldEdit (plugin.yml `depend: [WorldEdit]`). itzg auto-downloads it
       # from Modrinth into plugins/ on first boot and it then persists in ./data/plugins/.
-      MODRINTH_PROJECTS: worldedit
+      # WorldEdit + PlugManX from Modrinth. PlugManX (`plugmanx`) lets the CD deploy hot-reload just
+      # the SoT plugin via `plugman reload SoT` over RCON instead of restarting the container and
+      # kicking players. Its Paper-26.2-compatible build is on the beta channel, so beta versions
+      # must be allowed (Spiget/GitHub don't work: Spiget's download of PlugManX is gated, and the
+      # GitHub release jars up to 3.0.3 NumberFormatException on Paper's "26.2.build.NNN" version).
+      # Both auto-download on first boot; then persist in ./data/plugins/.
+      MODRINTH_PROJECTS: worldedit,plugmanx
+      MODRINTH_ALLOWED_VERSION_TYPE: beta
       # Grant yourself op so all sot.admin.* perms apply. REPLACE with your Minecraft username.
       OPS: "REPLACE_WITH_MC_USERNAME"
       # A superflat world makes building segments and watching game UX easiest. Remove for normal.

@@ -21,6 +21,8 @@ public final class SegmentBuilderKeys {
     // --- Marker-specific data ---
     /** String: Direction name stored on entry-point anchor entities. */
     public static final String DIRECTION        = "sot_direction";
+    /** Byte flag (1): marks an ItemDisplay that the marker animation task should spin. */
+    public static final String SPINNABLE        = "sot_marker_spin";
     /** String: VaultColor name stored on vault door, vault marker, key spawn entities. */
     public static final String VAULT_COLOR      = "sot_vault_color";
     /** Integer: base coin value stored on coin-spawn marker entities. */
