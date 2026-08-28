@@ -96,7 +96,7 @@ public class ToolListener implements Listener {
     // visible long axis sits ~45 deg off the sprite's vertical. Pre-roll about the sprite normal to
     // align that art with the axis the flatten+yaw math expects. Flip the sign if it points the
     // wrong way across the diagonal.
-    private static final float  EP_STICK_ROLL   = (float) Math.toRadians(-45);
+    private static final float  EP_STICK_ROLL   = (float) Math.toRadians(45);
 
     public ToolListener(@NotNull SoT plugin, @NotNull BuilderSessionManager sessionManager) {
         this.plugin = plugin;
