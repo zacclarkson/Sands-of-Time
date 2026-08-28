@@ -75,8 +75,8 @@ This plugin implements (or plans to implement) the following core features of th
 
 > *`(Note: These commands reflect the planned structure using GameManager. Update as implemented.)`*
 
-* `/sot setup <TeamID1> <TeamID2> ...`
-  Initializes a game instance with the specified teams. Requires prior player assignment via `/team` commands (if using internal `TeamManager`) or external system.
+* `/sot setup [numTeams]`
+  Initializes a game instance, spreading the online players round-robin across `numTeams` teams (default 1).
 
 * `/sot start`
   Starts the currently configured game instance.
@@ -85,7 +85,7 @@ This plugin implements (or plans to implement) the following core features of th
   Forcefully ends the current game instance.
 
 * `/sot set <lobby|trapped>`
-  (Admin) Sets the crucial universal locations for the game (lobby anchor, trapped location). Hub, Exit, and Cage are now instance-specific.
+  (Admin) Stores your current position as one of the two universal game locations, writes it to `config.yml` and applies it immediately. Hub, Exit, and Cage are instance-specific and are not set this way.
 
 * `/team assign <Player> <TeamID>`
   (Admin - if using internal `TeamManager`) Assigns a player to a team definition.
@@ -132,6 +132,29 @@ This plugin implements (or plans to implement) the following core features of th
   * Use `/sot set lobby` while standing at the desired main world anchor point (e.g., pre-game lobby).
   * Use `/sot set trapped` while standing at the location where players trapped by the timer should be sent.
   * (Hub, Safe Exit, Death Cage are now generated per-instance based on segment metadata and are not set globally).
+  * Both live in `plugins/SoT/config.yml` and can be edited by hand instead, followed by a restart:
+
+    ```yaml
+    locations:
+      lobby:
+        world: world
+        x: 0.5
+        y: 100.0
+        z: 0.5
+        yaw: 0.0
+        pitch: 0.0
+      trapped:
+        world: world
+        x: 10.5
+        y: 100.0
+        z: 10.5
+        yaw: 0.0
+        pitch: 0.0
+    ```
+
+  * Both ship unset. The plugin still enables without them (falling back to the main world's spawn
+    and logging a warning) so that `/sot set` is reachable, but `/sot setup` and `/sot start` refuse
+    to run until both are configured.
 * **Visual Timers**:
   * The visual timers are placed relative to the `lobby` location set above. Ensure the surrounding area is suitable.
 

@@ -49,8 +49,8 @@ manually (see `integration-test/README.md`); it is **not** part of CI.
 - **Builder tools** (perm `sot.admin.builder` / `sot.admin.savesegment`): `/sotbuilder` (gives the
   BLAZE_ROD tool), `/sotmode <mode> [arg]` (switch placement mode), `/sotsavesegment <name> <type>`
   (save the WorldEdit selection + placed markers as a segment template).
-- **Game control** (perm `sot.admin.control`): `/sot setup [numTeams] | start | end`, wired to
-  `GameManager.setupGame/startGame/endGame`.
+- **Game control** (perm `sot.admin.control`): `/sot setup [numTeams] | start | end | set <lobby|trapped>`,
+  wired to `GameManager.setupGame/startGame/endGame` and the location setters.
 
 ## Architecture notes & gotchas
 
@@ -65,8 +65,14 @@ manually (see `integration-test/README.md`); it is **not** part of CI.
   `/sotsavesegment <name> HUB`, then **restart** the server — there is no live reload. Until a HUB
   exists, the plugin enables fine but `/sot start` aborts. Mark the safe exit in that HUB with
   `/sotmode SAFE_EXIT`, otherwise escaping players are teleported to the hub instead.
-- **Placeholder locations.** `onEnable` passes placeholder lobby/trapped locations (TODO: load from
-  `config.yml`), which affects visual-timer placement and the trapped-player destination.
+- **Game locations come from `config.yml`.** `locations.lobby` and `locations.trapped` are stored as
+  plain `world/x/y/z/yaw/pitch` scalars and read by `SoTConfig` (deliberately *not* Bukkit's
+  `config.getLocation()`, whose serialized form needs a `==: org.bukkit.Location` marker and is not
+  hand-editable). Both ship unset. When one is unset the plugin still enables — falling back to the
+  main world's spawn and logging a warning — but `/sot setup` and `/sot start` refuse to run, so a
+  round is never generated somewhere nobody chose. `/sot set <lobby|trapped>` captures the sender's
+  position, writes it back to `config.yml` and applies it live; moving the lobby is rejected while a
+  game is running, since `startGame` derives the dungeon world and origin from it.
 
 ## Dev server
 
