@@ -33,7 +33,8 @@ public class VisualSandTimerDisplay {
     private int lastKnownVisualBlocks = -1; // Tracks the last calculated target block count
 
     // Configuration constants
-    private static final int SECONDS_PER_BLOCK_VISUAL = 10; // How many seconds each sand block represents
+    /** How many seconds of the logical timer each sand block represents. */
+    public static final int SECONDS_PER_BLOCK = 10;
     private static final long VISUAL_UPDATE_INTERVAL_TICKS = 20L; // How often to check (20 ticks = 1 second)
 
     /**
@@ -193,7 +194,7 @@ public class VisualSandTimerDisplay {
         if (remainingSeconds <= 0) return 0;
         // Calculate blocks needed: ceiling(time / seconds_per_block)
         // Example: 1s -> 1 block, 10s -> 1 block, 11s -> 2 blocks
-        int blocks = (int) Math.ceil((double) remainingSeconds / SECONDS_PER_BLOCK_VISUAL);
+        int blocks = (int) Math.ceil((double) remainingSeconds / SECONDS_PER_BLOCK);
         // Ensure calculated blocks don't exceed the physical height of the column
         return Math.min(blocks, this.totalHeight);
     }
