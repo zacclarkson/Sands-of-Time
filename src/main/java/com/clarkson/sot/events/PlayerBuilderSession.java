@@ -4,6 +4,8 @@ import com.clarkson.sot.dungeon.VaultColor;
 import org.bukkit.Location;
 import org.jetbrains.annotations.Nullable;
 
+import java.util.ArrayDeque;
+import java.util.Deque;
 import java.util.UUID;
 
 /**
@@ -25,6 +27,11 @@ public class PlayerBuilderSession {
     @Nullable private Location pendingBoundCorner = null;
     /** UUID of the temporary "first corner" marker entity, so it can be removed on cancel/complete. */
     @Nullable private UUID pendingCornerEntityId = null;
+
+    // --- Undo history ---
+    /** Most-recent-first stack of placed marker group IDs, for /sotundo. */
+    private final Deque<String> undoStack = new ArrayDeque<>();
+    private static final int UNDO_CAP = 200;
 
     // --- Getters and setters ---
 
@@ -52,5 +59,30 @@ public class PlayerBuilderSession {
     public void clearPendingBound() {
         this.pendingBoundCorner = null;
         this.pendingCornerEntityId = null;
+    }
+
+    // --- Undo history ---
+
+    /** Records a newly placed marker group so it can be reverted by /sotundo. */
+    public void pushUndo(String groupId) {
+        undoStack.push(groupId);
+        while (undoStack.size() > UNDO_CAP) {
+            undoStack.removeLast();
+        }
+    }
+
+    /** Pops and returns the most recently placed group ID, or null if history is empty. */
+    @Nullable
+    public String popUndo() {
+        return undoStack.poll();
+    }
+
+    /** Clears all undo history (e.g. after /sotclearmarkers). */
+    public void clearUndo() {
+        undoStack.clear();
+    }
+
+    public int undoSize() {
+        return undoStack.size();
     }
 }

@@ -48,8 +48,14 @@ public class GameManager {
     private DungeonBlueprint dungeonLayoutBlueprint; // Shared blueprint for this game run
 
     // --- Refactored Locations ---
-    private final Location lobbyLocation; // Main world anchor (e.g., for visual timers)
-    private final Location configTrappedLocation; // Universal location for trapped players
+    // Not final: an admin can move these at runtime with /sot set <lobby|trapped>. Both are
+    // always non-null, but until they have been set from config.yml or that command they hold a
+    // fallback (the main world's spawn) and the "configured" flags below stay false, which is what
+    // makes setupGame/startGame refuse to run rather than drop a round somewhere nobody chose.
+    private volatile Location lobbyLocation; // Main world anchor (e.g., for visual timers)
+    private volatile Location configTrappedLocation; // Universal location for trapped players
+    private volatile boolean lobbyConfigured;
+    private volatile boolean trappedConfigured;
 
     // --- Constants ---
     private static final Vector DUNGEON_BASE_OFFSET = new Vector(10000, 100, 10000); // Offset from world spawn/anchor
@@ -59,14 +65,21 @@ public class GameManager {
      * Constructor for GameManager (Refactored).
      * Initializes managers and loads configuration. Takes lobby and trapped locations.
      *
+     * <p>Both locations start out flagged as <i>unconfigured</i>: pass whatever fallback you like
+     * (the caller usually passes the main world's spawn) and then call {@link #setLobbyLocation} /
+     * {@link #setTrappedLocation} with the real values from {@code config.yml}. Until that happens
+     * {@link #setupGame} and {@link #startGame} refuse to run.
+     *
      * @param plugin            The main plugin instance.
      * @param lobbyLocation     A central location in the main world (e.g., lobby) used as an anchor.
      * @param trappedLocation   The universal location where players are sent when trapped by the timer.
      */
     public GameManager(Plugin plugin, Location lobbyLocation, Location trappedLocation) {
         this.plugin = Objects.requireNonNull(plugin, "Plugin cannot be null");
-        this.lobbyLocation = Objects.requireNonNull(lobbyLocation, "Lobby location cannot be null");
-        this.configTrappedLocation = Objects.requireNonNull(trappedLocation, "Trapped location cannot be null");
+        this.lobbyLocation = Objects.requireNonNull(lobbyLocation, "Lobby location cannot be null").clone();
+        this.configTrappedLocation = Objects.requireNonNull(trappedLocation, "Trapped location cannot be null").clone();
+        this.lobbyConfigured = false;
+        this.trappedConfigured = false;
 
         // Initialize managers - ORDER MATTERS based on dependencies
         this.playerStateManager = new PlayerStateManager();
@@ -105,6 +118,13 @@ public class GameManager {
      */
     public void setupGame(List<UUID> participatingTeamIds, List<Player> allPlayersInGame) {
         if (currentState != GameState.SETUP) { /* ... warning ... */ return; }
+        // Visual sand timers get anchored on the lobby here, so refuse before placing them at a
+        // fallback location. State is left alone so the admin can fix config and retry.
+        if (!areLocationsConfigured()) {
+            plugin.getLogger().severe("Cannot set up game: unconfigured location(s) "
+                    + getUnconfiguredLocationNames() + ". Use /sot set <lobby|trapped>.");
+            return;
+        }
         if (participatingTeamIds == null || participatingTeamIds.isEmpty()) { /* ... warning ... */ return; }
         plugin.getLogger().info("Setting up game with " + participatingTeamIds.size() + " teams.");
 
@@ -125,8 +145,11 @@ public class GameManager {
             TeamDefinition definition = teamManager.getTeamDefinition(teamId);
             if (definition == null) { /* ... warning ... */ continue; }
 
-            Location visualTimerBottom = determineVisualTimerBottomLocation(definition, this.lobbyLocation);
-            Location visualTimerTop = determineVisualTimerTopLocation(definition, this.lobbyLocation);
+            // Via the getter: it hands out a copy, so the team's timer display cannot end up holding
+            // a reference to the live lobby field.
+            Location anchor = getLobbyLocation();
+            Location visualTimerBottom = determineVisualTimerBottomLocation(definition, anchor);
+            Location visualTimerTop = determineVisualTimerTopLocation(definition, anchor);
 
             SoTTeam activeTeam = new SoTTeam(definition, plugin, this, visualTimerBottom, visualTimerTop);
             activeTeamsInGame.put(teamId, activeTeam);
@@ -152,6 +175,14 @@ public class GameManager {
     public void startGame() {
         if (currentState != GameState.SETUP) { /* ... error ... */ return; }
         if (activeTeamsInGame.isEmpty()) { /* ... error ... */ return; }
+        // Defence in depth for non-command callers; GameCommand reports this more helpfully.
+        // Deliberately leaves currentState at SETUP (unlike the generation failures below) so the
+        // admin can set the locations and start again without a restart.
+        if (!areLocationsConfigured()) {
+            plugin.getLogger().severe("Cannot start game: unconfigured location(s) "
+                    + getUnconfiguredLocationNames() + ". Use /sot set <lobby|trapped>.");
+            return;
+        }
         // Removed check for vaultManager/dungeonGenerator null as constructor handles it
 
         plugin.getLogger().info("Starting Sands of Time game generation...");
@@ -163,7 +194,7 @@ public class GameManager {
              currentState = GameState.ENDED; return;
         }
 
-        World gameWorld = lobbyLocation.getWorld();
+        World gameWorld = getLobbyLocation().getWorld();
         if (gameWorld == null) { /* ... error ... */ currentState = GameState.ENDED; return; }
 
         // 2. Create and Initialize Dungeon Instance for Each Team
@@ -241,9 +272,11 @@ public class GameManager {
                  scoreManager.applyTimerEndPenalty(memberUUID);
                  Player onlinePlayer = Bukkit.getPlayer(memberUUID);
                  if (onlinePlayer != null && onlinePlayer.isOnline()) {
-                     if (configTrappedLocation != null) {
+                     // Snapshot the destination now: /sot set trapped may move it before the task runs.
+                     final Location trapDestination = getTrappedLocation();
+                     if (trapDestination != null) {
                          final Component message = Component.text("Your team's timer ran out! You are trapped!", NamedTextColor.RED, TextDecoration.BOLD);
-                         Bukkit.getScheduler().runTask(plugin, () -> { if (onlinePlayer.isValid()) { onlinePlayer.teleport(configTrappedLocation); onlinePlayer.sendMessage(message); } });
+                         Bukkit.getScheduler().runTask(plugin, () -> { if (onlinePlayer.isValid()) { onlinePlayer.teleport(trapDestination); onlinePlayer.sendMessage(message); } });
                          NamedTextColor teamColor = teamManager.getTeamColor(team.getTeamId()); // Get team color
                          Component broadcastMessage = Component.text(onlinePlayer.getName(), teamColor).append(Component.text(" has been trapped!", NamedTextColor.RED));
                          Bukkit.getServer().broadcast(broadcastMessage);
@@ -277,14 +310,15 @@ public class GameManager {
         // --- Final score calculations & display ---
         displayFinalScores();
 
-        // Teleport remaining players to lobby
+        // Teleport remaining players to lobby (snapshot once; the field is mutable)
+        final Location lobbyDestination = getLobbyLocation();
         for (SoTTeam team : activeTeamsInGame.values()) {
             for (UUID memberId : team.getMemberUUIDs()) {
                 Player player = Bukkit.getPlayer(memberId);
                 if (player != null && player.isOnline()) {
                     Bukkit.getScheduler().runTask(plugin, () -> {
-                        if (player.isValid() && lobbyLocation != null) {
-                            player.teleport(lobbyLocation);
+                        if (player.isValid()) {
+                            player.teleport(lobbyDestination);
                         }
                     });
                 }
@@ -548,7 +582,7 @@ public class GameManager {
     private Location getPlayerDeathCageLocation(UUID teamId, UUID playerUUID) {
         DungeonManager teamDungeonManager = teamDungeonManagers.get(teamId);
         if (teamDungeonManager == null || teamDungeonManager.getDungeonData() == null) {
-            return this.configTrappedLocation;
+            return getTrappedLocation();
         }
         for (DeathCage cage : teamDungeonManager.getDungeonData().getDeathCages()) {
             if (playerUUID.equals(cage.getAssignedPlayerUUID())) {
@@ -556,7 +590,7 @@ public class GameManager {
             }
         }
         plugin.getLogger().warning("No death cage assigned to player " + playerUUID + " on team " + teamId);
-        return this.configTrappedLocation;
+        return getTrappedLocation();
     }
 
     /**
@@ -597,7 +631,44 @@ public class GameManager {
     public DungeonGenerator getDungeonGenerator() { return dungeonGenerator; }
     public FloorItemManager getFloorItemManager() { return floorItemManager; } // Added Getter
     public DoorManager getDoorManager() { return doorManager; } // Added Getter
-    public Location getTrappedLocation() { return configTrappedLocation; }
-    public Location getLobbyLocation() { return lobbyLocation; }
+    /** The universal trapped location. Returns a copy: {@link Location} is mutable. */
+    public Location getTrappedLocation() { return configTrappedLocation.clone(); }
+    /** The lobby anchor. Returns a copy: {@link Location} is mutable. */
+    public Location getLobbyLocation() { return lobbyLocation.clone(); }
+
+    // --- Location configuration (see /sot set and config.yml) ---
+
+    /**
+     * Sets the lobby anchor and marks it configured. Callers must not do this mid-round:
+     * {@link #startGame} derives the dungeon world and origin from it, so moving it under a live
+     * game would strand players and orphan the generated dungeons.
+     */
+    public void setLobbyLocation(Location location) {
+        this.lobbyLocation = Objects.requireNonNull(location, "Lobby location cannot be null").clone();
+        this.lobbyConfigured = true;
+    }
+
+    /**
+     * Sets the universal trapped location and marks it configured. Safe at any time: it is only
+     * read at teleport time and nothing caches it.
+     */
+    public void setTrappedLocation(Location location) {
+        this.configTrappedLocation = Objects.requireNonNull(location, "Trapped location cannot be null").clone();
+        this.trappedConfigured = true;
+    }
+
+    public boolean isLobbyConfigured() { return lobbyConfigured; }
+    public boolean isTrappedConfigured() { return trappedConfigured; }
+
+    /** True once both universal locations have been set from config.yml or {@code /sot set}. */
+    public boolean areLocationsConfigured() { return lobbyConfigured && trappedConfigured; }
+
+    /** Names of the locations still unset, for operator-facing messages. Empty when all are set. */
+    public List<String> getUnconfiguredLocationNames() {
+        List<String> names = new ArrayList<>(2);
+        if (!lobbyConfigured) names.add("lobby");
+        if (!trappedConfigured) names.add("trapped");
+        return names;
+    }
 
 }

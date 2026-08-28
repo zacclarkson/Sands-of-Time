@@ -43,7 +43,10 @@ jobs:
           path: target/surefire-reports/**
           if-no-files-found: ignore
 
-  # Deploys the freshly built jar to ~/servers/sot-test on the homelab and restarts the container.
+  # Deploys the freshly built jar to ~/servers/sot-test on the homelab and hot-reloads just the SoT
+  # plugin (via PlugManX over RCON) so players are not kicked. Requires PlugManX to be installed on
+  # the server (MODRINTH_PROJECTS: worldedit,plugmanx in compose.yml); if it is missing the reload
+  # step fails loudly.
   # Gated: stays skipped until a self-hosted runner is registered AND the repo variable
   # DEPLOY_ENABLED is set to "true" (see deploy/sot-test/README.md), so CI never hangs on a
   # missing runner.
@@ -61,7 +64,18 @@ jobs:
           name: SandsOfTime-Plugin-JAR
           path: artifact
 
-      - name: Deploy to sot-test and restart
+      - name: Deploy to sot-test and hot-reload
         run: |
           cp artifact/SoT-*.jar ~/servers/sot-test/data/plugins/SoT.jar
-          docker restart sot-test
+          # Hot-reload only the SoT plugin over RCON so connected players are not kicked.
+          # PlugManX 'reload' unloads then reloads from disk, picking up the jar just copied.
+          # rcon-cli exits 0 even when the server replies "Unknown command" (PlugManX missing),
+          # so inspect the reply and fail on any error marker instead of silently no-op'ing.
+          reload_out=$(docker exec sot-test rcon-cli plugman reload SoT 2>&1)
+          echo "plugman reply: $reload_out"
+          if echo "$reload_out" | grep -qiE 'unknown command|not found|not enabled|no plugin|exception|error'; then
+            echo "::error::plugman reload SoT failed (is PlugManX installed and SoT present?)"
+            exit 1
+          fi
+          # Announce the successful reload in-game (short commit SHA identifies the build).
+          docker exec sot-test rcon-cli say "[SoT] Plugin reloaded to build ${GITHUB_SHA:0:7}"

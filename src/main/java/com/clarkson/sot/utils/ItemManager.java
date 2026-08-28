@@ -25,6 +25,11 @@ import java.util.logging.Level;
  * Manages custom ItemStacks for the Sands of Time plugin.
  * Defines NamespacedKeys, creates custom items (keys, tools),
  * and provides methods to identify them.
+ *
+ * <p>This is the single source of truth for key items. Every producer of a key
+ * ({@link com.clarkson.sot.entities.Key} floor items, {@code VaultManager} spawns) builds its
+ * ItemStack here, and every consumer (both {@code Door} subclasses, vault activation) identifies
+ * it here, so a key that opens a vault is always the same key a door accepts.
  */
 public final class ItemManager {
 
@@ -66,15 +71,13 @@ public final class ItemManager {
 
     /**
      * Initializes all static NamespacedKey fields.
-     * MUST be called once during plugin startup (e.g., in onEnable).
+     * MUST be called during plugin startup (e.g., in onEnable) before any item is created or
+     * checked. Idempotent: the keys are derived from the plugin name, so re-initializing with the
+     * same plugin is a no-op in effect.
      * @param plugin The instance of the main plugin.
      */
     public static void initializeKeys(@NotNull Plugin plugin) {
         Objects.requireNonNull(plugin, "Plugin instance cannot be null for key initialization");
-        if (KEY_TYPE != null) {
-            plugin.getLogger().warning("ItemManager Keys already initialized!");
-            return;
-        }
         pluginInstance = plugin; // Store for potential future use if needed
         plugin.getLogger().info("Initializing ItemManager Keys...");
 
@@ -87,11 +90,23 @@ public final class ItemManager {
         plugin.getLogger().info("ItemManager Keys initialized.");
     }
 
+    /**
+     * Guards against using the item API before {@link #initializeKeys(Plugin)} has run.
+     * Failing loudly matters here: silently returning "not a key" from every check is exactly how
+     * the plugin shipped with unopenable doors.
+     */
+    private static void requireInitialized() {
+        if (KEY_TYPE == null) {
+            throw new IllegalStateException("ItemManager NamespacedKeys not initialized! Call ItemManager.initializeKeys() in onEnable.");
+        }
+    }
+
     // --- Item Creation Methods ---
 
     /** Creates the ItemStack for a Rusty Key. */
     @NotNull
     public static ItemStack createRustyKey() {
+        requireInitialized();
         ItemStack key = new ItemStack(Material.TRIPWIRE_HOOK); // Base material
         ItemMeta meta = key.getItemMeta();
         if (meta != null) {
@@ -114,6 +129,7 @@ public final class ItemManager {
     /** Creates the ItemStack for a specific colored Vault Key. */
     @NotNull
     public static ItemStack createVaultKey(@NotNull VaultColor color) {
+        requireInitialized();
         ItemStack key = new ItemStack(Material.TRIPWIRE_HOOK); // Base material
         ItemMeta meta = key.getItemMeta();
         if (meta != null) {
@@ -140,6 +156,7 @@ public final class ItemManager {
     /** Creates the ItemStack for the Coin Placer tool. */
     @NotNull
     public static ItemStack createCoinPlacerTool(int value) {
+        requireInitialized();
         ItemStack tool = new ItemStack(Material.BLAZE_ROD);
         ItemMeta meta = tool.getItemMeta();
         if (meta != null) {
@@ -161,6 +178,7 @@ public final class ItemManager {
     /** Creates the ItemStack for the Item Spawn Placer tool. */
      @NotNull
      public static ItemStack createItemSpawnPlacerTool() {
+         requireInitialized();
          ItemStack tool = new ItemStack(Material.IRON_SHOVEL);
          ItemMeta meta = tool.getItemMeta();
          if (meta != null) {
@@ -181,6 +199,7 @@ public final class ItemManager {
      /** Creates the ItemStack for the Entry Point Placer tool. */
       @NotNull
       public static ItemStack createEntryPointPlacerTool() {
+          requireInitialized();
           ItemStack tool = new ItemStack(Material.ARROW);
           ItemMeta meta = tool.getItemMeta();
           if (meta != null) {
@@ -213,23 +232,26 @@ public final class ItemManager {
 
     /** Checks if an ItemStack is a Rusty Key. */
     public static boolean isRustyKey(@Nullable ItemStack item) {
+        requireInitialized();
         PersistentDataContainer pdc = getPDC(item);
-        if (pdc == null || KEY_TYPE == null) return false;
+        if (pdc == null) return false;
         return RUSTY_KEY_VALUE.equals(pdc.get(KEY_TYPE, PersistentDataType.STRING));
     }
 
     /** Checks if an ItemStack is any Vault Key. */
     public static boolean isVaultKey(@Nullable ItemStack item) {
+        requireInitialized();
         PersistentDataContainer pdc = getPDC(item);
-        if (pdc == null || KEY_TYPE == null) return false;
+        if (pdc == null) return false;
         return VAULT_KEY_VALUE.equals(pdc.get(KEY_TYPE, PersistentDataType.STRING));
     }
 
     /** Gets the VaultColor from a Vault Key ItemStack, returns null if not a valid vault key or color tag missing/invalid. */
     @Nullable
     public static VaultColor getVaultKeyColor(@Nullable ItemStack item) {
+        requireInitialized();
         PersistentDataContainer pdc = getPDC(item);
-        if (pdc == null || KEY_TYPE == null || VAULT_COLOR == null) return null;
+        if (pdc == null) return null;
 
         // Check if it's actually a vault key first
         if (!VAULT_KEY_VALUE.equals(pdc.get(KEY_TYPE, PersistentDataType.STRING))) {
@@ -251,16 +273,18 @@ public final class ItemManager {
 
      /** Checks if an ItemStack is the Coin Placer tool. */
      public static boolean isCoinPlacerTool(@Nullable ItemStack item) {
+         requireInitialized();
          PersistentDataContainer pdc = getPDC(item);
-         if (pdc == null || TOOL_TYPE == null) return false;
+         if (pdc == null) return false;
          return TOOL_TYPE_COIN_PLACER.equals(pdc.get(TOOL_TYPE, PersistentDataType.STRING));
      }
 
      /** Gets the value stored on a Coin Placer tool. Returns null if not a coin tool or value missing. */
      @Nullable
      public static Integer getCoinToolValue(@Nullable ItemStack item) {
+         requireInitialized();
          PersistentDataContainer pdc = getPDC(item);
-         if (pdc == null || TOOL_TYPE == null || TOOL_VALUE == null) return null;
+         if (pdc == null) return null;
          if (!TOOL_TYPE_COIN_PLACER.equals(pdc.get(TOOL_TYPE, PersistentDataType.STRING))) {
              return null; // Not the right tool type
          }
@@ -269,15 +293,17 @@ public final class ItemManager {
 
      /** Checks if an ItemStack is the Item Spawn Placer tool. */
      public static boolean isItemSpawnPlacerTool(@Nullable ItemStack item) {
+         requireInitialized();
          PersistentDataContainer pdc = getPDC(item);
-         if (pdc == null || TOOL_TYPE == null) return false;
+         if (pdc == null) return false;
          return TOOL_TYPE_ITEM_SPAWN_PLACER.equals(pdc.get(TOOL_TYPE, PersistentDataType.STRING));
      }
 
       /** Checks if an ItemStack is the Entry Point Placer tool. */
       public static boolean isEntryPointPlacerTool(@Nullable ItemStack item) {
+          requireInitialized();
           PersistentDataContainer pdc = getPDC(item);
-          if (pdc == null || TOOL_TYPE == null) return false;
+          if (pdc == null) return false;
           return TOOL_TYPE_ENTRY_POINT_PLACER.equals(pdc.get(TOOL_TYPE, PersistentDataType.STRING));
       }
 
