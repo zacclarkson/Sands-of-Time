@@ -60,6 +60,13 @@ manually (see `integration-test/README.md`); it is **not** part of CI.
   register **those** instances (via `gameManager.getXManager()` getters) as event listeners — do
   **not** build a second parallel set (that was bug #65: listeners bound to instances that didn't
   hold the live game state).
+- **The live scoreboard is a task, not a listener.** `GameManager` owns `GameScoreboardManager`
+  and starts it in `startGame` / stops it in `endGameInternal`, so — unlike the managers listed
+  above — there is nothing for `SoT.onEnable()` to register. It refreshes every second from the live
+  managers and holds no game state of its own; `ScoreboardLayout` builds the text and is where the
+  unit tests live. Sidebar rows keep a permanent invisible score entry each and only their
+  scoreboard-team prefix is rewritten, because rewriting the entries themselves would make the whole
+  sidebar flicker once a second.
 - **No segment templates are bundled.** Dungeon generation needs at least one `HUB` segment on disk
   (`plugins/SoT/<name>.json` + `schematics/<name>.schem`). Build one in-game with the builder tools +
   `/sotsavesegment <name> HUB`, then **restart** the server — there is no live reload. Until a HUB

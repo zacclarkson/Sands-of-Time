@@ -7,6 +7,7 @@ import com.clarkson.sot.events.FloorItemManager; // Import FloorItemManager
 import com.clarkson.sot.scoring.BankingManager;
 import com.clarkson.sot.scoring.ScoreManager;
 import com.clarkson.sot.timer.VisualTimerLayout;
+import com.clarkson.sot.ui.GameScoreboardManager;
 import com.clarkson.sot.utils.*; // PlayerStateManager, PlayerStatus, SandManager, SoTTeam, TeamDefinition, TeamManager
 
 import org.bukkit.Bukkit;
@@ -44,6 +45,7 @@ public class GameManager {
     private final DungeonGenerator dungeonGenerator;
     private final FloorItemManager floorItemManager; // Added
     private final DoorManager doorManager; // Added
+    private final GameScoreboardManager scoreboardManager; // Live sidebar + boss bar display
     private final Map<UUID, DungeonManager> teamDungeonManagers; // TeamID -> Manager for their instance
     private final Map<UUID, SoTTeam> activeTeamsInGame; // TeamID -> Active team object
     private DungeonBlueprint dungeonLayoutBlueprint; // Shared blueprint for this game run
@@ -92,6 +94,7 @@ public class GameManager {
         this.floorItemManager = new FloorItemManager((SoT) plugin, this, scoreManager); // Pass SoT plugin, GameManager, ScoreManager
         this.doorManager = new DoorManager((SoT) plugin, this); // Pass SoT plugin, GameManager
         this.dungeonGenerator = new DungeonGenerator(plugin);
+        this.scoreboardManager = new GameScoreboardManager(plugin, this); // Reads the managers above
 
         // Initialize maps
         this.activeTeamsInGame = new ConcurrentHashMap<>(); // Use concurrent maps if accessed by events/tasks
@@ -130,6 +133,7 @@ public class GameManager {
         plugin.getLogger().info("Setting up game with " + participatingTeamIds.size() + " teams.");
 
         // Clear state from previous games (call clear methods on managers)
+        scoreboardManager.stop(); // Defensive: a previous round should already have stopped it
         activeTeamsInGame.clear();
         teamDungeonManagers.clear();
         playerStateManager.clearAllStates();
@@ -245,6 +249,7 @@ public class GameManager {
 
         // 5. Set Game State & Announce
         this.currentState = GameState.RUNNING;
+        scoreboardManager.start(); // Live standings/timer display, refreshed once a second
         Bukkit.getServer().broadcast(Component.text("Sands of Time has begun!", NamedTextColor.GOLD, TextDecoration.BOLD));
         plugin.getLogger().info("Sands of Time game started with per-team dungeons.");
     }
@@ -309,6 +314,10 @@ public class GameManager {
         this.currentState = GameState.ENDED;
 
         for (SoTTeam team : activeTeamsInGame.values()) { if (team.isTimerRunning()) team.stopTimer(); }
+
+        // Take the live display down before the teams are cleared below, so every player gets the
+        // server's own scoreboard back and no boss bar outlives the round.
+        scoreboardManager.stop();
 
         // --- Final score calculations & display ---
         displayFinalScores();
@@ -656,6 +665,7 @@ public class GameManager {
     public DungeonGenerator getDungeonGenerator() { return dungeonGenerator; }
     public FloorItemManager getFloorItemManager() { return floorItemManager; } // Added Getter
     public DoorManager getDoorManager() { return doorManager; } // Added Getter
+    public GameScoreboardManager getScoreboardManager() { return scoreboardManager; }
     /** The universal trapped location. Returns a copy: {@link Location} is mutable. */
     public Location getTrappedLocation() { return configTrappedLocation.clone(); }
     /** The lobby anchor. Returns a copy: {@link Location} is mutable. */

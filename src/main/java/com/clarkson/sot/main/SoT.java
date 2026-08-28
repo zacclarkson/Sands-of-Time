@@ -153,6 +153,11 @@ public class SoT extends JavaPlugin {
     @Override
     public void onDisable() {
         getLogger().info("Sands of Time Disabling...");
+        // Take the live scoreboard down explicitly: a boss bar shown to a player outlives the
+        // plugin being disabled, which matters on the hot-reload deploy path.
+        if (gameManager != null) {
+            gameManager.getScoreboardManager().stop();
+        }
         if (markerSpinTask != null) {
             markerSpinTask.cancel();
             markerSpinTask = null;
