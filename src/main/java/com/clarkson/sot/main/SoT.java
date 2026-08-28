@@ -33,6 +33,8 @@ import com.clarkson.sot.events.ToolListener;
 import com.clarkson.sot.entities.CoinStack;
 import com.clarkson.sot.entities.FloorLoot;
 import com.clarkson.sot.entities.Key;
+// Import the central item/key registry
+import com.clarkson.sot.utils.ItemManager;
 
 
 public class SoT extends JavaPlugin {
@@ -103,7 +105,10 @@ public class SoT extends JavaPlugin {
         //    segment templates in its constructor). We register GameManager's instances as
         //    listeners below so events act on the objects that hold the live game state.
 
-        // 3. Initialize static keys if needed
+        // 3. Initialize static keys if needed.
+        //    ItemManager owns the key/tool item tags and must be initialized before any item is
+        //    created or checked, or every door and builder-tool check silently fails.
+        ItemManager.initializeKeys(this);
         CoinStack.initializeKeys(this);
         Key.initializeKeys(this);
         FloorLoot.initializeKeys(this);
