@@ -1,0 +1,13 @@
+{
+  "name": "sot-integration-bot",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Mineflayer bot that drives end-to-end scenarios against a real Paper server running the SoT plugin.",
+  "type": "commonjs",
+  "scripts": {
+    "test": "node smoke-test.js"
+  },
+  "dependencies": {
+    "mineflayer": "^4.20.1"
+  }
+}
