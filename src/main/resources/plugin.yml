@@ -1,7 +1,7 @@
 name: SoT
 version: '${project.version}'
 main: com.clarkson.sot.main.SoT
-api-version: '1.21'
+api-version: '26.2'
 depend: [WorldEdit]
 authors: [ZacClarkson]
 description: A minecraft game based on MCC

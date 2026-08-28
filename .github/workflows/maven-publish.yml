@@ -21,16 +21,16 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4 # Use a recent version
 
-      # Step 2: Set up JDK 21 (Required for Paper 1.21+ and pom.xml target)
-      - name: Set up JDK 21 # <-- Updated Name
+      # Step 2: Set up JDK 25 (Required for Paper 26.2 and pom.xml target)
+      - name: Set up JDK 25
         uses: actions/setup-java@v4
         with:
-          java-version: '21' # <-- Updated Version
+          java-version: '25'
           distribution: 'temurin' # Popular distribution
           cache: maven # Automatically cache Maven dependencies
 
       # Step 3: Build with Maven
-      # 'verify' runs tests and package. Use 'package' if you don't have tests yet.
+      # 'verify' runs the MockBukkit/JUnit test suite and then packages the shaded JAR.
       # -B runs in batch mode (non-interactive)
       - name: Build with Maven
         run: mvn -B verify --file pom.xml # Use 'verify' to include tests, or 'package' just to build JAR
