@@ -92,7 +92,7 @@ public class ToolListener implements Listener {
     private static final float  EP_BARB_SCALE   = 0.45f;
     private static final double EP_TIP_DIST      = 0.45; // shaft-centre -> arrow tip
     private static final double EP_BARB_DIST     = 0.22; // tip -> barb centre
-    private static final double EP_BARB_LATERAL  = 0.2; // shift both barbs left of the shaft (- = right)
+    private static final double EP_BARB_LATERAL  = 0.05; // shift both barbs left of the shaft (- = right)
     // A stick's item texture runs diagonally (bottom-left to top-right) within its sprite, so its
     // visible long axis sits ~45 deg off the sprite's vertical. Pre-roll about the sprite normal to
     // align that art with the axis the flatten+yaw math expects. Flip the sign if it points the
