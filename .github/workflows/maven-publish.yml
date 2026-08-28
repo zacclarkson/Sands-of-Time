@@ -76,3 +76,5 @@ jobs:
             echo "::error::plugman reload SoT failed (is PlugManX installed and SoT present?)"
             exit 1
           fi
+          # Announce the successful reload in-game (short commit SHA identifies the build).
+          docker exec sot-test rcon-cli say "[SoT] Plugin reloaded to build ${GITHUB_SHA:0:7}"
