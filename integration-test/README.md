@@ -9,16 +9,16 @@ Intended to run on the homelab (or any Docker host).
 
 ## Pieces
 
-- **`docker-compose.yml`** — a Paper 1.21.1 server (`itzg/minecraft-server`) with `online-mode=false`,
+- **`docker-compose.yml`** — a Paper 26.2 server (`itzg/minecraft-server`) with `online-mode=false`,
   the freshly built plugin jar mounted into `plugins/`, and a Node service that runs the bot.
 - **`bot/smoke-test.js`** — a [Mineflayer](https://github.com/PrismarineJS/mineflayer) bot that
   connects, confirms it can join and act, and exits non-zero on failure/timeout.
 
 ## Prerequisites
 
-- **JDK 21** to build/test. The build and the MockBukkit unit tests fail on newer JDKs (a JDK 26
-  default crashes `maven-compiler-plugin` at test-compile), and CI pins Temurin 21 for the same
-  reason. Point `JAVA_HOME` at a JDK 21 before running `mvn`.
+- **JDK 25** to build/test. Paper 26.2 is compiled against Java 25 and MockBukkit v26.2 ships
+  Java 25 bytecode, so anything older cannot compile or run the tests. CI pins Temurin 25.
+  Point `JAVA_HOME` at a JDK 25 (or newer) before running `mvn`.
 - **Maven** (not bundled here) and **Docker** with the Compose plugin.
 
 For an always-on server you can log into from a real client (not a bot), see
@@ -61,7 +61,7 @@ Once (1) exists, extend `smoke-test.js` with scenarios such as:
 ## Notes
 
 - Keep the server `VERSION` in `docker-compose.yml` in sync with the plugin's `paper-api` version
-  (currently **1.21.1**).
+  (currently **26.2**).
 - Mineflayer must support the server version; bump `mineflayer` in `bot/package.json` if you raise
   the server version and the bot fails to connect.
 - This tier is heavier and slower than unit tests — run it on demand (or as a separate, non-blocking

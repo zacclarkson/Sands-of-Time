@@ -12,7 +12,8 @@
     <name>SoT</name>
 
     <properties>
-        <java.version>21</java.version>
+        <!-- Paper 26.2 is compiled against Java 25 and requires a Java 25+ server. -->
+        <java.version>25</java.version>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <server.plugins.dir>C:\Users\zac\Desktop\test_server\plugins</server.plugins.dir>
     </properties>
@@ -22,20 +23,33 @@
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-compiler-plugin</artifactId>
-                <version>3.11.0</version>
+                <version>3.15.0</version>
                 <configuration>
                     <release>${java.version}</release>
+                    <compilerArgs>
+                        <!-- Name the deprecated call rather than just counting it, so a
+                             version bump shows what it actually broke. -->
+                        <arg>-Xlint:deprecation</arg>
+                    </compilerArgs>
                 </configuration>
             </plugin>
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-surefire-plugin</artifactId>
-                <version>3.5.2</version>
+                <version>3.5.6</version>
+                <configuration>
+                    <!-- Mockito's inline mock maker self-attaches an agent; JDK 25 warns
+                         about that unless it is opted into explicitly. -->
+                    <argLine>-XX:+EnableDynamicAgentLoading -Xshare:off</argLine>
+                    <!-- A MockBukkit test that never releases the mock scheduler would
+                         otherwise hang the build until the CI job's own timeout. -->
+                    <forkedProcessTimeoutInSeconds>420</forkedProcessTimeoutInSeconds>
+                </configuration>
             </plugin>
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-shade-plugin</artifactId>
-                <version>3.5.2</version>
+                <version>3.6.2</version>
                 <executions>
                     <execution>
                         <phase>package</phase>
@@ -91,10 +105,6 @@
             <url>https://repo.papermc.io/repository/maven-public/</url>
         </repository>
         <repository>
-            <id>sonatype</id>
-            <url>https://oss.sonatype.org/content/groups/public/</url>
-        </repository>
-        <repository>
             <id>enginehub</id>
             <url>https://maven.enginehub.org/repo/</url>
         </repository>
@@ -104,13 +114,13 @@
         <dependency>
             <groupId>io.papermc.paper</groupId>
             <artifactId>paper-api</artifactId>
-            <version>1.21.1-R0.1-SNAPSHOT</version>
+            <version>26.2.build.119-stable</version>
             <scope>provided</scope>
         </dependency>
         <dependency>
             <groupId>com.sk89q.worldedit</groupId>
             <artifactId>worldedit-bukkit</artifactId>
-            <version>7.3.10</version>
+            <version>7.4.5</version>
             <scope>provided</scope>
         </dependency>
         <dependency>
@@ -129,19 +139,40 @@
          <dependency>
              <groupId>org.junit.jupiter</groupId>
              <artifactId>junit-jupiter</artifactId>
-             <version>5.11.4</version>
+             <version>6.1.3</version>
              <scope>test</scope>
          </dependency>
          <dependency>
              <groupId>org.mockbukkit.mockbukkit</groupId>
-             <artifactId>mockbukkit-v1.21</artifactId>
-             <version>4.0.0</version>
+             <artifactId>mockbukkit-v26.2</artifactId>
+             <version>4.116.1</version>
              <scope>test</scope>
          </dependency>
          <dependency>
              <groupId>org.mockito</groupId>
              <artifactId>mockito-core</artifactId>
-             <version>5.14.2</version>
+             <version>5.23.0</version>
+             <scope>test</scope>
+         </dependency>
+         <!-- Surefire needs the launcher on the test classpath for JUnit Platform 6. -->
+         <dependency>
+             <groupId>org.junit.platform</groupId>
+             <artifactId>junit-platform-launcher</artifactId>
+             <version>6.1.3</version>
+             <scope>test</scope>
+         </dependency>
+         <!-- MockBukkit needs byte-buddy 1.18.x to read Java 25 class files, but Mockito
+              still declares 1.17.7. Pin it rather than relying on Maven's mediation. -->
+         <dependency>
+             <groupId>net.bytebuddy</groupId>
+             <artifactId>byte-buddy</artifactId>
+             <version>1.18.11</version>
+             <scope>test</scope>
+         </dependency>
+         <dependency>
+             <groupId>net.bytebuddy</groupId>
+             <artifactId>byte-buddy-agent</artifactId>
+             <version>1.18.11</version>
              <scope>test</scope>
          </dependency>
     </dependencies>

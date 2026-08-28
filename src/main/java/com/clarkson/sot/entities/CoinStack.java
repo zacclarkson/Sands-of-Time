@@ -8,10 +8,12 @@ import org.bukkit.entity.ItemDisplay; // Assuming ItemDisplay is used
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta; // Needed for CustomModelData
+import org.bukkit.inventory.meta.components.CustomModelDataComponent;
 import org.bukkit.persistence.PersistentDataContainer;
 import org.bukkit.persistence.PersistentDataType;
 import org.bukkit.plugin.Plugin;
 
+import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
 import java.util.logging.Level;
@@ -121,8 +123,12 @@ public class CoinStack implements FloorItem {
         // 2. Get and modify ItemMeta
         ItemMeta meta = displayStack.getItemMeta();
         if (meta != null) {
-            // 3. Set the Custom Model Data
-            meta.setCustomModelData(this.modelIdToUse);
+            // 3. Set the Custom Model Data.
+            // The legacy setCustomModelData(int) is deprecated; an old integer id is
+            // equivalent to a single float in the component's float list.
+            CustomModelDataComponent customModelData = meta.getCustomModelDataComponent();
+            customModelData.setFloats(List.of((float) this.modelIdToUse));
+            meta.setCustomModelDataComponent(customModelData);
 
             // Optionally set other meta like name (usually not needed for display entities)
             // meta.displayName(Component.text("Coin Stack"));

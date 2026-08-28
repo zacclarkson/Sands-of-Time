@@ -8,10 +8,12 @@ generated dungeon, collect and bank coins, and race a sand timer. See `readme.md
 
 ## Requirements
 
-- **Java 21.** The build and the unit tests fail on newer JDKs (a JDK 26 default crashes
-  `maven-compiler-plugin` at test-compile). Point `JAVA_HOME` at a JDK 21 before running Maven.
-- **Paper 1.21.1** at runtime (`paper-api` is `provided` scope).
-- **WorldEdit 7.3.x** at runtime. `plugin.yml` has `depend: [WorldEdit]` (a hard depend) and
+- **Java 25.** Paper 26.2 is compiled against Java 25, so the build targets release 25 and the
+  plugin needs a Java 25+ server at runtime. Point `JAVA_HOME` at a JDK 25 (or newer) before
+  running Maven.
+- **Paper 26.2** at runtime (`paper-api` is `provided` scope). Note the calendar versioning: the
+  1.21 line was succeeded by 26.1 and then 26.2, so 26.2 is newer than 1.21.x, not older.
+- **WorldEdit 7.4.5+** at runtime. `plugin.yml` has `depend: [WorldEdit]` (a hard depend) and
   `worldedit-bukkit` is `provided` scope, so WorldEdit (or FAWE) must be installed separately on any
   server — the plugin will not enable without it.
 
@@ -30,9 +32,11 @@ JUnit 5 + Mockito, with **MockBukkit** for anything needing a live server/schedu
 classes use plain Mockito; we deliberately do **not** `MockBukkit.load(SoT.class)` (onEnable is heavy
 and WorldEdit is provided-scope).
 
-**Version coupling:** MockBukkit is pinned to a specific `paper-api` patch. `mockbukkit-v1.21:4.0.0`
-(JUnit 5) requires `paper-api` **1.21.1**. Bumping one usually forces the other — keep them in
-lockstep.
+**Version coupling:** MockBukkit is pinned to a specific `paper-api` line, and to a JUnit version.
+`mockbukkit-v26.2:4.116.1` tracks `paper-api` **26.2** and declares `junit-jupiter-api` **6.1.3**.
+Bumping any one of the three usually forces the others — keep them in lockstep. `byte-buddy` is also
+pinned explicitly, because MockBukkit needs 1.18.x for Java 25 bytecode while Mockito still declares
+1.17.7 and Maven would otherwise mediate by declaration order.
 
 ### Integration harness (`integration-test/`)
 
@@ -65,7 +69,7 @@ manually (see `integration-test/README.md`); it is **not** part of CI.
 
 ## Dev server
 
-`deploy/sot-test/` holds a reference Docker Compose for an always-on Paper 1.21.1 + WorldEdit server
+`deploy/sot-test/` holds a reference Docker Compose for an always-on Paper 26.2 + WorldEdit server
 you can log into to test the UX. Fill in the placeholders (host, your Minecraft username for `OPS`)
 for your own environment. The build jar is deployed to `data/plugins/SoT.jar`.
 

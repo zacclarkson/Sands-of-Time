@@ -1,4 +1,4 @@
-# Integration/E2E test harness: a real Paper 1.21.1 server running the built plugin.
+# Integration/E2E test harness: a real Paper 26.2 server running the built plugin.
 #
 # Usage (from the repo root):
 #   mvn package                       # builds target/SoT-1.0-SNAPSHOT.jar
@@ -13,7 +13,7 @@
 
 services:
   server:
-    image: itzg/minecraft-server:java21
+    image: itzg/minecraft-server:java25
     tty: true
     stdin_open: true
     ports:
@@ -21,7 +21,7 @@ services:
     environment:
       EULA: "TRUE"
       TYPE: PAPER
-      VERSION: "1.21.1"
+      VERSION: "26.2"
       ONLINE_MODE: "FALSE"
       MEMORY: "2G"
       # SoT hard-depends on WorldEdit (plugin.yml `depend: [WorldEdit]`); without it the plugin
@@ -48,7 +48,7 @@ services:
     environment:
       MC_HOST: server
       MC_PORT: "25565"
-      MC_VERSION: "1.21.1"
+      MC_VERSION: "26.2"
       MC_USERNAME: Tester
     volumes:
       - ./bot:/bot
