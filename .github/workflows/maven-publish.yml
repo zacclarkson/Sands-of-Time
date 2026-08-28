@@ -10,6 +10,7 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
@@ -25,7 +26,7 @@ jobs:
 
       # `verify` compiles, runs the JUnit/MockBukkit unit tests, and shades the jar.
       - name: Build with Maven
-        run: mvn -B verify --file pom.xml
+        run: mvn -B -ntp verify --file pom.xml
 
       - name: Upload Plugin JAR
         uses: actions/upload-artifact@v4

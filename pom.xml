@@ -36,6 +36,9 @@
                     <!-- Mockito's inline mock maker self-attaches an agent; JDK 25 warns
                          about that unless it is opted into explicitly. -->
                     <argLine>-XX:+EnableDynamicAgentLoading -Xshare:off</argLine>
+                    <!-- A MockBukkit test that never releases the mock scheduler would
+                         otherwise hang the build until the CI job's own timeout. -->
+                    <forkedProcessTimeoutInSeconds>420</forkedProcessTimeoutInSeconds>
                 </configuration>
             </plugin>
             <plugin>
@@ -95,10 +98,6 @@
         <repository>
             <id>papermc-repo</id>
             <url>https://repo.papermc.io/repository/maven-public/</url>
-        </repository>
-        <repository>
-            <id>sonatype</id>
-            <url>https://oss.sonatype.org/content/groups/public/</url>
         </repository>
         <repository>
             <id>enginehub</id>
