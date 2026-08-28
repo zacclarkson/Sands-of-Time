@@ -26,8 +26,8 @@ commands:
 
   # --- Game Control Commands ---
   sot:
-    description: Main command for Sands of Time game control.
-    usage: /<command> <setup|start|end>
+    description: Main command for Sands of Time game control and location setup.
+    usage: /<command> <setup|start|end|set <lobby|trapped>>
     permission: sot.admin.control
 
 permissions:
@@ -41,7 +41,7 @@ permissions:
     default: op
 
   sot.admin.control:
-    description: Allows controlling the SoT game state (setup, start, end).
+    description: Allows controlling the SoT game state (setup, start, end) and setting game locations.
     default: op
 
   sot.admin.team:
