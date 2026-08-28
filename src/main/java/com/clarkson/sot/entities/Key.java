@@ -1,25 +1,21 @@
 package com.clarkson.sot.entities;
 
 import com.clarkson.sot.dungeon.VaultColor;
+import com.clarkson.sot.utils.ItemManager;
 
 import org.bukkit.Location;
-import org.bukkit.Material;
 import org.bukkit.NamespacedKey;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.ItemDisplay;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.ItemStack;
-import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.persistence.PersistentDataContainer;
 import org.bukkit.persistence.PersistentDataType;
 import org.bukkit.plugin.Plugin;
 
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
-import net.kyori.adventure.text.format.TextColor;
-import net.kyori.adventure.text.format.TextDecoration;
 
-import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
 import java.util.logging.Level;
@@ -45,20 +41,15 @@ public class Key implements FloorItem {
     private final ItemStack keyItemStack;
     private boolean isPickedUp;
 
-    // Static PDC keys (shared with CoinStack pattern)
+    // Static PDC keys for the ItemDisplay entity (shared with CoinStack pattern).
+    // The key ItemStack itself is tagged by ItemManager, which owns the single key-item scheme.
     private static NamespacedKey UUID_KEY;
     private static NamespacedKey TEAM_KEY;
-    private static NamespacedKey VAULT_KEY_TAG;
-    private static NamespacedKey VAULT_COLOR_TAG;
-    private static NamespacedKey RUSTY_KEY_TAG;
 
     public static void initializeKeys(Plugin pluginInstance) {
         if (UUID_KEY == null) {
             UUID_KEY = new NamespacedKey(pluginInstance, "sot_floor_item_uuid");
             TEAM_KEY = new NamespacedKey(pluginInstance, "sot_floor_item_team");
-            VAULT_KEY_TAG = new NamespacedKey(pluginInstance, "sot_vault_key");
-            VAULT_COLOR_TAG = new NamespacedKey(pluginInstance, "sot_vault_color");
-            RUSTY_KEY_TAG = new NamespacedKey(pluginInstance, "sot_rusty_key");
         }
     }
 
@@ -95,42 +86,12 @@ public class Key implements FloorItem {
         return new Key(plugin, location, null, teamId, segmentInstanceId, depth, false);
     }
 
+    /**
+     * Builds the key ItemStack via {@link ItemManager} so a picked-up key carries the same tags
+     * the doors and the vault check for.
+     */
     private ItemStack createKeyItemStack() {
-        ItemStack key = new ItemStack(Material.TRIPWIRE_HOOK, 1);
-        ItemMeta meta = key.getItemMeta();
-        if (meta != null) {
-            if (vaultColor != null) {
-                // Vault key
-                TextColor textColor = getTextColor(vaultColor);
-                meta.displayName(Component.text(vaultColor.name() + " Vault Key", textColor, TextDecoration.BOLD)
-                        .decoration(TextDecoration.ITALIC, false));
-                meta.lore(List.of(
-                        Component.text("Used to unlock the " + vaultColor.name().toLowerCase() + " vault", NamedTextColor.GRAY)
-                                .decoration(TextDecoration.ITALIC, false),
-                        Component.empty(),
-                        Component.text("Sands of Time Item", NamedTextColor.DARK_GRAY)
-                                .decoration(TextDecoration.ITALIC, false)
-                ));
-                PersistentDataContainer pdc = meta.getPersistentDataContainer();
-                pdc.set(VAULT_KEY_TAG, PersistentDataType.BYTE, (byte) 1);
-                pdc.set(VAULT_COLOR_TAG, PersistentDataType.STRING, vaultColor.name());
-            } else {
-                // Rusty key
-                meta.displayName(Component.text("Rusty Key", NamedTextColor.GRAY, TextDecoration.BOLD)
-                        .decoration(TextDecoration.ITALIC, false));
-                meta.lore(List.of(
-                        Component.text("Opens a locked door in the dungeon", NamedTextColor.GRAY)
-                                .decoration(TextDecoration.ITALIC, false),
-                        Component.empty(),
-                        Component.text("Sands of Time Item", NamedTextColor.DARK_GRAY)
-                                .decoration(TextDecoration.ITALIC, false)
-                ));
-                PersistentDataContainer pdc = meta.getPersistentDataContainer();
-                pdc.set(RUSTY_KEY_TAG, PersistentDataType.BYTE, (byte) 1);
-            }
-            key.setItemMeta(meta);
-        }
-        return key;
+        return (vaultColor != null) ? ItemManager.createVaultKey(vaultColor) : ItemManager.createRustyKey();
     }
 
     private void spawnRepresentation() {
@@ -202,19 +163,6 @@ public class Key implements FloorItem {
     public boolean isRustyKey() { return this.vaultColor == null; }
 
     public static boolean isRustyKeyItem(ItemStack item) {
-        if (item == null || !item.hasItemMeta()) return false;
-        return item.getItemMeta().getPersistentDataContainer().has(RUSTY_KEY_TAG, PersistentDataType.BYTE);
-    }
-
-    public static NamespacedKey getRustyKeyTag() { return RUSTY_KEY_TAG; }
-
-    private static TextColor getTextColor(VaultColor color) {
-        switch (color) {
-            case BLUE: return NamedTextColor.BLUE;
-            case RED: return NamedTextColor.RED;
-            case GREEN: return NamedTextColor.GREEN;
-            case GOLD: return NamedTextColor.GOLD;
-            default: return NamedTextColor.WHITE;
-        }
+        return ItemManager.isRustyKey(item);
     }
 }

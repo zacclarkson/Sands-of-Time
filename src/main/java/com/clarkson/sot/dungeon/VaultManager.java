@@ -3,18 +3,17 @@ package com.clarkson.sot.dungeon; // Assuming package
 import com.clarkson.sot.main.GameManager;
 import com.clarkson.sot.main.GameState;
 import com.clarkson.sot.main.SoT; // Assuming main plugin class
+import com.clarkson.sot.utils.ItemManager;
 
 // Adventure API Imports
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
 import net.kyori.adventure.text.format.TextColor;
-import net.kyori.adventure.text.format.TextDecoration;
 
 // Bukkit API Imports
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.Material;
-import org.bukkit.NamespacedKey;
 import org.bukkit.block.Block;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
@@ -24,9 +23,6 @@ import org.bukkit.event.block.Action;
 import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.PlayerInventory;
-import org.bukkit.inventory.meta.ItemMeta;
-import org.bukkit.persistence.PersistentDataContainer;
-import org.bukkit.persistence.PersistentDataType;
 import org.bukkit.scheduler.BukkitRunnable;
 
 import java.util.*;
@@ -49,17 +45,11 @@ public class VaultManager implements Listener {
     // Key: Team UUID, Value: Set of VaultColors opened by that team
     private final Map<UUID, Set<VaultColor>> openVaultsByTeam;
 
-    // PDC Keys for identifying key items
-    private final NamespacedKey vaultKeyTagKey; // Tag identifying an item as a vault key
-    private final NamespacedKey vaultColorTagKey; // Tag storing the VaultColor string on the key
-
     // Constructor remains the same...
     public VaultManager(SoT plugin, GameManager gameManager) {
         this.plugin = Objects.requireNonNull(plugin, "Plugin cannot be null");
         this.gameManager = Objects.requireNonNull(gameManager, "GameManager cannot be null");
         this.openVaultsByTeam = new ConcurrentHashMap<>();
-        this.vaultKeyTagKey = new NamespacedKey(plugin, "sot_vault_key");
-        this.vaultColorTagKey = new NamespacedKey(plugin, "sot_vault_color");
         plugin.getServer().getPluginManager().registerEvents(this, plugin);
         plugin.getLogger().info("VaultManager initialized and registered.");
     }
@@ -264,62 +254,36 @@ public class VaultManager implements Listener {
     }
 
 
-    // --- Key Item Utility Methods (createKeyItem, isVaultKey, getKeyColor, consumeKeyItem) remain the same ---
+    // --- Key Item Utility Methods ---
+    // Key items are built and identified by ItemManager alone, so the keys this manager spawns are
+    // the same items VaultDoor and SegmentDoor accept.
+
+    /** Creates a vault key ItemStack for the given colour. */
     public ItemStack createKeyItem(VaultColor color) {
-        ItemStack key = new ItemStack(Material.TRIPWIRE_HOOK, 1);
-        ItemMeta meta = key.getItemMeta();
-        if (meta != null) {
-            Component displayName = Component.text(color.name() + " Vault Key", getVaultColorTextColor(color), TextDecoration.BOLD)
-                                            .decoration(TextDecoration.ITALIC, false);
-            meta.displayName(displayName);
-            List<Component> loreComponents = new ArrayList<>();
-            loreComponents.add(Component.text("Used to unlock the " + color.name().toLowerCase() + " vault", NamedTextColor.GRAY)
-                                        .decoration(TextDecoration.ITALIC, false));
-            loreComponents.add(Component.empty());
-            loreComponents.add(Component.text("Sands of Time Item", NamedTextColor.DARK_GRAY)
-                                        .decoration(TextDecoration.ITALIC, false));
-            meta.lore(loreComponents);
-            PersistentDataContainer pdc = meta.getPersistentDataContainer();
-            pdc.set(vaultKeyTagKey, PersistentDataType.BYTE, (byte) 1);
-            pdc.set(vaultColorTagKey, PersistentDataType.STRING, color.name());
-            key.setItemMeta(meta);
-        }
-        return key;
+        return ItemManager.createVaultKey(color);
     }
+
+    /** Checks whether the item is any vault key. */
     public boolean isVaultKey(@Nullable ItemStack item) {
-        if (item == null || item.getType() == Material.AIR || !item.hasItemMeta()) {
-            return false;
-        }
-        ItemMeta meta = item.getItemMeta();
-        if (meta == null) return false;
-        return meta.getPersistentDataContainer().has(vaultKeyTagKey, PersistentDataType.BYTE);
+        return ItemManager.isVaultKey(item);
     }
+
+    /** Gets the colour of a vault key, or null if the item is not a vault key. */
     @Nullable
     public VaultColor getKeyColor(@Nullable ItemStack item) {
-        if (!isVaultKey(item)) {
-            return null;
-        }
-        ItemMeta meta = item.getItemMeta();
-        PersistentDataContainer pdc = meta.getPersistentDataContainer();
-        String colorString = pdc.get(vaultColorTagKey, PersistentDataType.STRING);
-        if (colorString != null) {
-            try {
-                return VaultColor.valueOf(colorString);
-            } catch (IllegalArgumentException e) {
-                plugin.getLogger().warning("Invalid VaultColor string found in item PDC: " + colorString);
-                return null;
-            }
-        }
-        plugin.getLogger().warning("Vault key item missing color tag!");
-        return null;
+        return ItemManager.getVaultKeyColor(item);
     }
+
+    /**
+     * Removes one vault key of the given colour from the player's inventory.
+     * Matching is by PDC tag rather than by comparing against a freshly built key, so a key still
+     * counts even if its display name or lore is changed later.
+     */
     private boolean consumeKeyItem(Player player, VaultColor color) {
         PlayerInventory inventory = player.getInventory();
-        ItemStack keyToConsume = createKeyItem(color);
-        keyToConsume.setAmount(1);
         for (int i = 0; i < inventory.getSize(); i++) {
             ItemStack currentItem = inventory.getItem(i);
-            if (currentItem != null && currentItem.isSimilar(keyToConsume)) {
+            if (currentItem != null && ItemManager.getVaultKeyColor(currentItem) == color) {
                  if (currentItem.getAmount() > 1) {
                      currentItem.setAmount(currentItem.getAmount() - 1);
                  } else {
