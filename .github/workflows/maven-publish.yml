@@ -45,7 +45,8 @@ jobs:
 
   # Deploys the freshly built jar to ~/servers/sot-test on the homelab and hot-reloads just the SoT
   # plugin (via PlugManX over RCON) so players are not kicked. Requires PlugManX to be installed on
-  # the server (SPIGET_RESOURCES in compose.yml); if it is missing the reload step fails loudly.
+  # the server (MODRINTH_PROJECTS: worldedit,plugmanx in compose.yml); if it is missing the reload
+  # step fails loudly.
   # Gated: stays skipped until a self-hosted runner is registered AND the repo variable
   # DEPLOY_ENABLED is set to "true" (see deploy/sot-test/README.md), so CI never hangs on a
   # missing runner.

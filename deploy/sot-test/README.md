@@ -7,8 +7,9 @@ the SoT plugin so you can log in from a real Minecraft client and test the UX (b
 - **Connect:** `<SERVER_HOST>:25700` from your Minecraft client. This is a raw game port (not HTTP),
   so expose it only on a trusted network (LAN/VPN), not the public internet.
 - **Requires:** Paper 26.2, Java 25, WorldEdit 7.4.5+ (auto-installed). All provided by the
-  `itzg/minecraft-server:java25` image + `MODRINTH_PROJECTS: worldedit`. `SPIGET_RESOURCES: "88135"`
-  additionally installs **PlugManX**, used to hot-reload just the SoT plugin without a full restart.
+  `itzg/minecraft-server:java25` image + `MODRINTH_PROJECTS: worldedit,plugmanx` (plus
+  `MODRINTH_ALLOWED_VERSION_TYPE: beta`, since PlugManX's Paper-26.2 build is on the beta channel).
+  **PlugManX** is used to hot-reload just the SoT plugin without a full restart.
 
 `compose.yml` here is the version-controlled reference; deploy a copy to a working directory on the
 host (referred to below as `<server-dir>`, e.g. `~/servers/sot-test/`).
@@ -64,9 +65,9 @@ online. It is **gated** and stays skipped until both of these are done:
    hangs waiting for a runner.
 
 **One-time bootstrap:** the reload step needs PlugManX already running on the server. After adding
-`SPIGET_RESOURCES: "88135"` to `compose.yml`, restart the container **once**
-(`docker restart sot-test`) so itzg downloads PlugManX into `data/plugins/`. Every deploy after that
-is restart-free. If PlugManX is missing, the deploy's reload step fails loudly rather than silently
-skipping the reload.
+`MODRINTH_PROJECTS: worldedit,plugmanx` + `MODRINTH_ALLOWED_VERSION_TYPE: beta` to `compose.yml`,
+recreate the container **once** (`docker compose up -d`) so itzg downloads PlugManX into
+`data/plugins/`. Every deploy after that is restart-free. If PlugManX is missing, the deploy's reload
+step fails loudly rather than silently skipping the reload.
 
 Manual fallback is the `scp` + `plugman reload` (or `docker restart`) shown above.
