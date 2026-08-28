@@ -238,7 +238,7 @@ public class ToolListener implements Listener {
             dir = Direction.fromYaw(player.getLocation().getYaw());
         }
 
-        spawnEntryPointMarker(player, airBlock.getLocation(), dir);
+        spawnEntryPointMarker(player, airBlock.getLocation(), dir, null, true);
     }
 
     /**
@@ -247,10 +247,15 @@ public class ToolListener implements Listener {
      * are ItemDisplay entities tagged ENTRY_FRAME so SaveSegmentCommand skips them. All entities
      * share a group ID so left-click removes them together.
      *
-     * @param airBlockLoc the (integer) corner location of the air block the marker occupies.
+     * @param airBlockLoc  the (integer) corner location of the air block the marker occupies.
+     * @param reuseGroupId if non-null, reuse this group ID (used by rotate so undo still tracks it);
+     *                     otherwise a fresh group ID is generated.
+     * @param recordUndo   if true, push the group onto the player's undo stack.
+     * @return the group ID of the placed marker.
      */
-    private void spawnEntryPointMarker(Player player, Location airBlockLoc, Direction dir) {
-        String groupId = UUID.randomUUID().toString();
+    private String spawnEntryPointMarker(Player player, Location airBlockLoc, Direction dir,
+                                         @Nullable String reuseGroupId, boolean recordUndo) {
+        String groupId = (reuseGroupId != null) ? reuseGroupId : UUID.randomUUID().toString();
         World world = player.getWorld();
 
         // 1. Centered glass block (the anchor). A BlockDisplay's position is its corner, so spawn
@@ -284,8 +289,13 @@ public class ToolListener implements Listener {
         // 2. Flat stick arrow floating above the glass, pointing in `dir`.
         spawnArrow(world, airBlockLoc, dir, groupId);
 
+        if (recordUndo) {
+            sessionManager.getSession(player).pushUndo(groupId);
+        }
+
         player.sendActionBar(Component.text(
                 "Placed Entry Point (" + dir.name() + ")", NamedTextColor.GREEN));
+        return groupId;
     }
 
     /**
@@ -387,8 +397,9 @@ public class ToolListener implements Listener {
                 anchor.getLocation().getBlockZ());
         removeGroupEntities(groupId, anchor.getWorld());
 
-        // Respawn at the same block with the new direction.
-        spawnEntryPointMarker(player, airBlockLoc, next);
+        // Respawn at the same block with the new direction, reusing the group ID so the
+        // existing undo entry still points at it (and without pushing a duplicate).
+        spawnEntryPointMarker(player, airBlockLoc, next, groupId, false);
     }
 
     // -------------------------------------------------------------------------
@@ -569,6 +580,8 @@ public class ToolListener implements Listener {
             isFirstEntity = false;
         }
 
+        sessionManager.getSession(player).pushUndo(groupId);
+
         String colorLabel = (vaultColor != null) ? " (" + vaultColor.name() + ")" : "";
         String displayName = MT_VAULT_DOOR.equals(markerType) ? "Vault Door" : "Gate";
         int width  = (dz <= dx && dz <= dy) ? (maxX - minX + 1) : (maxZ - minZ + 1);
@@ -615,6 +628,7 @@ public class ToolListener implements Listener {
         BlockData blockData = material.createBlockData();
         final String colorName = (color != null) ? color.name() : null;
         final int finalCoinValue = coinValue;
+        final String groupId = UUID.randomUUID().toString();
 
         try {
             player.getWorld().spawn(spawnLoc, BlockDisplay.class, display -> {
@@ -631,6 +645,7 @@ public class ToolListener implements Listener {
                 PersistentDataContainer pdc = display.getPersistentDataContainer();
                 pdc.set(BUILD_MARKER_TAG, PersistentDataType.BYTE, (byte) 1);
                 pdc.set(MARKER_TYPE_KEY, PersistentDataType.STRING, markerType);
+                pdc.set(BOUND_GROUP_KEY, PersistentDataType.STRING, groupId);
                 if (colorName != null) {
                     pdc.set(VAULT_COLOR_KEY, PersistentDataType.STRING, colorName);
                 }
@@ -638,6 +653,8 @@ public class ToolListener implements Listener {
                     pdc.set(COIN_VALUE_KEY, PersistentDataType.INTEGER, finalCoinValue);
                 }
             });
+
+            sessionManager.getSession(player).pushUndo(groupId);
 
             String colorLabel = (color != null) ? " (" + color.name() + ")" : "";
             String valueSuffix = (coinValue > 0) ? " value=" + coinValue : "";
