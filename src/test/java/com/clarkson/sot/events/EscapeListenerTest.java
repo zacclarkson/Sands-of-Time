@@ -11,6 +11,7 @@ import org.bukkit.Material;
 import org.bukkit.World;
 import org.bukkit.block.Block;
 import org.bukkit.block.BlockFace;
+import org.bukkit.event.Event;
 import org.bukkit.event.block.Action;
 import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.inventory.ItemStack;
@@ -186,6 +187,7 @@ class EscapeListenerTest {
                 player, Action.RIGHT_CLICK_BLOCK, (ItemStack) null, exitBlock, BlockFace.UP);
         server.getPluginManager().callEvent(event);
 
-        assertTrue(event.isCancelled(), "the block interaction should not also fire in the world");
+        assertEquals(Event.Result.DENY, event.useInteractedBlock(),
+                "the block interaction should not also fire in the world");
     }
 }
