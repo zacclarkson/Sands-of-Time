@@ -14,6 +14,17 @@ Intended to run on the homelab (or any Docker host).
 - **`bot/smoke-test.js`** — a [Mineflayer](https://github.com/PrismarineJS/mineflayer) bot that
   connects, confirms it can join and act, and exits non-zero on failure/timeout.
 
+## Prerequisites
+
+- **JDK 21** to build/test. The build and the MockBukkit unit tests fail on newer JDKs (a JDK 26
+  default crashes `maven-compiler-plugin` at test-compile), and CI pins Temurin 21 for the same
+  reason. Point `JAVA_HOME` at a JDK 21 before running `mvn`.
+- **Maven** (not bundled here) and **Docker** with the Compose plugin.
+
+For an always-on server you can log into from a real client (not a bot), see
+[`deploy/sot-test/`](../deploy/sot-test/README.md) instead — this harness is the automated,
+offline, bot-driven tier.
+
 ## Run it
 
 From the repo root:

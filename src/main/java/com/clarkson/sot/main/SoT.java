@@ -93,6 +93,10 @@ public class SoT extends JavaPlugin {
         this.getCommand("sotmode").setTabCompleter(modeCmd);
         this.getCommand("sotsavesegment").setExecutor(new SaveSegmentCommand(this));
 
+        GameCommand gameCmd = new GameCommand(gameManager);
+        this.getCommand("sot").setExecutor(gameCmd);
+        this.getCommand("sot").setTabCompleter(gameCmd);
+
 
         // --- Register Listeners ---
         // All gameplay listeners are the GameManager-owned instances so they operate on the

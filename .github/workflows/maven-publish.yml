@@ -1,45 +1,65 @@
-# GitHub Actions workflow name
-name: Java CI with Maven (Build Plugin)
+# Build + test the plugin, and (optionally) deploy the jar to the homelab sot-test server.
+name: Build & Deploy Plugin
 
-# Controls when the workflow will run
 on:
   push:
-    branches: [ "main", "master" ] # Runs on pushes to main or master branch
+    branches: [ "main", "master" ]
   pull_request:
-    branches: [ "main", "master" ] # Runs on pull requests targeting main or master
+    branches: [ "main", "master" ]
 
-# A workflow run is made up of one or more jobs that can run sequentially or in parallel
 jobs:
-  # This workflow contains a single job called "build"
   build:
-    # The type of runner that the job will run on
     runs-on: ubuntu-latest
-
-    # Steps represent a sequence of tasks that will be executed as part of the job
     steps:
-      # Step 1: Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
       - name: Checkout Repository
-        uses: actions/checkout@v4 # Use a recent version
+        uses: actions/checkout@v4
 
-      # Step 2: Set up JDK 21 (Required for Paper 1.21+ and pom.xml target)
-      - name: Set up JDK 21 # <-- Updated Name
+      # JDK 21 is required: the plugin targets Java 21, and the build/tests crash on newer JDKs.
+      - name: Set up JDK 21
         uses: actions/setup-java@v4
         with:
-          java-version: '21' # <-- Updated Version
-          distribution: 'temurin' # Popular distribution
-          cache: maven # Automatically cache Maven dependencies
+          java-version: '21'
+          distribution: 'temurin'
+          cache: maven
 
-      # Step 3: Build with Maven
-      # 'verify' runs tests and package. Use 'package' if you don't have tests yet.
-      # -B runs in batch mode (non-interactive)
+      # `verify` compiles, runs the JUnit/MockBukkit unit tests, and shades the jar.
       - name: Build with Maven
-        run: mvn -B verify --file pom.xml # Use 'verify' to include tests, or 'package' just to build JAR
+        run: mvn -B verify --file pom.xml
 
-      # Step 4: (Optional) Upload the built JAR artifact
-      # This allows you to download the compiled plugin JAR from the Actions run page
-      - name: Upload Artifact
+      - name: Upload Plugin JAR
         uses: actions/upload-artifact@v4
         with:
-          name: SandsOfTime-Plugin-JAR # Name of the artifact zip file on GitHub Actions
-          path: target/SoT-*.jar # Path to the JAR file (adjust if your artifactId/version changes naming)
-          if-no-files-found: error # Fail the step if the JAR isn't found
+          name: SandsOfTime-Plugin-JAR
+          path: target/SoT-*.jar
+          if-no-files-found: error
+
+      - name: Upload surefire reports on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: surefire-reports
+          path: target/surefire-reports/**
+          if-no-files-found: ignore
+
+  # Deploys the freshly built jar to ~/servers/sot-test on the homelab and restarts the container.
+  # Gated: stays skipped until a self-hosted runner is registered AND the repo variable
+  # DEPLOY_ENABLED is set to "true" (see deploy/sot-test/README.md), so CI never hangs on a
+  # missing runner.
+  deploy:
+    needs: build
+    if: >-
+      github.event_name == 'push' &&
+      github.ref == 'refs/heads/master' &&
+      vars.DEPLOY_ENABLED == 'true'
+    runs-on: [self-hosted, linux]
+    steps:
+      - name: Download Plugin JAR
+        uses: actions/download-artifact@v4
+        with:
+          name: SandsOfTime-Plugin-JAR
+          path: artifact
+
+      - name: Deploy to sot-test and restart
+        run: |
+          cp artifact/SoT-*.jar ~/servers/sot-test/data/plugins/SoT.jar
+          docker restart sot-test
