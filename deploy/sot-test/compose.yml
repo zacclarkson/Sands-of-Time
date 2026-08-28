@@ -1,8 +1,8 @@
 # Persistent Sands of Time test/dev server for the homelab.
 #
-# This is the version-controlled REFERENCE copy. The live file lives on the debian box at
-# ~/servers/sot-test/compose.yml (see deploy/sot-test/README.md). Copy it there and
-# `docker compose up -d`. A real Minecraft client connects to this to test the plugin's UX.
+# This is the version-controlled REFERENCE copy. Deploy a copy to a working directory on your
+# Docker host (see deploy/sot-test/README.md) and `docker compose up -d`. A real Minecraft client
+# connects to this to test the plugin's UX. Fill in OPS with your Minecraft username.
 #
 # Unlike integration-test/ (a throwaway offline harness driven by a bot), this server is
 # always-on, online-mode, and keeps its world so segments/state persist between sessions.
@@ -15,9 +15,8 @@ services:
     stdin_open: true
     restart: unless-stopped
     ports:
-      # Host port -> MC port. LAN/Tailscale only (no Cloudflare ingress; a game port is not HTTP).
-      # Join at 100.125.118.2:25700 (Tailscale) or 192.168.1.250:25700 (LAN).
-      # 25700 sits above crafty's fully-bound 25565-25600 managed range.
+      # Host port -> MC port. A raw game port (not HTTP) — expose only on a trusted network.
+      # Join at <SERVER_HOST>:25700. Pick a host port that is free on your Docker host.
       - "25700:25565"
     environment:
       EULA: "TRUE"

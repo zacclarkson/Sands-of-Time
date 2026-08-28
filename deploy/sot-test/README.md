@@ -1,25 +1,25 @@
-# Homelab test/dev server (`sot-test`)
+# Test/dev server (`sot-test`)
 
-An always-on Paper 1.21.1 + WorldEdit server on the debian box that runs the current build of the
-SoT plugin, so you can log in from a real Minecraft client and test the UX (builder tools and, via
+An always-on Paper 1.21.1 + WorldEdit server, running on a Docker host, that runs the current build of
+the SoT plugin so you can log in from a real Minecraft client and test the UX (builder tools and, via
 `/sot`, a full game round).
 
-- **Connect:** `100.125.118.2:25700` (Tailscale) or `192.168.1.250:25700` (LAN). Game port only —
-  not behind Cloudflare/Authentik.
+- **Connect:** `<SERVER_HOST>:25700` from your Minecraft client. This is a raw game port (not HTTP),
+  so expose it only on a trusted network (LAN/VPN), not the public internet.
 - **Requires:** Paper 1.21.1, Java 21, WorldEdit 7.3.x (auto-installed). All provided by the
   `itzg/minecraft-server:java21` image + `MODRINTH_PROJECTS: worldedit`.
 
-`compose.yml` here is the version-controlled reference; the live copy lives at
-`~/servers/sot-test/compose.yml` on the box.
+`compose.yml` here is the version-controlled reference; deploy a copy to a working directory on the
+host (referred to below as `<server-dir>`, e.g. `~/servers/sot-test/`).
 
-## First-time setup (on the debian box)
+## First-time setup (on the Docker host)
 
 ```bash
-ssh zac@192.168.1.250
-mkdir -p ~/servers/sot-test/data/plugins
-# copy compose.yml (from this dir) to ~/servers/sot-test/compose.yml, then edit OPS:
+ssh <user>@<SERVER_HOST>
+mkdir -p <server-dir>/data/plugins
+# copy compose.yml (from this dir) to <server-dir>/compose.yml, then edit OPS:
 #   OPS: "<your-minecraft-username>"
-cd ~/servers/sot-test && docker compose up -d
+cd <server-dir> && docker compose up -d
 docker compose logs -f sot-test   # wait for WorldEdit load + "Sands of Time Enabled Successfully"
 ```
 
@@ -27,8 +27,8 @@ Then drop the built plugin jar in and restart:
 
 ```bash
 # from your dev machine, after `mvn package`:
-scp target/SoT-1.0-SNAPSHOT.jar zac@192.168.1.250:~/servers/sot-test/data/plugins/SoT.jar
-ssh zac@192.168.1.250 'docker restart sot-test'
+scp target/SoT-1.0-SNAPSHOT.jar <user>@<SERVER_HOST>:<server-dir>/data/plugins/SoT.jar
+ssh <user>@<SERVER_HOST> 'docker restart sot-test'
 ```
 
 ## First game (build a HUB segment — required for /sot start)
@@ -45,14 +45,12 @@ The plugin ships no segment templates, and dungeon generation needs at least one
 ## Auto-deploy from CI (optional)
 
 `.github/workflows/maven-publish.yml` has a `deploy` job that, on push to `master`, copies the freshly
-built jar to `~/servers/sot-test/data/plugins/SoT.jar` and restarts the container. It is **gated** and
-stays skipped until both of these are done:
+built jar to `<server-dir>/data/plugins/SoT.jar` and restarts the container. It is **gated** and stays
+skipped until both of these are done:
 
-1. **Register a repo-scoped self-hosted runner** on the box (see the notes-maker CI/CD section of the
-   debianserver `CLAUDE.md` for the exact `config.sh`/`svc.sh` steps — clone `~/actions-runner` to a
-   new dir, clean the `.runner*`/`.credentials*` files, register against
-   `https://github.com/zacclarkson/Sands-of-Time` with labels `self-hosted,linux`, then
-   `sudo ./svc.sh install zac && sudo ./svc.sh start`).
+1. **Register a repo-scoped self-hosted runner** on the host, with labels `self-hosted,linux`, against
+   this repository (see GitHub's self-hosted runner docs). The runner's user needs access to
+   `<server-dir>` and to `docker`.
 2. **Enable the job:** set an Actions **repository variable** `DEPLOY_ENABLED = true`
    (`gh variable set DEPLOY_ENABLED --body true`). Without it the deploy job is skipped so CI never
    hangs waiting for a runner.
