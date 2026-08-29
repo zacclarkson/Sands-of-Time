@@ -3,6 +3,7 @@ package com.clarkson.sot.scoring;
 import com.clarkson.sot.entities.CoinStack;
 import com.clarkson.sot.entities.FloorItem;
 import com.clarkson.sot.main.GameManager;
+import com.clarkson.sot.ui.CoinPickupNotifier;
 import com.clarkson.sot.utils.TeamManager;
 
 import net.kyori.adventure.text.Component;
@@ -24,15 +25,24 @@ public class ScoreManager {
     private final Plugin plugin;
 
     private final Map<UUID, Integer> playerUnbankedScores = new HashMap<>();
+    /** Combines coins picked up in quick succession into one action-bar message. */
+    private final CoinPickupNotifier pickupNotifier;
 
     // Depth scaling: 100% at depth 0, up to 120% at max depth
     private static final int MAX_DUNGEON_DEPTH = 10;
     private static final double MAX_DEPTH_MULTIPLIER = 1.20;
 
     public ScoreManager(TeamManager teamManager, GameManager gameManager, Plugin plugin) {
+        this(teamManager, gameManager, plugin, new CoinPickupNotifier());
+    }
+
+    /** Constructor for tests, which need to drive the pickup notifier's clock. */
+    public ScoreManager(TeamManager teamManager, GameManager gameManager, Plugin plugin,
+                        CoinPickupNotifier pickupNotifier) {
         this.teamManager = teamManager;
         this.gameManager = gameManager;
         this.plugin = plugin;
+        this.pickupNotifier = pickupNotifier;
     }
 
     /**
@@ -44,7 +54,7 @@ public class ScoreManager {
             CoinStack coin = (CoinStack) item;
             int scaledValue = calculateScaledCoinValue(coin.getBaseValue(), coin.getDepth());
             updatePlayerUnbankedScore(player.getUniqueId(), scaledValue);
-            player.sendActionBar(Component.text("+" + scaledValue + " coins", NamedTextColor.GOLD));
+            pickupNotifier.notifyPickup(player, scaledValue);
             plugin.getLogger().fine(player.getName() + " collected coin worth " + scaledValue
                     + " (base: " + coin.getBaseValue() + ", depth: " + coin.getDepth() + ")");
         }
@@ -57,7 +67,7 @@ public class ScoreManager {
     public void playerCollectedCoin(Player player, ItemStack coinItem, int baseCoinValue) {
         // When recovering dropped coins, no depth scaling — use base value directly
         updatePlayerUnbankedScore(player.getUniqueId(), baseCoinValue);
-        player.sendActionBar(Component.text("+" + baseCoinValue + " coins", NamedTextColor.GOLD));
+        pickupNotifier.notifyPickup(player, baseCoinValue);
         plugin.getLogger().fine(player.getName() + " recovered coin worth " + baseCoinValue);
     }
 
@@ -95,10 +105,13 @@ public class ScoreManager {
 
     public void clearPlayerUnbankedScore(UUID playerUUID) {
         playerUnbankedScores.remove(playerUUID);
+        // Banking/death ends the burst: the next coin picked up starts a fresh message.
+        pickupNotifier.reset(playerUUID);
     }
 
     public void clearAllUnbankedScores() {
         playerUnbankedScores.clear();
+        pickupNotifier.resetAll();
     }
 
     // --- Penalty & Escape Methods ---

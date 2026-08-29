@@ -69,6 +69,13 @@ manually (see `integration-test/README.md`); it is **not** part of CI.
   Sidebar rows keep a permanent invisible score entry each and only their scoreboard-team prefix is
   rewritten, because rewriting the entries themselves would make the whole sidebar flicker once a
   second.
+- **Coin pickups are batched into one action bar.** `ScoreManager` no longer sends a message per
+  coin — `CoinPickupNotifier` (in `ui`) keeps a per-player running total for a 3-second window from
+  the first coin of a burst, so picking up 5 then 7 reads `+12 coins (x2)` instead of the `+7` that
+  used to overwrite the `+5` before anyone could read it. Expiry is time-based and checked on the
+  next pickup, so there is no scheduled task; the clock is constructor-injected for the unit tests.
+  Banking or dying (`clearPlayerUnbankedScore`) and game end (`clearAllUnbankedScores`) end the
+  batch, so a fresh burst never inherits a stale total.
 - **A HUB segment is bundled and auto-installed.** Dungeon generation needs at least one `HUB` segment
   on disk (`plugins/SoT/<name>.json` + `schematics/<name>.schem`). Templates listed in
   `src/main/resources/bundled_segments/manifest.txt` are shipped in the jar and copied into the data
