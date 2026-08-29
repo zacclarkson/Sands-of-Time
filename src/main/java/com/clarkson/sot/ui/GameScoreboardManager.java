@@ -1,10 +1,8 @@
 package com.clarkson.sot.ui;
 
 import com.clarkson.sot.main.GameManager;
-import com.clarkson.sot.timer.TeamTimer;
 import com.clarkson.sot.utils.SoTTeam;
 
-import net.kyori.adventure.bossbar.BossBar;
 import net.kyori.adventure.text.Component;
 
 import org.bukkit.Bukkit;
@@ -30,13 +28,14 @@ import java.util.logging.Level;
 import javax.annotation.Nullable;
 
 /**
- * Drives the live scoreboard: a per-player sidebar with the team standings and a per-team boss bar
- * counting the sand down.
+ * Drives the live scoreboard: a per-player sidebar with each team's banked coins and the viewer's
+ * own unbanked haul.
  *
  * <p>Owned by {@link GameManager}, which {@link #start()}s it when a round begins and
  * {@link #stop()}s it when the round ends. While running it refreshes every
  * {@link #REFRESH_INTERVAL_TICKS} ticks on the main thread, reading the live managers rather than
- * caching game state of its own; {@link ScoreboardLayout} turns that reading into text.
+ * caching game state of its own; {@link ScoreboardLayout} turns that reading into text — and
+ * deliberately leaves the sand timer out of it.
  *
  * <p><b>How a line is drawn.</b> Sidebar rows are score entries, and an entry's text is fixed once
  * it is registered — rewriting the entries every second would make the whole sidebar flicker.
@@ -57,10 +56,6 @@ public class GameScoreboardManager {
 
     /** Player -> the scoreboard built for them. Cleared when the display stops. */
     private final Map<UUID, Scoreboard> playerBoards = new HashMap<>();
-    /** Team -> that team's boss bar. */
-    private final Map<UUID, BossBar> teamBossBars = new HashMap<>();
-    /** Player -> the boss bar currently shown to them, so it can be swapped or hidden again. */
-    private final Map<UUID, BossBar> shownBossBars = new HashMap<>();
 
     private BukkitTask refreshTask;
     /** Keeps a server without a scoreboard manager from warning once per player per second. */
@@ -71,7 +66,7 @@ public class GameScoreboardManager {
         this.gameManager = Objects.requireNonNull(gameManager, "GameManager cannot be null");
     }
 
-    /** Shows the display and starts refreshing it. Does nothing if it is already running. */
+    /** Shows the sidebar and starts refreshing it. Does nothing if it is already running. */
     public void start() {
         if (refreshTask != null) {
             plugin.getLogger().fine("Live scoreboard already running.");
@@ -84,23 +79,14 @@ public class GameScoreboardManager {
     }
 
     /**
-     * Stops refreshing and takes the display away again: boss bars are hidden and every player is
-     * handed the server's main scoreboard back. Safe to call when it is not running.
+     * Stops refreshing and takes the sidebar away again: every player is handed the server's main
+     * scoreboard back. Safe to call when it is not running.
      */
     public void stop() {
         if (refreshTask != null) {
             refreshTask.cancel();
             refreshTask = null;
         }
-
-        for (Map.Entry<UUID, BossBar> shown : shownBossBars.entrySet()) {
-            Player player = Bukkit.getPlayer(shown.getKey());
-            if (player != null && player.isOnline()) {
-                player.hideBossBar(shown.getValue());
-            }
-        }
-        shownBossBars.clear();
-        teamBossBars.clear();
 
         Scoreboard mainScoreboard = mainScoreboard();
         for (UUID playerId : playerBoards.keySet()) {
@@ -118,9 +104,9 @@ public class GameScoreboardManager {
     }
 
     /**
-     * Rebuilds every participant's sidebar and boss bar from the live game state. Called once a
-     * second by the refresh task, and directly by {@link #start()} so the display is up before
-     * the first tick of the interval elapses.
+     * Rebuilds every participant's sidebar from the live game state. Called once a second by the
+     * refresh task, and directly by {@link #start()} so the sidebar is up before the first tick of
+     * the interval elapses.
      */
     public void refresh() {
         Map<UUID, SoTTeam> activeTeams = gameManager.getActiveTeams();
@@ -136,9 +122,7 @@ public class GameScoreboardManager {
 
         for (SoTTeam team : activeTeams.values()) {
             TeamSnapshot snapshot = snapshotsByTeam.get(team.getTeamId());
-            BossBar bossBar = updateBossBar(snapshot);
             for (Player player : team.getOnlineMembers()) {
-                showBossBar(player, bossBar);
                 applySidebar(player, ranked, snapshot);
             }
         }
@@ -151,38 +135,7 @@ public class GameScoreboardManager {
                 team.getTeamId(),
                 team.getTeamName(),
                 gameManager.getTeamManager().getTeamColor(team.getTeamId()),
-                team.getBankedScore(),
-                team.getRemainingSeconds());
-    }
-
-    // --- Boss bar ---
-
-    private BossBar updateBossBar(TeamSnapshot snapshot) {
-        float progress = ScoreboardLayout.bossBarProgress(
-                snapshot.remainingSeconds(), TeamTimer.DEFAULT_MAX_TIMER_SECONDS);
-        BossBar bossBar = teamBossBars.get(snapshot.teamId());
-        if (bossBar == null) {
-            bossBar = BossBar.bossBar(ScoreboardLayout.bossBarName(snapshot), progress,
-                    ScoreboardLayout.bossBarColor(snapshot.remainingSeconds()), BossBar.Overlay.PROGRESS);
-            teamBossBars.put(snapshot.teamId(), bossBar);
-            return bossBar;
-        }
-        bossBar.name(ScoreboardLayout.bossBarName(snapshot));
-        bossBar.progress(progress);
-        bossBar.color(ScoreboardLayout.bossBarColor(snapshot.remainingSeconds()));
-        return bossBar;
-    }
-
-    private void showBossBar(Player player, BossBar bossBar) {
-        BossBar shown = shownBossBars.get(player.getUniqueId());
-        if (bossBar.equals(shown)) {
-            return;
-        }
-        if (shown != null) {
-            player.hideBossBar(shown);
-        }
-        player.showBossBar(bossBar);
-        shownBossBars.put(player.getUniqueId(), bossBar);
+                team.getBankedScore());
     }
 
     // --- Sidebar ---
@@ -279,7 +232,6 @@ public class GameScoreboardManager {
         }
         for (UUID playerId : offline) {
             playerBoards.remove(playerId);
-            shownBossBars.remove(playerId);
         }
     }
 }

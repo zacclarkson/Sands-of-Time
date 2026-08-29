@@ -1,6 +1,5 @@
 package com.clarkson.sot.ui;
 
-import net.kyori.adventure.bossbar.BossBar;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
 import net.kyori.adventure.text.format.TextDecoration;
@@ -9,20 +8,22 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Comparator;
 import java.util.List;
-import java.util.Locale;
 import java.util.Objects;
 
 /**
- * Builds the text of the live scoreboard: the sidebar lines every player sees during a round and
- * the boss bar above their hotbar.
+ * Builds the text of the live scoreboard sidebar every player sees during a round.
  *
  * <p>Pure presentation logic — no Bukkit, no game state of its own. It turns a list of
  * {@link TeamSnapshot}s plus the viewer's own unbanked coins into {@link Component}s;
  * {@link GameScoreboardManager} does the Bukkit plumbing and the once-a-second refresh.
  *
+ * <p><b>No clock.</b> The sidebar deliberately never shows the sand timer. Reading time off the
+ * lobby's sand column and calling it out is part of the game — putting a countdown on everyone's
+ * screen would take that job away from the team (see {@code GAME_RULES.md}, "Visual Sand Timer").
+ *
  * <p>The sidebar is capped at {@link #MAX_SIDEBAR_LINES}, which is all Minecraft renders. With a
- * viewer on a team that leaves {@link #MAX_STANDINGS_LINES} rows for the standings, one per
- * standard team (see {@code GAME_RULES.md}, "Teams").
+ * viewer on a team that leaves {@link #MAX_STANDINGS_LINES} rows for the standings, more than
+ * enough for the ten standard teams (see {@code GAME_RULES.md}, "Teams").
  */
 public final class ScoreboardLayout {
 
@@ -30,16 +31,10 @@ public final class ScoreboardLayout {
     public static final int MAX_SIDEBAR_LINES = 15;
 
     /** Sidebar lines spent on the viewer's own team before the standings start. */
-    private static final int VIEWER_HEADER_LINES = 4; // time, unbanked, banked, spacer
+    private static final int VIEWER_HEADER_LINES = 3; // unbanked, banked, spacer
 
-    /** Standings rows that fit below the viewer's own lines. Matches the 10 standard teams. */
+    /** Standings rows that fit below the viewer's own lines. */
     public static final int MAX_STANDINGS_LINES = MAX_SIDEBAR_LINES - VIEWER_HEADER_LINES - 1;
-
-    /** At or below this many seconds the timer reads red. */
-    public static final int URGENT_SECONDS = 30;
-
-    /** At or below this many seconds (but above {@link #URGENT_SECONDS}) the timer reads yellow. */
-    public static final int WARNING_SECONDS = 60;
 
     private ScoreboardLayout() {}
 
@@ -75,7 +70,6 @@ public final class ScoreboardLayout {
         List<Component> lines = new ArrayList<>(MAX_SIDEBAR_LINES);
 
         if (viewerTeam != null) {
-            lines.add(labelled("Time", timeValue(viewerTeam.remainingSeconds())));
             lines.add(labelled("Unbanked", coins(Math.max(0, viewerUnbankedCoins), NamedTextColor.GOLD)));
             lines.add(labelled("Banked", coins(viewerTeam.bankedScore(), NamedTextColor.YELLOW)));
             lines.add(Component.empty());
@@ -91,56 +85,6 @@ public final class ScoreboardLayout {
             room--;
         }
         return List.copyOf(lines);
-    }
-
-    /** The boss bar text for a team: its name and how much sand it has left. */
-    public static Component bossBarName(TeamSnapshot team) {
-        Objects.requireNonNull(team, "Team snapshot cannot be null");
-        return Component.text(team.name(), team.color(), TextDecoration.BOLD)
-                .append(Component.text(" · ", NamedTextColor.DARK_GRAY))
-                .append(timeValue(team.remainingSeconds()));
-    }
-
-    /**
-     * How full the boss bar is drawn: the fraction of the maximum timer still left, clamped to
-     * 0..1 so an over-full or negative timer cannot throw.
-     *
-     * @param remainingSeconds Seconds left on the team's timer.
-     * @param maxSeconds       The timer's maximum (see {@code TeamTimer.DEFAULT_MAX_TIMER_SECONDS}).
-     */
-    public static float bossBarProgress(int remainingSeconds, int maxSeconds) {
-        if (maxSeconds <= 0) return 0f;
-        float ratio = (float) remainingSeconds / maxSeconds;
-        return Math.max(0f, Math.min(1f, ratio));
-    }
-
-    /** The boss bar colour, matching the urgency of the sidebar's time line. */
-    public static BossBar.Color bossBarColor(int remainingSeconds) {
-        if (remainingSeconds <= URGENT_SECONDS) return BossBar.Color.RED;
-        if (remainingSeconds <= WARNING_SECONDS) return BossBar.Color.YELLOW;
-        return BossBar.Color.GREEN;
-    }
-
-    /**
-     * Formats a countdown as {@code M:SS}. Negative values read as {@code 0:00}.
-     */
-    public static String formatTime(int totalSeconds) {
-        int safeSeconds = Math.max(0, totalSeconds);
-        return String.format(Locale.ROOT, "%d:%02d", safeSeconds / 60, safeSeconds % 60);
-    }
-
-    /** The remaining time, or a red {@code OUT} once the sand has run out. */
-    private static Component timeValue(int remainingSeconds) {
-        if (remainingSeconds <= 0) {
-            return Component.text("OUT", NamedTextColor.RED, TextDecoration.BOLD);
-        }
-        return Component.text(formatTime(remainingSeconds), timeColor(remainingSeconds));
-    }
-
-    private static NamedTextColor timeColor(int remainingSeconds) {
-        if (remainingSeconds <= URGENT_SECONDS) return NamedTextColor.RED;
-        if (remainingSeconds <= WARNING_SECONDS) return NamedTextColor.YELLOW;
-        return NamedTextColor.GREEN;
     }
 
     private static Component standingsLine(int rank, TeamSnapshot team, TeamSnapshot viewerTeam) {
