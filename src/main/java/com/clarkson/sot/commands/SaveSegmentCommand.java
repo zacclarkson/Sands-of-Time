@@ -435,7 +435,8 @@ public class SaveSegmentCommand implements CommandExecutor {
             player.sendMessage(Component.text("Segment saved: " + segmentName + ".json + "
                     + schematicFileName, NamedTextColor.GREEN));
             player.sendMessage(Component.text(
-                    "Use /sotreloadsegments or restart to use the new segment.", NamedTextColor.YELLOW));
+                    "Restart the server to load the new segment (templates are read once at startup).",
+                    NamedTextColor.YELLOW));
         } else {
             player.sendMessage(Component.text(
                     "Failed to save segment. Check console for errors.", NamedTextColor.RED));
