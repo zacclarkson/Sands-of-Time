@@ -96,6 +96,44 @@ public class Key implements FloorItem {
         return (vaultColor != null) ? ItemManager.createVaultKey(vaultColor) : ItemManager.createRustyKey();
     }
 
+    /** Scale shared with {@link CoinStack} and {@link FloorLoot}, so all floor pickups read alike. */
+    static final float DISPLAY_SCALE = 0.7f;
+
+    /**
+     * Where the visual sits relative to the block the key was placed on: centred horizontally and
+     * just above the floor surface, the same offset {@link CoinStack} and {@link FloorLoot} use.
+     * {@code FloorItemManager} measures pickup range to this point, so the two must agree.
+     *
+     * <p>Package-visible so the offset can be asserted without a live server.
+     */
+    static Location displayLocationFor(Location blockLocation) {
+        return blockLocation.clone().add(0.5, 0.1, 0.5);
+    }
+
+    /**
+     * Applies the presentation shared by every floor item: no gravity, not saved across restarts,
+     * invulnerable, and laid flat on the block at {@link #DISPLAY_SCALE}.
+     *
+     * <p>Package-visible so the presentation can be asserted against a mock display: the mock server
+     * the unit tests run on cannot spawn real display entities.
+     */
+    static void applyFloorItemStyle(ItemDisplay display) {
+        display.setGravity(false);
+        display.setPersistent(false);
+        display.setInvulnerable(true);
+        // FIXED (the default) so the flat 90-deg rotation below is honored; a CENTER
+        // billboard would always face the camera and cancel the transform's rotation.
+        display.setBillboard(Display.Billboard.FIXED);
+
+        // Lie flat on the ground: 90 deg around X tips the upright item face-down.
+        // No downward translation: the spawn offset already rests it on the surface.
+        display.setTransformation(new Transformation(
+                new Vector3f(0f, 0f, 0f),
+                new AxisAngle4f((float) Math.toRadians(90), 1f, 0f, 0f),
+                new Vector3f(DISPLAY_SCALE, DISPLAY_SCALE, DISPLAY_SCALE),
+                new AxisAngle4f(0f, 0f, 0f, 1f)));
+    }
+
     /**
      * Spawns the ItemDisplay representing this key. Presentation matches {@link CoinStack} and
      * {@link FloorLoot} so every floor pickup reads the same way: laid flat on the marked block,
@@ -103,27 +141,12 @@ public class Key implements FloorItem {
      */
     private void spawnRepresentation() {
         ItemStack displayStack = keyItemStack.clone();
-        // Same offset the other floor items use: centred in the block, resting on the floor surface.
-        Location spawnLocation = this.location.clone().add(0.5, 0.1, 0.5);
+        Location spawnLocation = displayLocationFor(this.location);
 
         try {
             this.itemDisplay = this.location.getWorld().spawn(spawnLocation, ItemDisplay.class, display -> {
                 display.setItemStack(displayStack);
-                display.setGravity(false);
-                display.setPersistent(false);
-                display.setInvulnerable(true);
-                // FIXED (the default) so the flat 90-deg rotation below is honored; a CENTER
-                // billboard would always face the camera and cancel the transform's rotation.
-                display.setBillboard(Display.Billboard.FIXED);
-
-                // Lie flat on the ground: 90 deg around X tips the upright item face-down.
-                // No downward translation: the +0.1 spawn offset already rests it on the surface.
-                float scale = 0.7f;
-                display.setTransformation(new Transformation(
-                        new Vector3f(0f, 0f, 0f),
-                        new AxisAngle4f((float) Math.toRadians(90), 1f, 0f, 0f),
-                        new Vector3f(scale, scale, scale),
-                        new AxisAngle4f(0f, 0f, 0f, 1f)));
+                applyFloorItemStyle(display);
 
                 PersistentDataContainer pdc = display.getPersistentDataContainer();
                 pdc.set(UUID_KEY, PersistentDataType.STRING, this.uniqueId.toString());

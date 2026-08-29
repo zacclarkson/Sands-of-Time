@@ -6,33 +6,32 @@ import com.clarkson.sot.utils.ItemManager;
 import org.bukkit.Location;
 import org.bukkit.World;
 import org.bukkit.entity.Display;
-import org.bukkit.entity.Entity;
 import org.bukkit.entity.ItemDisplay;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.plugin.Plugin;
 import org.bukkit.util.Transformation;
 import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
 import org.mockbukkit.mockbukkit.MockBukkit;
 import org.mockbukkit.mockbukkit.ServerMock;
+import org.mockito.ArgumentCaptor;
 
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.Mockito.*;
 
 /**
  * Covers {@link Key} as a floor item — the class vault keys now spawn as, instead of the dropped
  * Item entity {@code VaultManager} used to create.
  *
- * <p>The visual is an ItemDisplay, so the assertions that need one are guarded by an assumption:
- * whether the mock server can spawn display entities is a property of the test platform, not of
- * this class. Everything a player actually interacts with — the item they receive, the pickup
- * contract {@code FloorItemManager} drives — is asserted unconditionally.
+ * <p>The mock server cannot spawn display entities, so the presentation is asserted through the
+ * {@link Key#applyFloorItemStyle} / {@link Key#displayLocationFor} seams against a mock display,
+ * rather than by reading back a spawned one.
  */
 class KeyFloorItemTest {
 
@@ -150,28 +149,50 @@ class KeyFloorItemTest {
      * The display is laid flat on the marked block, scaled to match {@link CoinStack} and
      * {@link FloorLoot} so every floor pickup reads the same way, and billboarded FIXED so that flat
      * rotation is not cancelled by the display turning to face the camera.
+     *
+     * <p>Asserted against a mock display rather than a spawned one: the mock server cannot spawn
+     * display entities, so {@link Key#applyFloorItemStyle} is the seam.
      */
     @Test
     void theVisualMatchesTheOtherFloorItems() {
-        Key key = vaultKeyAt(VaultColor.BLUE, at(5, 64, 5));
+        ItemDisplay display = mock(ItemDisplay.class);
 
-        Entity visual = key.getVisualEntity();
-        Assumptions.assumeTrue(visual instanceof ItemDisplay,
-                "this mock server cannot spawn ItemDisplay entities; visual is verified in-game");
-        ItemDisplay display = (ItemDisplay) visual;
+        Key.applyFloorItemStyle(display);
 
-        assertEquals(Display.Billboard.FIXED, display.getBillboard(),
-                "a CENTER billboard would cancel the flat rotation");
-        assertFalse(display.hasGravity(), "floor items must not fall");
-        assertFalse(display.isPersistent(), "floor items must not survive a restart");
+        verify(display).setGravity(false);
+        verify(display).setPersistent(false);
+        verify(display).setInvulnerable(true);
+        verify(display).setBillboard(Display.Billboard.FIXED);
 
-        Transformation transformation = display.getTransformation();
-        assertEquals(0.7f, transformation.getScale().x(), 1e-6f, "keys use the same 0.7 scale as coins and loot");
+        ArgumentCaptor<Transformation> captor = ArgumentCaptor.forClass(Transformation.class);
+        verify(display).setTransformation(captor.capture());
+        Transformation transformation = captor.getValue();
+
+        assertEquals(Key.DISPLAY_SCALE, transformation.getScale().x(), 1e-6f,
+                "keys use the same scale as coins and loot");
+        assertEquals(Key.DISPLAY_SCALE, transformation.getScale().y(), 1e-6f);
+        assertEquals(Key.DISPLAY_SCALE, transformation.getScale().z(), 1e-6f);
         assertEquals((float) Math.toRadians(90), transformation.getLeftRotation().angle(), 1e-4f,
                 "keys lie flat, like coins and loot");
+        assertEquals(0f, transformation.getTranslation().y(), 1e-6f,
+                "a downward translation would sink the key into the floor (see #78)");
+    }
 
-        assertEquals(at(5, 64, 5).add(0.5, 0.1, 0.5), display.getLocation(),
-                "the display sits centred on the marked block, resting on its surface");
+    /**
+     * {@code FloorItemManager} measures pickup range to the visual, so where the visual sits relative
+     * to the marked block is a shared contract, not a private detail of this class.
+     */
+    @Test
+    void theVisualSitsCentredOnTheMarkedBlock() {
+        Location block = at(3, 64, 9);
+
+        Location visual = Key.displayLocationFor(block);
+
+        assertEquals(world, visual.getWorld());
+        assertEquals(3.5, visual.getX(), 1e-9, "centred in the block on X");
+        assertEquals(64.1, visual.getY(), 1e-9, "resting just above the floor surface");
+        assertEquals(9.5, visual.getZ(), 1e-9, "centred in the block on Z");
+        assertEquals(at(3, 64, 9), block, "displayLocationFor must not mutate its argument");
     }
 
     /**
