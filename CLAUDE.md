@@ -62,8 +62,9 @@ manually (see `integration-test/README.md`); it is **not** part of CI.
   hold the live game state).
 - **No segment templates are bundled.** Dungeon generation needs at least one `HUB` segment on disk
   (`plugins/SoT/<name>.json` + `schematics/<name>.schem`). Build one in-game with the builder tools +
-  `/sotsavesegment <name> HUB`, then **restart** the server — there is no live reload. Until a HUB
-  exists, the plugin enables fine but `/sot start` aborts.
+  `/sotsavesegment <name> HUB`, then run `/sotreloadsegments` (or restart the server) to load it —
+  templates are otherwise read only at startup. Reloading is refused while a game is RUNNING. Until a
+  HUB exists, the plugin enables fine but `/sot start` aborts.
 - **The safe exit is a segment marker.** The escape point comes from a `SAFE_EXIT` marker on a
   segment template; a marker on the HUB segment wins over one on any other segment. Templates saved
   before that marker existed carry none, so `GameManager.getTeamSafeExitLocation` falls back to the
