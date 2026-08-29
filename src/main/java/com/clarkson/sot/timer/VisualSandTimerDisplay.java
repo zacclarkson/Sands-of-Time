@@ -7,8 +7,11 @@ import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.World;
 import org.bukkit.block.Block;
+import org.bukkit.entity.Entity;
+import org.bukkit.entity.FallingBlock;
 import org.bukkit.plugin.Plugin;
 import org.bukkit.scheduler.BukkitTask;
+import org.bukkit.util.BoundingBox;
 
 import java.util.Objects;
 import java.util.logging.Level;
@@ -143,6 +146,26 @@ public class VisualSandTimerDisplay {
             visualUpdateTask = null; // Clear the task reference
             plugin.getLogger().log(Level.INFO, "Stopped visual timer updates task for team " + team.getTeamName());
         }
+    }
+
+    /**
+     * Stops updates and clears every sand block in the column back to air. Used by end-of-game
+     * cleanup: a column relocated into the dungeon hub is wiped by the dungeon air-fill, but a
+     * lobby-fallback column (hub had no TIMER marker) sits outside every cleanup region and would
+     * otherwise be left standing between rounds.
+     */
+    public void stopAndClear() {
+        stopVisualUpdates();
+        if (totalHeight <= 0) return;
+        World world = bottomLocation.getWorld();
+        if (world == null) return;
+        for (int y = bottomLocation.getBlockY() + 1; y <= topLocation.getBlockY(); y++) {
+            Block block = new Location(world, bottomLocation.getBlockX(), y, bottomLocation.getBlockZ()).getBlock();
+            if (block.getType() == Material.SAND) {
+                block.setType(Material.AIR, false);
+            }
+        }
+        lastKnownVisualBlocks = -1;
     }
 
     /**
@@ -291,7 +314,10 @@ public class VisualSandTimerDisplay {
             Block block = currentLocation.getBlock();
             // If we find a sand block, remove it
             if (block.getType() == Material.SAND) {
-                block.setType(Material.AIR, false); // Set to air, no physics update
+                // applyPhysics=true so the sand resting above this block loses support and
+                // falls into the gap (the hourglass "drain from the bottom" look). With false
+                // the upper sand stays suspended in mid-air, which is the visual bug we fix.
+                block.setType(Material.AIR, true);
                 blocksRemoved++;
             } else {
                 // Stop if we hit air or any non-sand block, means we reached the current top of the stack
@@ -319,6 +345,19 @@ public class VisualSandTimerDisplay {
             Location currentLocation = new Location(world, bottomLocation.getBlockX(), y, bottomLocation.getBlockZ());
             // Check if the block at this location is sand
             if (currentLocation.getBlock().getType() == Material.SAND) {
+                count++;
+            }
+        }
+        // Also count sand that is momentarily a FallingBlock entity mid-drop within this column,
+        // otherwise updateVisuals would briefly see fewer blocks than the target and re-add a block,
+        // fighting the fall. The bounding box spans the whole column at this X/Z.
+        double x = bottomLocation.getBlockX() + 0.5;
+        double z = bottomLocation.getBlockZ() + 0.5;
+        BoundingBox columnBox = new BoundingBox(
+                x - 0.5, bottomLocation.getBlockY() + 1, z - 0.5,
+                x + 0.5, topLocation.getBlockY() + 1, z + 0.5);
+        for (Entity e : world.getNearbyEntities(columnBox)) {
+            if (e instanceof FallingBlock && ((FallingBlock) e).getBlockData().getMaterial() == Material.SAND) {
                 count++;
             }
         }

@@ -188,6 +188,7 @@ public class SaveSegmentCommand implements CommandExecutor, TabCompleter {
         BlockVector3 timerOffset               = null;
         List<BlockVector3> deathCageOffsets    = new ArrayList<>();
         List<BlockVector3> sandTimerOffsets    = new ArrayList<>();
+        List<BlockVector3> playerSpawnOffsets  = new ArrayList<>();
         VaultColor containedVault              = null;
         VaultColor containedVaultKey           = null;
 
@@ -349,6 +350,9 @@ public class SaveSegmentCommand implements CommandExecutor, TabCompleter {
                     }
                     break;
                 }
+                case "PLAYER_SPAWN":
+                    playerSpawnOffsets.add(relPos);
+                    break;
                 case "COIN_SPAWN": {
                     coinSpawns.add(relPos);
                     Integer val = pdc.get(COIN_VALUE_KEY, PersistentDataType.INTEGER);
@@ -436,6 +440,7 @@ public class SaveSegmentCommand implements CommandExecutor, TabCompleter {
                         bankOffset != null ? NamedTextColor.GREEN : NamedTextColor.GRAY)));
         player.sendMessage(info("Death Cages",    deathCageOffsets.size()));
         player.sendMessage(info("Timer Deposits", sandTimerOffsets.size()));
+        player.sendMessage(info("Player Spawns",  playerSpawnOffsets.size()));
         player.sendMessage(Component.text("  Timer: ", NamedTextColor.WHITE)
                 .append(Component.text(timerOffset != null ? "yes" : "none",
                         timerOffset != null ? NamedTextColor.GREEN : NamedTextColor.GRAY)));
@@ -459,7 +464,8 @@ public class SaveSegmentCommand implements CommandExecutor, TabCompleter {
                     vaultDoorBound, gates, leverOffset,
                     sandSacrifices, mobSpawners,
                     safeExitOffset,
-                    bankOffset, deathCageOffsets, safeExitBound, sandTimerOffsets, timerOffset
+                    bankOffset, deathCageOffsets, safeExitBound, sandTimerOffsets, timerOffset,
+                    playerSpawnOffsets
             );
         } catch (Exception e) {
             plugin.getLogger().log(Level.SEVERE, "Error constructing Segment for " + segmentName, e);
@@ -527,6 +533,7 @@ public class SaveSegmentCommand implements CommandExecutor, TabCompleter {
             case "MOB_SPAWNER":
             case "SAND_SPAWN":
             case "SAND_SACRIFICE":
+            case "PLAYER_SPAWN":
                 return true;
             default:
                 return false;

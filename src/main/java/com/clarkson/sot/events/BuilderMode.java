@@ -54,6 +54,9 @@ public enum BuilderMode {
             false),
     TIMER("Timer",
             "Right-click to mark the base of the visual sand-timer column in the HUB. One per HUB.",
+            false),
+    PLAYER_SPAWN("Player Spawn",
+            "Right-click to mark where a player spawns at game start. Place one per player (up to your team size) in the HUB; players are spread across them.",
             false);
 
     private final String displayName;

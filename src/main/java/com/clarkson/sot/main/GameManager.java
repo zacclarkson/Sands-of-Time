@@ -11,6 +11,7 @@ import com.clarkson.sot.utils.*; // PlayerStateManager, PlayerStatus, SandManage
 
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
+import org.bukkit.Sound;
 import org.bukkit.World;
 import org.bukkit.entity.Player;
 import org.bukkit.plugin.Plugin;
@@ -19,7 +20,9 @@ import org.bukkit.util.Vector;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
 import net.kyori.adventure.text.format.TextDecoration;
+import net.kyori.adventure.title.Title;
 
+import java.time.Duration;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap; // Added for maps accessed by listeners
 
@@ -233,13 +236,21 @@ public class GameManager {
             // 3. Assign each player to their own death cage
             assignPlayerCages(teamId, team);
 
-            // 4. Teleport Team Members to their specific Hub
+            // 4. Teleport Team Members to their spawn points. Each player gets a distinct PLAYER_SPAWN
+            //    marker (round-robin if there are more players than markers); segments without markers
+            //    fall back to the single hub location for everyone.
             Location teamHubLocation = getTeamHubLocation(teamId); // Get instance-specific hub
-            if (teamHubLocation != null) {
+            List<Location> spawnPoints = getTeamPlayerSpawnLocations(teamId);
+            if (teamHubLocation != null || !spawnPoints.isEmpty()) {
+                 int spawnIndex = 0;
                  for (UUID memberId : team.getMemberUUIDs()) {
                      Player player = Bukkit.getPlayer(memberId);
                      if (player != null && player.isOnline()) {
-                         final Location teleportTarget = teamHubLocation.clone().add(0.5, 0.1, 0.5);
+                         Location base = spawnPoints.isEmpty()
+                                 ? teamHubLocation
+                                 : spawnPoints.get(spawnIndex % spawnPoints.size());
+                         spawnIndex++;
+                         final Location teleportTarget = base.clone().add(0.5, 0.1, 0.5);
                          teleportTarget.setYaw(player.getLocation().getYaw());
                          teleportTarget.setPitch(0);
                          Bukkit.getScheduler().runTask(plugin, () -> { if (player.isValid()) player.teleport(teleportTarget); });
@@ -249,13 +260,78 @@ public class GameManager {
             teamIndex++;
         }
 
-        // 4. Start All Team Timers
-        for (SoTTeam team : activeTeamsInGame.values()) { team.startTimer(); }
+        // 4. Freeze players for a countdown, then begin play. Timers must NOT tick during the
+        //    countdown, so team.startTimer() is deferred to beginPlay() when the count hits zero.
+        //    The COUNTDOWN state gates the freeze listener (see CountdownFreezeListener).
+        this.currentState = GameState.COUNTDOWN;
+        startCountdown();
+        plugin.getLogger().info("Sands of Time dungeons generated; countdown started.");
+    }
 
-        // 5. Set Game State & Announce
+    /** Seconds players are frozen at the hub before movement and timers begin. */
+    private static final int COUNTDOWN_SECONDS = 10;
+
+    /**
+     * Runs a {@value #COUNTDOWN_SECONDS}-second on-screen countdown while players are frozen
+     * (movement blocked by CountdownFreezeListener while the state is COUNTDOWN), then calls
+     * {@link #beginPlay()}. Aborts silently if the game is no longer in COUNTDOWN (e.g. force-ended).
+     */
+    private void startCountdown() {
+        final int[] remaining = { COUNTDOWN_SECONDS };
+        Bukkit.getScheduler().runTaskTimer(plugin, task -> {
+            if (currentState != GameState.COUNTDOWN) { task.cancel(); return; }
+            if (remaining[0] > 0) {
+                Title title = Title.title(
+                        Component.text(String.valueOf(remaining[0]), NamedTextColor.GOLD, TextDecoration.BOLD),
+                        Component.text("Get ready...", NamedTextColor.YELLOW),
+                        Title.Times.times(Duration.ZERO, Duration.ofMillis(1200), Duration.ofMillis(200)));
+                for (Player p : getParticipatingPlayers()) {
+                    p.showTitle(title);
+                    p.playSound(p.getLocation(), Sound.BLOCK_NOTE_BLOCK_HAT, 1f, 1f);
+                }
+                remaining[0]--;
+            } else {
+                task.cancel();
+                beginPlay();
+            }
+        }, 0L, 20L);
+    }
+
+    /** Releases the freeze, starts every team timer, and announces the game has begun. */
+    private void beginPlay() {
+        if (currentState != GameState.COUNTDOWN) return;
         this.currentState = GameState.RUNNING;
+        for (SoTTeam team : activeTeamsInGame.values()) { team.startTimer(); }
+        Title go = Title.title(
+                Component.text("GO!", NamedTextColor.GREEN, TextDecoration.BOLD),
+                Component.empty(),
+                Title.Times.times(Duration.ZERO, Duration.ofMillis(800), Duration.ofMillis(200)));
+        for (Player p : getParticipatingPlayers()) {
+            p.showTitle(go);
+            p.playSound(p.getLocation(), Sound.ENTITY_ENDER_DRAGON_GROWL, 0.6f, 1.2f);
+        }
         Bukkit.getServer().broadcast(Component.text("Sands of Time has begun!", NamedTextColor.GOLD, TextDecoration.BOLD));
         plugin.getLogger().info("Sands of Time game started with per-team dungeons.");
+    }
+
+    /** True if the player belongs to an active team in the current game. Used by the freeze gate. */
+    public boolean isParticipant(UUID playerId) {
+        for (SoTTeam team : activeTeamsInGame.values()) {
+            if (team.getMemberUUIDs().contains(playerId)) return true;
+        }
+        return false;
+    }
+
+    /** All online players across every active team. Used for countdown titles and the freeze gate. */
+    public List<Player> getParticipatingPlayers() {
+        List<Player> players = new ArrayList<>();
+        for (SoTTeam team : activeTeamsInGame.values()) {
+            for (UUID memberId : team.getMemberUUIDs()) {
+                Player p = Bukkit.getPlayer(memberId);
+                if (p != null && p.isOnline()) players.add(p);
+            }
+        }
+        return players;
     }
 
     /** Forcefully ends the current Sands of Time game */
@@ -317,7 +393,12 @@ public class GameManager {
         plugin.getLogger().info("Executing internal game end sequence. Reason: " + reason);
         this.currentState = GameState.ENDED;
 
-        for (SoTTeam team : activeTeamsInGame.values()) { if (team.isTimerRunning()) team.stopTimer(); }
+        for (SoTTeam team : activeTeamsInGame.values()) {
+            if (team.isTimerRunning()) team.stopTimer();
+            // Tear down the visual sand column too. A hub column is inside the dungeon bounds and
+            // gets air-filled by cleanupInstance below, but a lobby-fallback column is not.
+            team.clearVisualTimer();
+        }
 
         // --- Final score calculations & display ---
         displayFinalScores();
@@ -345,6 +426,7 @@ public class GameManager {
         teamDungeonManagers.clear();
         playerStateManager.clearAllStates();
         scoreManager.clearAllUnbankedScores();
+        sandManager.clearAllSandCounts();
         // No need to call clearTeamState here again, cleanupInstance does it
         dungeonLayoutBlueprint = null;
 
@@ -520,6 +602,18 @@ public class GameManager {
         if (dungeonLayoutBlueprint == null || teamOrigin == null) return null;
         Vector hubRelative = dungeonLayoutBlueprint.getHubRelativeLocation();
         return (hubRelative != null) ? teamOrigin.clone().add(hubRelative) : null;
+    }
+
+    /**
+     * Absolute per-player spawn points for a team's instance (from PLAYER_SPAWN markers). Empty when
+     * the segment templates define none — callers then fall back to {@link #getTeamHubLocation}.
+     */
+    public List<Location> getTeamPlayerSpawnLocations(UUID teamId) {
+        DungeonManager teamDungeonManager = teamDungeonManagers.get(teamId);
+        if (teamDungeonManager == null) return Collections.emptyList();
+        Dungeon teamDungeonData = teamDungeonManager.getDungeonData();
+        if (teamDungeonData == null) return Collections.emptyList();
+        return teamDungeonData.getPlayerSpawnLocations();
     }
 
     /**

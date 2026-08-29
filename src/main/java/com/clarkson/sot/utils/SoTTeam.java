@@ -99,6 +99,13 @@ public class SoTTeam {
         }
     }
 
+    /** Stops the visual timer task and clears its sand column. Used by end-of-game cleanup. */
+    public void clearVisualTimer() {
+        if (visualTimerDisplay != null) {
+            visualTimerDisplay.stopAndClear();
+        }
+    }
+
     // --- Timer Control (Delegation) ---
     // (startTimer, stopTimer, addSeconds, getRemainingSeconds, isTimerRunning methods remain the same)
     public void startTimer() { this.teamTimer.start(); }
