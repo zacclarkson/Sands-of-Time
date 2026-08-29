@@ -382,6 +382,21 @@ public class GameManager {
          checkGameEndCondition(); // Check if game should end now
     }
 
+    /**
+     * Whether a team member should be pulled back to the lobby when the round ends.
+     *
+     * <p>Everyone except the players locked in by their timer. {@link #handleTeamTimerEnd} only
+     * <i>queues</i> the trapped teleport ({@code runTask} = next tick) and then calls
+     * {@link #checkGameEndCondition} synchronously, so on the last team's expiry
+     * {@link #endGameInternal} runs in that same tick and queues its lobby teleport <i>behind</i>
+     * the trapped one. Teleporting a trapped player here would therefore silently undo the
+     * trapping — which is exactly what used to happen in a single-team round, where the game
+     * always ends on the tick the team is trapped.
+     */
+    static boolean returnsToLobbyAtGameEnd(PlayerStatus status) {
+        return status != PlayerStatus.TRAPPED_TIMER_OUT;
+    }
+
     /** Checks if all active teams' timers have expired. */
     private void checkGameEndCondition() {
         if (currentState != GameState.RUNNING) return;
@@ -398,8 +413,9 @@ public class GameManager {
 
         for (SoTTeam team : activeTeamsInGame.values()) {
             if (team.isTimerRunning()) team.stopTimer();
-            // Tear down the visual sand column too. A hub column is inside the dungeon bounds and
-            // gets air-filled by cleanupInstance below, but a lobby-fallback column is not.
+            // Tear down the visual sand column too. cleanupInstance below air-fills the dungeon
+            // bounds, which covers it, but this also disarms the display and keeps its own block
+            // count honest for the next round.
             team.clearVisualTimer();
         }
 
@@ -410,10 +426,13 @@ public class GameManager {
         // --- Final score calculations & display ---
         displayFinalScores();
 
-        // Teleport remaining players to lobby (snapshot once; the field is mutable)
+        // Teleport remaining players to lobby (snapshot once; the field is mutable).
+        // The status must be read here rather than inside the task below — clearAllStates() runs
+        // further down in this same tick, so by the time the task fires every status is gone.
         final Location lobbyDestination = getLobbyLocation();
         for (SoTTeam team : activeTeamsInGame.values()) {
             for (UUID memberId : team.getMemberUUIDs()) {
+                if (!returnsToLobbyAtGameEnd(playerStateManager.getStatus(memberId))) continue;
                 Player player = Bukkit.getPlayer(memberId);
                 if (player != null && player.isOnline()) {
                     Bukkit.getScheduler().runTask(plugin, () -> {
@@ -526,16 +545,17 @@ public class GameManager {
         playerStateManager.updateStatus(playerUUID, PlayerStatus.ESCAPED_SAFE);
         scoreManager.playerEscaped(playerUUID);
 
-        // Teleport to safe exit
-        Location safeExit = getTeamSafeExitLocation(teamId);
-        if (safeExit != null) {
-            Bukkit.getScheduler().runTask(plugin, () -> {
-                if (player.isValid()) {
-                    player.teleport(safeExit.clone().add(0.5, 0.1, 0.5));
-                    player.sendMessage(Component.text("You escaped safely!", NamedTextColor.GREEN));
-                }
-            });
-        }
+        // Out of the dungeon and out of the round: escaping is irreversible, so send them back to
+        // the lobby rather than leaving them standing at the exit block inside the dungeon.
+        // ESCAPED_SAFE already bars them from escaping again (EscapeListener) and from spending
+        // sand (SandManager); the lobby puts them physically out of reach of the dungeon too.
+        final Location lobbyDestination = getLobbyLocation();
+        Bukkit.getScheduler().runTask(plugin, () -> {
+            if (player.isValid()) {
+                player.teleport(lobbyDestination);
+                player.sendMessage(Component.text("You escaped safely!", NamedTextColor.GREEN));
+            }
+        });
 
         // Notify team
         NamedTextColor teamColor = teamManager.getTeamColor(teamId);
