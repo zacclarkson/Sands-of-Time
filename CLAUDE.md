@@ -84,7 +84,17 @@ manually (see `integration-test/README.md`); it is **not** part of CI.
   segment template; a marker on the HUB segment wins over one on any other segment. Templates saved
   before that marker existed carry none, so `GameManager.getTeamSafeExitLocation` falls back to the
   hub and `EscapeListener` falls back to accepting any `END_PORTAL_FRAME` within 30 blocks of the
-  hub. Generation logs a warning once when no template defines an exit.
+  hub. Generation logs a warning once when no template defines an exit. The marker only decides
+  *where you escape from*: escaping teleports the player to the **lobby**, not to the exit block —
+  the round is over for them, `ESCAPED_SAFE` bars them from escaping again (`EscapeListener`) or
+  spending sand (`SandManager`), and the dungeon is torn down moments later.
+- **The end-of-round teleport must skip trapped players.** `handleTeamTimerEnd` only *queues* the
+  trapped teleport (`runTask` = next tick) and then calls `checkGameEndCondition` synchronously, so
+  when the last team expires `endGameInternal` runs in that same tick and queues its lobby teleport
+  **behind** the trapped one. `GameManager.returnsToLobbyAtGameEnd` is the guard that keeps the
+  lobby teleport off `TRAPPED_TIMER_OUT` players; without it a single-team round (the `/sot setup`
+  default) never shows the trapped box at all. The status has to be read *outside* the scheduled
+  task, since `clearAllStates()` runs later in the same tick.
 - **Game locations come from `config.yml`.** `locations.lobby` and `locations.trapped` are stored as
   plain `world/x/y/z/yaw/pitch` scalars and read by `SoTConfig` (deliberately *not* Bukkit's
   `config.getLocation()`, whose serialized form needs a `==: org.bukkit.Location` marker and is not
