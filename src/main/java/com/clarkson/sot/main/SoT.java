@@ -164,6 +164,11 @@ public class SoT extends JavaPlugin {
     @Override
     public void onDisable() {
         getLogger().info("Sands of Time Disabling...");
+        // Hand players the server's own scoreboard back: a sidebar set by the plugin outlives
+        // the plugin being disabled, which matters on the hot-reload deploy path.
+        if (gameManager != null) {
+            gameManager.getScoreboardManager().stop();
+        }
         if (markerSpinTask != null) {
             markerSpinTask.cancel();
             markerSpinTask = null;

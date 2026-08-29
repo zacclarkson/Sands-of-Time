@@ -210,6 +210,20 @@ Coins spawn throughout the dungeon as visual displays on the ground. They come i
 - **Death**: Drop **all** items and unbanked coins at death location (no percentage penalty — everything can be recovered if you get back in time)
 - **Trapped (timer expires)**: Lose **ALL** unbanked coins — total wipeout
 
+### Live Scoreboard
+
+While a round is running every player sees a **sidebar** listing their own unbanked coins, their
+team's banked coins, and the standings — every team ordered by banked coins, ties broken by name,
+with the viewer's own team highlighted. The sidebar holds 15 lines: three viewer lines, a heading,
+and a row for each team.
+
+The **sand timer never appears on the sidebar**. Teams read their remaining time off the sand column
+in the hub and call it out to each other — putting a countdown on every screen would take that job
+away from the team.
+
+The sidebar refreshes once per second and disappears when the round ends, at which point the final
+scores are broadcast in chat.
+
 ---
 
 ## Banking at the Sphinx
@@ -457,6 +471,7 @@ Puzzle rooms are accessible from the hub exits (not on the vault branches). They
 | Banking tax | 20% |
 | Death penalty | None (drop all items/coins, no percentage destroyed) |
 | Timer expiry penalty | 100% (all unbanked) |
+| Live scoreboard refresh interval | 20 ticks (1 second) |
 | Depth multiplier range | 100% (hub) to 120% (max depth) |
 
 ### Sand

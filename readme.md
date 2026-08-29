@@ -47,6 +47,12 @@ This plugin implements (or plans to implement) the following core features of th
 ### Team Management
 - Supports the standard 10 MCC teams (Red Rabbits to Pink Parrots).
 
+### Live Scoreboard
+- A sidebar shows each player their own unbanked coins, their team's banked coins, and the
+  standings across every team, refreshed once a second.
+- The sand timer is deliberately absent: teams read it off the lobby's sand column and call it out
+  to each other.
+
 ### Death & Consequences
 - Players who die are temporarily trapped and must be revived by teammates using sand.
 
@@ -186,6 +192,7 @@ This plugin implements (or plans to implement) the following core features of th
 - **SoTTeam**: Represents an active team in a game instance, holding game state like score and its `TeamTimer`.
 - **TeamTimer**: Manages the logical countdown for a team.
 - **VisualSandTimerDisplay**: Manages the physical sand block visuals for each team's timer (placed relative to lobby).
+- **GameScoreboardManager**: Drives the live standings sidebar while a round runs; `ScoreboardLayout` builds its text.
 - **PlayerStateManager**: Tracks the status of each player (alive, dead, escaped, trapped).
 - **SandManager**: Manages sand collection and usage logic (timer extension, revives). *(Needs Implementation)*
 - **VaultManager**: Handles vault/key placement (via `DungeonManager`/`Dungeon`) and interaction logic within instances. Manages vault open state per team.
