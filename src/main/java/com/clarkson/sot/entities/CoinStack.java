@@ -161,7 +161,8 @@ public class CoinStack implements FloorItem {
                  // (a CENTER billboard would face the camera and cancel it).
                  float scale = 0.7f;
                  AxisAngle4f rotation = new AxisAngle4f((float) Math.toRadians(90), 1f, 0f, 0f);
-                 Vector3f translation = new Vector3f(0f, -0.2f, 0f);
+                 // No downward translation: rest on the floor surface (the +0.1 spawn offset above).
+                 Vector3f translation = new Vector3f(0f, 0f, 0f);
                  display.setTransformation(new Transformation(
                          translation,
                          rotation,
