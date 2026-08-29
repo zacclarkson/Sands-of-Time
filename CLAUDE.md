@@ -95,6 +95,16 @@ manually (see `integration-test/README.md`); it is **not** part of CI.
   lobby teleport off `TRAPPED_TIMER_OUT` players; without it a single-team round (the `/sot setup`
   default) never shows the trapped box at all. The status has to be read *outside* the scheduled
   task, since `clearAllStates()` runs later in the same tick.
+- **The visual sand column lives in the hub, never at the lobby.** Its base comes from a `TIMER`
+  marker on a segment template (HUB wins), via `DungeonGenerator.selectTimerBaseRelativeLocation` →
+  `DungeonBlueprint.getTimerBaseRelativeLocation` → `DungeonManager.getTimerBaseLocation`.
+  `SoTTeam` therefore starts with **no** `VisualSandTimerDisplay`: `GameManager.startGame` builds it
+  via `SoTTeam.relocateVisualTimer` once the team's dungeon is pasted, and a hub without a `TIMER`
+  marker just plays with no column (logged as a warning) — there is deliberately no lobby fallback.
+  `VisualSandTimerDisplay` is additionally gated on an `armed` flag set only by
+  `startVisualUpdates()`, so no sand can be placed before the column is anchored (that gate is what
+  stopped a 15-block pillar appearing at the lobby spawn at `/sot setup`). The bundled hub's marker
+  sits at segment-relative `(21, 1, 18)`, the pedestal under the sand column baked into `hub.schem`.
 - **Game locations come from `config.yml`.** `locations.lobby` and `locations.trapped` are stored as
   plain `world/x/y/z/yaw/pitch` scalars and read by `SoTConfig` (deliberately *not* Bukkit's
   `config.getLocation()`, whose serialized form needs a `==: org.bukkit.Location` marker and is not
