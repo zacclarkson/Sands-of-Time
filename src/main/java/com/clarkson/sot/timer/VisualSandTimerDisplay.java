@@ -149,6 +149,26 @@ public class VisualSandTimerDisplay {
     }
 
     /**
+     * True if the given block location is part of this team's sand column — the same cells
+     * {@link #countCurrentSandBlocks()} scans, i.e. the block above the bottom marker up to and
+     * including the top.
+     *
+     * <p>Used to keep players from mining their own timer. The column is built from
+     * {@link Material#SAND}, so without this check a hub-anchored column is just a sand mine: the
+     * periodic update only ever <em>removes</em> blocks, so a mined block stays gone until the next
+     * {@link #syncVisualState()} — which the resulting deposit itself triggers, putting the block
+     * back for free.
+     */
+    public boolean isColumnBlock(Location location) {
+        if (location == null || totalHeight <= 0) return false;
+        if (!Objects.equals(location.getWorld(), bottomLocation.getWorld())) return false;
+        if (location.getBlockX() != bottomLocation.getBlockX()) return false;
+        if (location.getBlockZ() != bottomLocation.getBlockZ()) return false;
+        int y = location.getBlockY();
+        return y > bottomLocation.getBlockY() && y <= topLocation.getBlockY();
+    }
+
+    /**
      * Stops updates and clears every sand block in the column back to air. Used by end-of-game
      * cleanup: a column relocated into the dungeon hub is wiped by the dungeon air-fill, but a
      * lobby-fallback column (hub had no TIMER marker) sits outside every cleanup region and would

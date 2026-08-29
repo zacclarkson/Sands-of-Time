@@ -88,6 +88,26 @@ manually (see `integration-test/README.md`); it is **not** part of CI.
   *where you escape from*: escaping teleports the player to the **lobby**, not to the exit block —
   the round is over for them, `ESCAPED_SAFE` bars them from escaping again (`EscapeListener`) or
   spending sand (`SandManager`), and the dungeon is torn down moments later.
+- **Sand is an item; only a deposit point converts it to time.** Breaking a dungeon sand block hands the
+  player a plain `Material.SAND` item and adds *no* time — `SandManager.onBlockPlace` does that, when the
+  sand is placed on one of the team's `TIMER_DEPOSIT` marker cells. The chain mirrors `PLAYER_SPAWN`:
+  `Segment.getSandTimerOffsets()` (JSON key `sandTimerLocations`) → `DungeonGenerator.selectSandTimerRelativeLocations`
+  (a HUB's markers win outright) → `DungeonBlueprint` → `Dungeon.isSandTimerDepositAt` →
+  `GameManager.isTeamSandTimerDepositAt`. Three things are easy to get wrong here. **(a)** Unlike the safe
+  exit, a deposit needs no ±1 Y tolerance: the builder tool records the marker at the *air cell* next to
+  the clicked face, which is exactly the cell a placed block occupies, so it is an exact block match
+  (the safe exit compares a clicked *solid* block against an air-cell marker, hence its fudge).
+  **(b)** The placement is *cancelled* rather than placed and cleared a tick later — sand has gravity, and
+  a block that becomes a falling entity before the cleanup runs would land elsewhere as a duplicate;
+  cancelling also refunds the sand atomically, which is what makes an at-cap refusal loss-free
+  (`TeamTimer.addSeconds` clamps, so an accepted deposit at 150s would destroy the sand for nothing).
+  **(c)** The inventory is the *only* store of carried sand — there is deliberately no counter map to
+  drift out of sync. That is why escaping wipes the inventory (`GameManager.handlePlayerLeave`) and why
+  `endGameInternal` strips sand from every team member *before* `activeTeamsInGame.clear()`, which is the
+  only source of member lists: players who are trapped, dead, or still exploring never pass through the
+  escape path, and their sand would otherwise buy free time next round. Breaking a block of the team's own
+  visual timer column is refused for the same reason — the column is sand, and a mined block is restored
+  by the next `syncVisualState()`, which the resulting deposit itself triggers.
 - **The end-of-round teleport must skip trapped players.** `handleTeamTimerEnd` only *queues* the
   trapped teleport (`runTask` = next tick) and then calls `checkGameEndCondition` synchronously, so
   when the last team expires `endGameInternal` runs in that same tick and queues its lobby teleport
