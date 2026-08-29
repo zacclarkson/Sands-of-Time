@@ -92,6 +92,9 @@ public class ToolListener implements Listener {
     private static final String MT_COIN_SPAWN       = "COIN_SPAWN";
     private static final String MT_ITEM_SPAWN       = "ITEM_SPAWN";
     private static final String MT_MOB_SPAWNER      = "MOB_SPAWNER";
+    private static final String MT_BANK             = "BANK";
+    private static final String MT_DEATH_CAGE       = "DEATH_CAGE";
+    private static final String MT_TIMER_DEPOSIT    = "TIMER_DEPOSIT";
     private static final String MT_ICON             = "ICON";   // cosmetic floating icon
     private static final String MT_LABEL            = "LABEL";  // cosmetic floating text label
 
@@ -190,6 +193,7 @@ public class ToolListener implements Listener {
                 break;
             case VAULT_DOOR:
             case GATE:
+            case SAFE_EXIT:
                 handleBoundFirstOrSecondClick(event, player, session, mode);
                 break;
             case VAULT_MARKER: {
@@ -223,10 +227,6 @@ public class ToolListener implements Listener {
                 placeBlockMarker(event, player, MT_SAND_SACRIFICE, SACRIFICE_MATERIAL, 0.5f, null, -1,
                         null, Component.text("Sacrifice", NamedTextColor.GOLD));
                 break;
-            case SAFE_EXIT:
-                placeBlockMarker(event, player, MT_SAFE_EXIT, Material.END_PORTAL_FRAME, 0.5f, null, -1,
-                        new ItemStack(Material.ENDER_PEARL), Component.text("Safe Exit", NamedTextColor.GREEN));
-                break;
             case COIN_SPAWN: {
                 int val = session.getCoinValue();
                 placeItemMarker(event, player, MT_COIN_SPAWN, buildCoinItem(val),
@@ -241,6 +241,18 @@ public class ToolListener implements Listener {
             case MOB_SPAWNER:
                 placeBlockMarker(event, player, MT_MOB_SPAWNER, Material.SPAWNER, 0.5f, null, -1,
                         new ItemStack(Material.ZOMBIE_HEAD), Component.text("Mob Spawner", NamedTextColor.RED));
+                break;
+            case BANK:
+                placeBlockMarker(event, player, MT_BANK, Material.EMERALD_BLOCK, 0.6f, null, -1,
+                        new ItemStack(Material.GOLD_INGOT), Component.text("Bank", NamedTextColor.GREEN));
+                break;
+            case DEATH_CAGE:
+                placeBlockMarker(event, player, MT_DEATH_CAGE, Material.IRON_BARS, 0.7f, null, -1,
+                        new ItemStack(Material.SKELETON_SKULL), Component.text("Death Cage", NamedTextColor.RED));
+                break;
+            case TIMER_DEPOSIT:
+                placeBlockMarker(event, player, MT_TIMER_DEPOSIT, Material.HOPPER, 0.6f, null, -1,
+                        new ItemStack(Material.SAND), Component.text("Timer Deposit", NamedTextColor.YELLOW));
                 break;
         }
     }
@@ -537,12 +549,26 @@ public class ToolListener implements Listener {
             }
             session.clearPendingBound();
 
-            // Spawn the perimeter frame
-            String markerType = (mode == BuilderMode.VAULT_DOOR) ? MT_VAULT_DOOR : MT_GATE;
-            VaultColor color = (mode == BuilderMode.VAULT_DOOR) ? session.getVaultColor() : null;
-            Material frameMat = (mode == BuilderMode.VAULT_DOOR)
-                    ? (color != null ? color.getGlassMaterial() : Material.PURPLE_STAINED_GLASS)
-                    : Material.GRAY_STAINED_GLASS;
+            // Spawn the perimeter frame — material and marker type depend on the bound mode.
+            String markerType;
+            VaultColor color = null;
+            Material frameMat;
+            switch (mode) {
+                case VAULT_DOOR:
+                    markerType = MT_VAULT_DOOR;
+                    color = session.getVaultColor();
+                    frameMat = (color != null) ? color.getGlassMaterial() : Material.PURPLE_STAINED_GLASS;
+                    break;
+                case SAFE_EXIT:
+                    markerType = MT_SAFE_EXIT;
+                    frameMat = Material.PURPLE_STAINED_GLASS; // evokes the nether portal
+                    break;
+                case GATE:
+                default:
+                    markerType = MT_GATE;
+                    frameMat = Material.GRAY_STAINED_GLASS;
+                    break;
+            }
 
             spawnBoundFrame(player, corner1, corner2, markerType, frameMat, color);
         }
@@ -652,17 +678,23 @@ public class ToolListener implements Listener {
         }
 
         // Floating label centred above the top edge of the frame.
-        Component boundLabel = MT_VAULT_DOOR.equals(markerType)
-                ? Component.text("Vault Door" + (vaultColor != null ? " " + vaultColor.name() : ""),
-                        vaultColor != null ? vaultColor.getTextColor() : NamedTextColor.LIGHT_PURPLE)
-                : Component.text("Gate", NamedTextColor.GRAY);
+        Component boundLabel;
+        if (MT_VAULT_DOOR.equals(markerType)) {
+            boundLabel = Component.text("Vault Door" + (vaultColor != null ? " " + vaultColor.name() : ""),
+                    vaultColor != null ? vaultColor.getTextColor() : NamedTextColor.LIGHT_PURPLE);
+        } else if (MT_SAFE_EXIT.equals(markerType)) {
+            boundLabel = Component.text("Safe Exit", NamedTextColor.GREEN);
+        } else {
+            boundLabel = Component.text("Gate", NamedTextColor.GRAY);
+        }
         spawnLabel(player.getWorld(), (minX + maxX) / 2.0 + 0.5, maxY + BOUND_LABEL_EXTRA,
                 (minZ + maxZ) / 2.0 + 0.5, groupId, boundLabel);
 
         sessionManager.getSession(player).pushUndo(groupId);
 
         String colorLabel = (vaultColor != null) ? " (" + vaultColor.name() + ")" : "";
-        String displayName = MT_VAULT_DOOR.equals(markerType) ? "Vault Door" : "Gate";
+        String displayName = MT_VAULT_DOOR.equals(markerType) ? "Vault Door"
+                : MT_SAFE_EXIT.equals(markerType) ? "Safe Exit" : "Gate";
         int width  = (dz <= dx && dz <= dy) ? (maxX - minX + 1) : (maxZ - minZ + 1);
         int height = maxY - minY + 1;
         player.sendActionBar(Component.text(

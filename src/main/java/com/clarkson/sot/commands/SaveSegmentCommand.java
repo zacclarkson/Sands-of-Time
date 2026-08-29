@@ -170,6 +170,10 @@ public class SaveSegmentCommand implements CommandExecutor {
         BlockVector3 keyOffset                 = null;
         BlockVector3 leverOffset               = null;
         BlockVector3 safeExitOffset            = null;
+        SegmentBound safeExitBound             = null;
+        BlockVector3 bankOffset                = null;
+        List<BlockVector3> deathCageOffsets    = new ArrayList<>();
+        List<BlockVector3> sandTimerOffsets    = new ArrayList<>();
         VaultColor containedVault              = null;
         VaultColor containedVaultKey           = null;
 
@@ -285,13 +289,32 @@ public class SaveSegmentCommand implements CommandExecutor {
                     sandSacrifices.add(relPos);
                     break;
                 case "SAFE_EXIT": {
-                    if (safeExitOffset != null) {
-                        warn(player, "Multiple SAFE_EXIT markers — only one allowed. Using first.");
-                    } else {
-                        safeExitOffset = relPos;
+                    SegmentBound bound = readBound(pdc, selMin);
+                    if (bound != null) {
+                        if (safeExitBound != null) {
+                            warn(player, "Multiple SAFE_EXIT markers — only one allowed. Using first.");
+                        } else {
+                            safeExitBound = bound;
+                            // Keep a representative point (bound min) for the legacy escape path.
+                            safeExitOffset = bound.getMin();
+                        }
                     }
                     break;
                 }
+                case "BANK": {
+                    if (bankOffset != null) {
+                        warn(player, "Multiple BANK markers — only one allowed. Using first.");
+                    } else {
+                        bankOffset = relPos;
+                    }
+                    break;
+                }
+                case "DEATH_CAGE":
+                    deathCageOffsets.add(relPos);
+                    break;
+                case "TIMER_DEPOSIT":
+                    sandTimerOffsets.add(relPos);
+                    break;
                 case "COIN_SPAWN": {
                     coinSpawns.add(relPos);
                     Integer val = pdc.get(COIN_VALUE_KEY, PersistentDataType.INTEGER);
@@ -335,6 +358,10 @@ public class SaveSegmentCommand implements CommandExecutor {
             player.sendMessage(Component.text(
                     "Warning: LEVER marker present but no gates found.", NamedTextColor.YELLOW));
         }
+        if (deathCageOffsets.size() > 4) {
+            warn(player, deathCageOffsets.size() + " DEATH_CAGE markers — the runtime uses at most 4 "
+                    + "(one per player); extras will be ignored.");
+        }
 
         // --- Print summary ---
         player.sendMessage(Component.text("--- Segment Marker Summary ---", NamedTextColor.GOLD));
@@ -363,13 +390,18 @@ public class SaveSegmentCommand implements CommandExecutor {
                         : "none",
                         keyOffset != null ? NamedTextColor.AQUA : NamedTextColor.GRAY)));
         player.sendMessage(Component.text("  Safe Exit: ", NamedTextColor.WHITE)
-                .append(Component.text(safeExitOffset != null ? "yes" : "none",
-                        safeExitOffset != null ? NamedTextColor.GREEN : NamedTextColor.GRAY)));
+                .append(Component.text(safeExitBound != null ? "yes (portal area)" : "none",
+                        safeExitBound != null ? NamedTextColor.GREEN : NamedTextColor.GRAY)));
+        player.sendMessage(Component.text("  Bank: ", NamedTextColor.WHITE)
+                .append(Component.text(bankOffset != null ? "yes" : "none",
+                        bankOffset != null ? NamedTextColor.GREEN : NamedTextColor.GRAY)));
+        player.sendMessage(info("Death Cages",    deathCageOffsets.size()));
+        player.sendMessage(info("Timer Deposits", sandTimerOffsets.size()));
 
         // A hub without an exit still saves; escaping just falls back to the hub location.
-        if (segmentType == SegmentType.HUB && safeExitOffset == null) {
+        if (segmentType == SegmentType.HUB && safeExitBound == null) {
             warn(player, "HUB segment has no SAFE_EXIT marker — escaping will fall back to the hub.");
-        } else if (segmentType != SegmentType.HUB && safeExitOffset != null) {
+        } else if (segmentType != SegmentType.HUB && safeExitBound != null) {
             warn(player, "SAFE_EXIT on a non-HUB segment — a HUB segment's marker takes priority.");
         }
 
@@ -384,7 +416,8 @@ public class SaveSegmentCommand implements CommandExecutor {
                     vaultOffset, keyOffset,
                     vaultDoorBound, gates, leverOffset,
                     sandSacrifices, mobSpawners,
-                    safeExitOffset
+                    safeExitOffset,
+                    bankOffset, deathCageOffsets, safeExitBound, sandTimerOffsets
             );
         } catch (Exception e) {
             plugin.getLogger().log(Level.SEVERE, "Error constructing Segment for " + segmentName, e);

@@ -27,6 +27,7 @@ import com.clarkson.sot.commands.*;
 import com.clarkson.sot.events.BuilderSessionManager;
 import com.clarkson.sot.events.DeathListener;
 import com.clarkson.sot.events.EscapeListener;
+import com.clarkson.sot.events.NetherPortalListener;
 import com.clarkson.sot.events.SegmentBuilderKeys;
 import com.clarkson.sot.events.ToolListener;
 // Import Entities if needed for static init
@@ -142,6 +143,9 @@ public class SoT extends JavaPlugin {
         getServer().getPluginManager().registerEvents(gameManager.getDoorManager(), this);
         getServer().getPluginManager().registerEvents(new DeathListener(gameManager), this);
         getServer().getPluginManager().registerEvents(new EscapeListener(gameManager), this);
+        // Nether portals are used as the safe-exit visual; suppress the vanilla teleport so nobody is
+        // sent to the Nether when they walk into one.
+        getServer().getPluginManager().registerEvents(new NetherPortalListener(), this);
 
         // Animate spinnable builder markers (e.g. coin markers). Cancelled in onDisable so a
         // plugin hot-reload does not orphan the task.

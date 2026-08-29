@@ -187,10 +187,27 @@ public class StructureLoader {
                         json.getAsJsonObject("safeExitOffset"), "safeExitOffset", name, sourceFileName);
             }
 
+            SegmentBound safeExitBound = null;
+            if (json.has("safeExitBound") && json.get("safeExitBound").isJsonObject()) {
+                safeExitBound = deserializeSegmentBound(
+                        json.getAsJsonObject("safeExitBound"), "safeExitBound", name, sourceFileName);
+            }
+
             List<BlockVector3> sandSacrifices = deserializeBlockVectorList(
                     json.getAsJsonArray("sandSacrificeLocations"), "sandSacrificeLocations", name, sourceFileName);
             List<BlockVector3> mobSpawners = deserializeBlockVectorList(
                     json.getAsJsonArray("mobSpawnerLocations"), "mobSpawnerLocations", name, sourceFileName);
+
+            // --- Deserialize hub features ---
+            BlockVector3 bankOffset = null;
+            if (json.has("bankLocationOffset") && json.get("bankLocationOffset").isJsonObject()) {
+                bankOffset = deserializeBlockVector3(
+                        json.getAsJsonObject("bankLocationOffset"), "bankLocationOffset", name, sourceFileName);
+            }
+            List<BlockVector3> deathCages = deserializeBlockVectorList(
+                    json.getAsJsonArray("deathCageLocations"), "deathCageLocations", name, sourceFileName);
+            List<BlockVector3> sandTimers = deserializeBlockVectorList(
+                    json.getAsJsonArray("sandTimerLocations"), "sandTimerLocations", name, sourceFileName);
 
             // --- Construct the Segment Template Object ---
             return new Segment(
@@ -213,7 +230,11 @@ public class StructureLoader {
                     leverOffset,
                     sandSacrifices != null ? sandSacrifices : new ArrayList<>(),
                     mobSpawners    != null ? mobSpawners    : new ArrayList<>(),
-                    safeExitOffset
+                    safeExitOffset,
+                    bankOffset,
+                    deathCages != null ? deathCages : new ArrayList<>(),
+                    safeExitBound,
+                    sandTimers != null ? sandTimers : new ArrayList<>()
             );
 
         } catch (JsonParseException | IllegalStateException | ClassCastException | NullPointerException e) {

@@ -165,7 +165,12 @@ Each segment template can contain any combination of:
 - **Vault doors** — openings blocked until the matching vault is opened
 - **Levers** — interact to open all gates in the segment
 - **Color marking placeholder** — every segment needs a placeholder location for a color marking on the wall, used to indicate which vault branch the segment belongs to
-- **Safe exit** — the block players interact with to escape. One per dungeon; a marker on the HUB segment takes priority over one on any other segment
+- **Safe exit** — a **2D area (like a door) built as a nether portal** that players walk through to escape. Placed in the builder as a two-click bound (`SAFE_EXIT`), normally in the HUB; one per dungeon, and a HUB marker takes priority over one on any other segment. Vanilla Nether travel is suppressed so the portal never teleports anyone out (`NetherPortalListener`).
+
+The HUB segment additionally defines these hub-only features (placed in the builder, wired to the live dungeon in a later pass):
+- **Bank** — a single interact point (`BANK` marker) marking where the banking Sphinx / bank spot lives
+- **Death cages** — 1–4 points (`DEATH_CAGE` markers), one per player, where dead players are held and respawn; each cage's revive/sacrifice point is auto-derived at runtime
+- **Timer deposits** — interact points (`TIMER_DEPOSIT` markers) where players place collected sand onto the timer to add time
 
 ### Depth & Difficulty
 
@@ -364,7 +369,7 @@ When a team's timer reaches zero:
 
 ## Escaping
 
-- Players escape by right-clicking the **safe exit** block, marked in a segment template with the `SAFE_EXIT` builder marker
+- The **safe exit** is a nether portal, marked in a segment template as a 2D `SAFE_EXIT` bound; the intended mechanic is to **walk through** it to escape (walk-through detection is a follow-up runtime pass — until then the existing right-click-to-escape on the exit block still applies, using a representative cell of the bound)
 - The exit location is per-instance: each team's copy of the dungeon has its own
 - A dungeon whose segment templates carry no safe-exit marker falls back to the older behaviour, where any End Portal Frame within 30 blocks of the hub works
 - Escaping changes the player's status to **ESCAPED_SAFE**

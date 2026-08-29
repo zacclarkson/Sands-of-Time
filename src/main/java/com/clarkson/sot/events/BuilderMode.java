@@ -32,8 +32,8 @@ public enum BuilderMode {
             "Right-click to mark a sand sacrifice block position.",
             false),
     SAFE_EXIT("Safe Exit",
-            "Right-click to mark where players escape the dungeon. One per dungeon, normally in the HUB.",
-            false),
+            "Click two air blocks to define the safe-exit nether-portal opening (2D, like a door). Build the portal blocks inside it. One per dungeon, normally in the HUB.",
+            true),
     COIN_SPAWN("Coin Spawn",
             "Right-click to mark a coin spawn. Use /sotmode COIN_SPAWN <value> to set value.",
             false),
@@ -42,6 +42,15 @@ public enum BuilderMode {
             false),
     MOB_SPAWNER("Mob Spawner",
             "Right-click to mark a mob spawner position.",
+            false),
+    BANK("Bank",
+            "Right-click to mark where players bank coins (the Sphinx / bank spot). One per HUB.",
+            false),
+    DEATH_CAGE("Death Cage",
+            "Right-click to mark a death/respawn cage. Place 1-4 (one per player); revive points are auto-derived.",
+            false),
+    TIMER_DEPOSIT("Timer Deposit",
+            "Right-click to mark an interact point where players place collected sand onto the timer.",
             false);
 
     private final String displayName;
