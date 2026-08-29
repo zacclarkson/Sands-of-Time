@@ -115,6 +115,7 @@ public class ToolListener implements Listener {
     private static final double MARKER_LABEL_HEIGHT = 1.3;  // point-marker label height above cell floor
     private static final double ENTRY_LABEL_HEIGHT  = 2.2;  // entry-point label, above the arrow
     private static final double BOUND_LABEL_EXTRA   = 1.2;  // bound-frame label, above the top edge
+    private static final float  BOUND_FRAME_SCALE   = 0.9f;  // sub-block frame cubes, centred in their cell
     private static final float  MARKER_ICON_SCALE   = 0.45f;
     private static final double MARKER_ICON_HEIGHT  = 1.0;  // floating icon height above cell floor
     private static final float  COIN_MARKER_SCALE   = 0.6f;
@@ -498,16 +499,17 @@ public class ToolListener implements Listener {
                                 ? session.getVaultColor().getGlassMaterial()
                                 : Material.PURPLE_STAINED_GLASS)
                         : Material.GRAY_STAINED_GLASS;
+                final float cornerOffset = (1.0f - BOUND_FRAME_SCALE) / 2.0f;
                 BlockDisplay bd = player.getWorld().spawn(
-                        corner.clone().add(0.5, 0.0, 0.5), BlockDisplay.class, display -> {
+                        corner.getBlock().getLocation(), BlockDisplay.class, display -> {
                     display.setBlock(mat.createBlockData());
                     display.setGravity(false);
                     display.setInvulnerable(true);
                     display.setPersistent(true);
                     display.setTransformation(new Transformation(
-                            new Vector3f(0f, 0f, 0f),
+                            new Vector3f(cornerOffset, cornerOffset, cornerOffset),
                             new AxisAngle4f(0f, 0f, 0f, 1f),
-                            new Vector3f(0.9f, 0.9f, 0.9f),
+                            new Vector3f(BOUND_FRAME_SCALE, BOUND_FRAME_SCALE, BOUND_FRAME_SCALE),
                             new AxisAngle4f(0f, 0f, 0f, 1f)
                     ));
                     PersistentDataContainer pdc = display.getPersistentDataContainer();
@@ -608,9 +610,14 @@ public class ToolListener implements Listener {
         BlockData blockData = material.createBlockData();
         boolean isFirstEntity = true;
         final String vaultColorName = (vaultColor != null) ? vaultColor.name() : null;
+        // A BlockDisplay's position is its own corner, so to centre a scaled block inside its
+        // integer cell we spawn at the integer corner and translate by (1 - scale)/2 on each axis
+        // (same convention as placeBlockMarker). Spawning at pos+0.5 with a zero translation would
+        // put the block's corner at the cell centre and grow outward — the off-centre frame bug.
+        final float frameOffset = (1.0f - BOUND_FRAME_SCALE) / 2.0f;
 
         for (int[] pos : perimeterPositions) {
-            Location spawnLoc = new Location(player.getWorld(), pos[0] + 0.5, pos[1], pos[2] + 0.5);
+            Location spawnLoc = new Location(player.getWorld(), pos[0], pos[1], pos[2]);
             boolean isAnchor = isFirstEntity;
             try {
                 player.getWorld().spawn(spawnLoc, BlockDisplay.class, display -> {
@@ -619,9 +626,9 @@ public class ToolListener implements Listener {
                     display.setInvulnerable(true);
                     display.setPersistent(true);
                     display.setTransformation(new Transformation(
-                            new Vector3f(0f, 0f, 0f),
+                            new Vector3f(frameOffset, frameOffset, frameOffset),
                             new AxisAngle4f(0f, 0f, 0f, 1f),
-                            new Vector3f(0.9f, 0.9f, 0.9f),
+                            new Vector3f(BOUND_FRAME_SCALE, BOUND_FRAME_SCALE, BOUND_FRAME_SCALE),
                             new AxisAngle4f(0f, 0f, 0f, 1f)
                     ));
                     PersistentDataContainer pdc = display.getPersistentDataContainer();
