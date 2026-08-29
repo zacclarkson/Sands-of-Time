@@ -32,6 +32,7 @@ import org.bukkit.util.Vector;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.CommandSender;
+import org.bukkit.command.TabCompleter;
 import org.bukkit.entity.Display;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.Player;
@@ -57,7 +58,7 @@ import java.util.stream.Collectors;
  * <p>
  * The schematic filename is auto-derived as {@code <name>.schem}.
  */
-public class SaveSegmentCommand implements CommandExecutor {
+public class SaveSegmentCommand implements CommandExecutor, TabCompleter {
 
     /** Blocks beyond the selection to also scan, so just-outside markers can be reported. */
     private static final int OUTSIDE_SCAN_PAD = 2;
@@ -470,6 +471,21 @@ public class SaveSegmentCommand implements CommandExecutor {
                     "Failed to save segment. Check console for errors.", NamedTextColor.RED));
         }
         return true;
+    }
+
+    @Override
+    @Nullable
+    public List<String> onTabComplete(@NotNull CommandSender sender, @NotNull Command command,
+                                      @NotNull String alias, @NotNull String[] args) {
+        // arg 1 is a free-form segment name (no completion); arg 2 is the SegmentType.
+        if (args.length == 2) {
+            String prefix = args[1].toUpperCase();
+            return java.util.Arrays.stream(SegmentType.values())
+                    .map(Enum::name)
+                    .filter(n -> n.startsWith(prefix))
+                    .collect(Collectors.toList());
+        }
+        return new ArrayList<>();
     }
 
     // -------------------------------------------------------------------------
