@@ -148,7 +148,9 @@ public class FloorLoot implements FloorItem {
                  display.setGravity(false);      // Prevent falling
                  display.setPersistent(false);   // Don't save entity across server restarts
                  display.setInvulnerable(true);  // Prevent destruction by players/environment
-                 display.setBillboard(Display.Billboard.CENTER); // Make it always face the player
+                 // FIXED (the default) so the flat 90-deg rotation below is honored; a CENTER
+                 // billboard would always face the camera and cancel the transform's rotation.
+                 display.setBillboard(Display.Billboard.FIXED);
 
                  // --- Optional: Add Transformation (Example: make item lie flat) ---
                  float scale = 0.7f; // Adjust scale as needed

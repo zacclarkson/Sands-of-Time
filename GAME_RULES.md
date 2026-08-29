@@ -131,7 +131,7 @@ The hub has approximately **10 exits** leading into the dungeon. These exits fal
 
 - Dungeons are procedurally generated using a **depth-first search (DFS)** algorithm
 - Each team gets their own copy of the same dungeon layout (blueprint)
-- Maximum dungeon depth: **10 segments** from the hub
+- Maximum dungeon depth: **`MAX_DEPTH` segments** from the hub (currently 12; the deepest vault, gold, maxes at depth 10)
 - Maximum total segments per dungeon: **50**
 - Generation attempts up to **5 retries** if validation fails
 
@@ -171,6 +171,7 @@ The HUB segment additionally defines these hub-only features (placed in the buil
 - **Bank** — a single interact point (`BANK` marker) marking where the banking Sphinx / bank spot lives
 - **Death cages** — 1–4 points (`DEATH_CAGE` markers), one per player, where dead players are held and respawn; each cage's revive/sacrifice point is auto-derived at runtime
 - **Timer deposits** — interact points (`TIMER_DEPOSIT` markers) where players place collected sand onto the timer to add time
+- **Timer column** — a single `TIMER` marker at the base of the visual sand-timer column; the draining sand timer stands in the hub at this marker (per team). When a HUB has no TIMER marker the timer falls back to the lobby anchor.
 
 ### Depth & Difficulty
 
@@ -242,12 +243,20 @@ There are **4 vault colors**, each with a unique challenge profile. Vaults conta
 
 ### Vault Overview
 
+Depths must fit within the generator's `MAX_DEPTH` (currently 12), so the ranges below are the values
+the generator actually uses (`DungeonGenerator.VAULT_DEPTH_RANGES`). They are tunable.
+
 | Color | Key Location | Vault Location | Difficulty | Depth Range (Vault) |
 |-------|-------------|----------------|------------|---------------------|
-| **Blue** | Free — given to players | Must find deep in dungeon | Easiest | Depth 7–10 |
-| **Green** | Must find in dungeon | Near the hub (easy access) | Easy | Depth 3–6 |
-| **Red** | In puzzle room at the hub | Must find in dungeon | Medium | Depth 10–14 |
-| **Gold** | Must find in dungeon | Must find in dungeon | Hardest | Depth 13–15 |
+| **Green** | Must find in dungeon | Near the hub (easy access) | Easy | Depth 2–4 |
+| **Blue** | Free — blue key spawns in the hub | Must find in dungeon | Easiest | Depth 3–6 |
+| **Red** | In the hub's key room | Must find in dungeon | Medium | Depth 5–8 |
+| **Gold** | Must find in dungeon | Must find deep in dungeon | Hardest | Depth 7–10 |
+
+Vaults and keys are placed **opportunistically**: any not-yet-placed vault/key drops onto whichever
+branch first reaches its depth range via a connecting doorway (no dedicated colored branch). The red key
+no longer requires a puzzle-room segment (puzzle rooms aren't implemented yet) — a normal key room works,
+and it will naturally prefer a puzzle room once those exist.
 
 ### Vault Mechanics
 - Each vault has a **colored marker block** that serves as the activation point
@@ -491,22 +500,29 @@ Puzzle rooms are accessible from the hub exits (not on the vault branches). They
 | Team instance spacing | 5,000 blocks |
 | Dungeon base offset | (10000, 100, 10000) |
 
-### Vault Depth Ranges
+### Vault Depth Ranges (`DungeonGenerator.VAULT_DEPTH_RANGES`, all < `MAX_DEPTH`)
 | Vault Color | Min Depth | Max Depth |
 |-------------|-----------|-----------|
-| Green | 3 | 6 |
-| Blue | 7 | 10 |
-| Red | 10 | 14 |
-| Gold | 13 | 15 |
+| Green | 2 | 4 |
+| Blue | 3 | 6 |
+| Red | 5 | 8 |
+| Gold | 7 | 10 |
+
+### Key Depth Ranges (`DungeonGenerator.KEY_DEPTH_RANGES`; blue key is hub metadata)
+| Key Color | Min Depth | Max Depth |
+|-----------|-----------|-----------|
+| Red | 2 | 6 |
+| Green | 3 | 7 |
+| Gold | 5 | 9 |
 
 ### Key Placement
 
-| Key Color | Location                  | Notes                                  |
-|-----------|---------------------------|----------------------------------------|
-| Blue      | Hub                       | Always spawns in hub                   |
-| Green     | Any of 3 deeper branches  | Not on green branch (too shallow)      |
-| Red       | Hub puzzle room           | Always in puzzle room                  |
-| Gold      | Any of 3 deeper branches  | Not on green branch (too shallow)      |
+| Key Color | Location                     | Notes                                             |
+|-----------|------------------------------|---------------------------------------------------|
+| Blue      | Hub                          | Always spawns in hub                              |
+| Green     | Opportunistic, within range  | Placed on whichever branch reaches its depth      |
+| Red       | Opportunistic, within range  | Prefers a puzzle room if one exists, else any     |
+| Gold      | Opportunistic, within range  | Placed on whichever branch reaches its depth      |
 
 ### Vault/Key Spawn Probabilities
 | Condition | Probability |

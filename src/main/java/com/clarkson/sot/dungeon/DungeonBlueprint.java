@@ -33,6 +33,10 @@ public class DungeonBlueprint {
     // Where players escape the dungeon. Null when no segment template carries a SAFE_EXIT marker.
     @Nullable private final Vector safeExitRelativeLocation;
 
+    // Base of the visual sand-timer column. Null when no segment carries a TIMER marker.
+    @Nullable private final Vector timerBaseRelativeLocation;
+    private final List<Vector> playerSpawnRelativeLocations;
+
     // --- Changed: Use Area for Relative Bounding Box ---
     private final Area relativeBounds; // Represents bounds using relative Locations (null world)
 
@@ -48,7 +52,9 @@ public class DungeonBlueprint {
                             @NotNull List<Vector> coinSpawnRelativeLocations,
                             @NotNull List<Vector> itemSpawnRelativeLocations,
                             @NotNull Area relativeBounds, // Changed parameter
-                            @Nullable Vector safeExitRelativeLocation
+                            @Nullable Vector safeExitRelativeLocation,
+                            @Nullable Vector timerBaseRelativeLocation,
+                            @NotNull List<Vector> playerSpawnRelativeLocations
                            ) {
 
         // Validate inputs
@@ -77,6 +83,8 @@ public class DungeonBlueprint {
         this.relativeBounds = relativeBounds; // Store the Area object (Area itself is effectively immutable once constructed)
         // Deliberately not null-checked: segment templates predating the SAFE_EXIT marker have none.
         this.safeExitRelativeLocation = (safeExitRelativeLocation != null) ? safeExitRelativeLocation.clone() : null;
+        this.timerBaseRelativeLocation = (timerBaseRelativeLocation != null) ? timerBaseRelativeLocation.clone() : null;
+        this.playerSpawnRelativeLocations = Collections.unmodifiableList(new ArrayList<>(playerSpawnRelativeLocations));
     }
 
     // --- Getters ---
@@ -94,6 +102,14 @@ public class DungeonBlueprint {
      */
     @Nullable public Vector getSafeExitRelativeLocation() {
         return safeExitRelativeLocation != null ? safeExitRelativeLocation.clone() : null;
+    }
+
+    /** Relative per-player spawn points (empty if no segment defines a PLAYER_SPAWN marker). */
+    @NotNull public List<Vector> getPlayerSpawnRelativeLocations() { return playerSpawnRelativeLocations; }
+
+    /** Relative base of the visual sand-timer column, or null if no segment defines a TIMER marker. */
+    @Nullable public Vector getTimerBaseRelativeLocation() {
+        return timerBaseRelativeLocation != null ? timerBaseRelativeLocation.clone() : null;
     }
 
     // --- Changed: Getter for Relative Bounds ---

@@ -8,12 +8,15 @@ import com.clarkson.sot.events.FloorItemManager;
 import com.clarkson.sot.main.GameManager;
 
 // Bukkit/WorldEdit imports
+import com.clarkson.sot.events.SegmentBuilderKeys;
 import org.bukkit.Location;
 import org.bukkit.Material;
+import org.bukkit.NamespacedKey;
 import org.bukkit.World;
 import org.bukkit.block.Block;
 import org.bukkit.entity.Entity; // Import Entity
 import org.bukkit.entity.Player; // Import Player
+import org.bukkit.persistence.PersistentDataType;
 import org.bukkit.plugin.Plugin;
 import org.bukkit.util.Vector;
 import com.sk89q.worldedit.math.BlockVector3;
@@ -28,6 +31,8 @@ import com.sk89q.worldedit.extent.clipboard.io.ClipboardFormat;
 import com.sk89q.worldedit.extent.clipboard.io.ClipboardFormats;
 import com.sk89q.worldedit.extent.clipboard.io.ClipboardReader;
 import com.sk89q.worldedit.session.ClipboardHolder;
+import com.sk89q.worldedit.math.Vector3;
+import com.sk89q.worldedit.math.transform.AffineTransform;
 import com.sk89q.worldedit.EditSession;
 import com.sk89q.worldedit.function.operation.Operation;
 import com.sk89q.worldedit.function.operation.Operations;
@@ -72,6 +77,7 @@ public class DungeonManager {
 
     // The consolidated data object with ABSOLUTE locations for this instance
     private Dungeon dungeonData;
+    private Location timerBaseLocation; // Absolute base of the visual sand timer; null if no TIMER marker
 
     /**
      * Constructor for a team's specific DungeonManager instance.
@@ -118,9 +124,12 @@ public class DungeonManager {
         List<Location> absSandSpawns = calculateAbsoluteLocations(blueprintData.getSandSpawnRelativeLocations());
         List<Location> absCoinSpawns = calculateAbsoluteLocations(blueprintData.getCoinSpawnRelativeLocations());
         List<Location> absItemSpawns = calculateAbsoluteLocations(blueprintData.getItemSpawnRelativeLocations());
+        List<Location> absPlayerSpawns = calculateAbsoluteLocations(blueprintData.getPlayerSpawnRelativeLocations());
         Location absHubLocation = dungeonOrigin.clone().add(blueprintData.getHubRelativeLocation());
         Vector safeExitRelative = blueprintData.getSafeExitRelativeLocation();
         Location absSafeExitLocation = (safeExitRelative != null) ? dungeonOrigin.clone().add(safeExitRelative) : null;
+        Vector timerBaseRelative = blueprintData.getTimerBaseRelativeLocation();
+        this.timerBaseLocation = (timerBaseRelative != null) ? dungeonOrigin.clone().add(timerBaseRelative) : null;
 
 
         // --- 2. Paste Schematics (Populates placedSegmentsInWorld) ---
@@ -129,6 +138,10 @@ public class DungeonManager {
              return false;
         }
         plugin.getLogger().info("Pasted all " + placedSegmentsInWorld.size() + " segment schematics for team " + teamId);
+
+        // Strip any builder-marker Display entities baked into older schematics (saved before we
+        // stopped copying entities). Without this they render as floating markers during play.
+        removeBakedBuildMarkers();
 
 
         // --- 3. Create Dungeon Data Object ---
@@ -154,7 +167,7 @@ public class DungeonManager {
                 teamId, world, dungeonOrigin, blueprintData,
                 absHubLocation, absVaultMarkers, absKeySpawns,
                 absSandSpawns, absCoinSpawns, absItemSpawns,
-                deathCages, absSafeExitLocation
+                deathCages, absSafeExitLocation, absPlayerSpawns
             );
              plugin.getLogger().info("Created Dungeon data object for team " + teamId);
          } catch (Exception e) {
@@ -212,15 +225,18 @@ public class DungeonManager {
                 Vector relativeOriginVec = blueprintSegment.getWorldOrigin().toVector();
                 Location absoluteOriginLoc = dungeonOrigin.clone().add(relativeOriginVec);
 
+                int rotationSteps = blueprintSegment.getRotationSteps();
+
                 // Call pasting logic, passing the single EditSession
-                boolean success = pasteSchematic(template, absoluteOriginLoc, editSession); // Pass session
+                boolean success = pasteSchematic(template, absoluteOriginLoc, rotationSteps, editSession); // Pass session
                 if (!success) {
                     plugin.getLogger().severe("Failed to paste schematic '" + template.getSchematicFileName() + "' for team " + teamId + " at " + absoluteOriginLoc.toVector());
                     overallSuccess = false; // Mark failure but continue pasting others if desired
                     // return false; // Option: Stop immediately on first failure
                 } else {
-                     // Only add to placedSegmentsInWorld if successfully pasted
-                     PlacedSegment worldSegment = new PlacedSegment(template, absoluteOriginLoc, blueprintSegment.getDepth());
+                     // Only add to placedSegmentsInWorld if successfully pasted (carry the rotation so
+                     // world-space feature/entry lookups stay correct).
+                     PlacedSegment worldSegment = new PlacedSegment(template, absoluteOriginLoc, blueprintSegment.getDepth(), rotationSteps);
                      this.placedSegmentsInWorld.add(worldSegment);
                      plugin.getLogger().finer("Pasted segment " + template.getName() + " for team " + teamId + " at " + absoluteOriginLoc.toVector());
                 }
@@ -245,7 +261,7 @@ public class DungeonManager {
      * @param editSession The EditSession to use for the paste operation.
      * @return true if pasting was successful, false otherwise.
      */
-    private boolean pasteSchematic(Segment template, Location pasteOrigin, EditSession editSession) { // Added EditSession parameter
+    private boolean pasteSchematic(Segment template, Location pasteOrigin, int rotationSteps, EditSession editSession) {
         File schematicDir = new File(plugin.getDataFolder(), "schematics");
         File schematicFile = new File(schematicDir, template.getSchematicFileName());
 
@@ -264,15 +280,26 @@ public class DungeonManager {
             try (ClipboardReader reader = format.getReader(new FileInputStream(schematicFile))) {
                 Clipboard clipboard = reader.read();
 
-                // --- Use the provided EditSession ---
-                // No need to create a new one here
-                Operation operation = new ClipboardHolder(clipboard)
-                        .createPaste(editSession) // Use passed-in session
-                        .to(BlockVector3.at(pasteOrigin.getBlockX(), pasteOrigin.getBlockY(), pasteOrigin.getBlockZ()))
+                // Rotate about Y by the placement's step count. WorldEdit rotates the clipboard about
+                // its origin, which can push blocks negative; shift the paste target by the rotated
+                // footprint's min corner so the rotated segment's min corner lands exactly on
+                // pasteOrigin — matching SegmentRotation.rotatePoint used for the marker offsets.
+                AffineTransform transform = new AffineTransform().rotateY(90.0 * (((rotationSteps % 4) + 4) % 4));
+                int[] rmin = rotatedFootprintMin(template.getSize(), transform);
+
+                BlockVector3 to = BlockVector3.at(
+                        pasteOrigin.getBlockX() - rmin[0],
+                        pasteOrigin.getBlockY(),
+                        pasteOrigin.getBlockZ() - rmin[1]);
+
+                ClipboardHolder holder = new ClipboardHolder(clipboard);
+                holder.setTransform(transform); // setTransform returns void, so cannot be chained
+                Operation operation = holder
+                        .createPaste(editSession)
+                        .to(to)
                         .ignoreAirBlocks(true) // Paste non-air blocks
                         .build();
                 Operations.complete(operation); // Queue and complete the operation within the session
-                // --- Removed the local EditSession try-with-resources block ---
             }
             return true;
         } catch (IOException | WorldEditException e) {
@@ -282,6 +309,23 @@ public class DungeonManager {
             plugin.getLogger().log(Level.SEVERE, "Unexpected error pasting schematic " + template.getSchematicFileName(), e);
             return false;
         }
+    }
+
+    /**
+     * Min X/Z (as {x,z}, rounded) of a segment's footprint {@code [0,size-1]} after {@code transform},
+     * used to shift the paste so the rotated segment's min corner lands on its placement origin.
+     */
+    private static int[] rotatedFootprintMin(BlockVector3 size, AffineTransform transform) {
+        int sx = size.x() - 1, sz = size.z() - 1;
+        double minX = Double.POSITIVE_INFINITY, minZ = Double.POSITIVE_INFINITY;
+        for (int x : new int[]{0, sx}) {
+            for (int z : new int[]{0, sz}) {
+                Vector3 v = transform.apply(Vector3.at(x, 0, z));
+                minX = Math.min(minX, v.getX());
+                minZ = Math.min(minZ, v.getZ());
+            }
+        }
+        return new int[]{(int) Math.round(minX), (int) Math.round(minZ)};
     }
 
 
@@ -377,6 +421,9 @@ public class DungeonManager {
     @NotNull public World getWorld() { return world; }
     @NotNull public UUID getTeamId() { return teamId; }
     @Nullable public Dungeon getDungeonData() { return dungeonData; } // Can be null before init finishes
+
+    /** Absolute base of this instance's visual sand-timer column, or null if the hub has no TIMER marker. */
+    @Nullable public Location getTimerBaseLocation() { return (timerBaseLocation != null) ? timerBaseLocation.clone() : null; }
     @NotNull public List<PlacedSegment> getPlacedSegmentsInWorld() { return Collections.unmodifiableList(this.placedSegmentsInWorld); }
 
     /** Finds the PlacedSegment (with absolute world coords) at a given absolute world location within this instance. */
@@ -400,6 +447,37 @@ public class DungeonManager {
      * Clears the area using WorldEdit and removes non-player entities.
      * Also clears state from associated managers.
      */
+    /**
+     * Removes builder-marker Display entities that were baked into a segment schematic (segments
+     * saved while StructureSaver still copied entities). Marker entities are tagged with
+     * {@link SegmentBuilderKeys#BUILD_MARKER_TAG}; players and gameplay entities are left untouched.
+     */
+    private void removeBakedBuildMarkers() {
+        if (blueprintData == null) return;
+        Area relativeBounds = blueprintData.getRelativeBounds();
+        Location absMinLoc = dungeonOrigin.clone().add(relativeBounds.getMinPoint().toVector());
+        Location absMaxLoc = dungeonOrigin.clone().add(relativeBounds.getMaxPoint().toVector());
+        NamespacedKey markerKey = new NamespacedKey(plugin, SegmentBuilderKeys.BUILD_MARKER_TAG);
+        try {
+            Collection<Entity> entitiesInBounds = world.getNearbyEntities(new org.bukkit.util.BoundingBox(
+                    absMinLoc.getX(), absMinLoc.getY(), absMinLoc.getZ(),
+                    absMaxLoc.getX() + 1, absMaxLoc.getY() + 1, absMaxLoc.getZ() + 1));
+            int removed = 0;
+            for (Entity entity : entitiesInBounds) {
+                if (entity instanceof Player) continue;
+                if (entity.getPersistentDataContainer().has(markerKey, PersistentDataType.BYTE)) {
+                    entity.remove();
+                    removed++;
+                }
+            }
+            if (removed > 0) {
+                plugin.getLogger().info("Removed " + removed + " baked-in builder markers for team " + teamId);
+            }
+        } catch (Exception e) {
+            plugin.getLogger().log(Level.WARNING, "Error removing baked-in builder markers for team " + teamId, e);
+        }
+    }
+
     public void cleanupInstance() {
          plugin.getLogger().info("Attempting cleanup for dungeon instance of team " + teamId + " at origin " + dungeonOrigin.toVector());
 

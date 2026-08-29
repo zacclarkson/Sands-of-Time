@@ -25,6 +25,7 @@ import org.bukkit.plugin.java.JavaPlugin;
 import com.clarkson.sot.commands.*;
 // Import Listeners / Session management
 import com.clarkson.sot.events.BuilderSessionManager;
+import com.clarkson.sot.events.CountdownFreezeListener;
 import com.clarkson.sot.events.DeathListener;
 import com.clarkson.sot.events.EscapeListener;
 import com.clarkson.sot.events.NetherPortalListener;
@@ -148,6 +149,7 @@ public class SoT extends JavaPlugin {
         getServer().getPluginManager().registerEvents(gameManager.getDoorManager(), this);
         getServer().getPluginManager().registerEvents(new DeathListener(gameManager), this);
         getServer().getPluginManager().registerEvents(new EscapeListener(gameManager), this);
+        getServer().getPluginManager().registerEvents(new CountdownFreezeListener(gameManager), this);
         // Nether portals are used as the safe-exit visual; suppress the vanilla teleport so nobody is
         // sent to the Nether when they walk into one.
         getServer().getPluginManager().registerEvents(new NetherPortalListener(), this);

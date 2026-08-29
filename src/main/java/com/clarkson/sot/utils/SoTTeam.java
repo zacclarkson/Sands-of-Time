@@ -88,6 +88,24 @@ public class SoTTeam {
     public boolean isMember(UUID playerUUID) { return memberUUIDs.contains(playerUUID); }
 
 
+    /**
+     * Moves this team's visual sand-timer column to a new bottom/top before the timer starts. Used to
+     * anchor the column in the team's dungeon hub (it is created against the lobby at setup time, before
+     * the hub exists). No-op if the team has no visual timer.
+     */
+    public void relocateVisualTimer(Location bottom, Location top) {
+        if (visualTimerDisplay != null) {
+            visualTimerDisplay.relocate(bottom, top);
+        }
+    }
+
+    /** Stops the visual timer task and clears its sand column. Used by end-of-game cleanup. */
+    public void clearVisualTimer() {
+        if (visualTimerDisplay != null) {
+            visualTimerDisplay.stopAndClear();
+        }
+    }
+
     // --- Timer Control (Delegation) ---
     // (startTimer, stopTimer, addSeconds, getRemainingSeconds, isTimerRunning methods remain the same)
     public void startTimer() { this.teamTimer.start(); }

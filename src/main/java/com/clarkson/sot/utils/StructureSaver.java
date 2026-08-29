@@ -246,7 +246,10 @@ public class StructureSaver {
             ForwardExtentCopy copy = new ForwardExtentCopy(
                 editSession, region, clipboard, region.getMinimumPoint() // Source region, clipboard destination, source origin for copy offset
             );
-            copy.setCopyingEntities(true); // Copy entities within the region
+            // Do NOT copy entities: the only entities in a builder's selection are the Display-entity
+            // markers, and baking them into the schematic makes them render in the live dungeon.
+            // Marker positions are persisted separately as JSON offsets, so nothing is lost.
+            copy.setCopyingEntities(false);
             Operations.complete(copy);
 
             // --- Prepare File Path ---
@@ -380,6 +383,12 @@ public class StructureSaver {
                     segmentTemplate.getDeathCageOffsets(), "deathCageLocations", segmentName));
             json.add("sandTimerLocations", serializeBlockVectorList(
                     segmentTemplate.getSandTimerOffsets(), "sandTimerLocations", segmentName));
+            json.add("playerSpawnLocations", serializeBlockVectorList(
+                    segmentTemplate.getPlayerSpawnOffsets(), "playerSpawnLocations", segmentName));
+            BlockVector3 timer = segmentTemplate.getTimerOffset();
+            if (timer != null) {
+                json.add("timerLocationOffset", serializeBlockVector3(timer));
+            }
 
             return json;
 

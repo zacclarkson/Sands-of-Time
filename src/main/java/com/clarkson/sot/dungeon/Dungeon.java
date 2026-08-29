@@ -32,6 +32,7 @@ public class Dungeon {
     private final List<Location> itemSpawnLocations;
     private final List<DeathCage> deathCages;
     private final Location safeExitLocation; // Null when no segment template defined one
+    private final List<Location> playerSpawnLocations; // Absolute per-player start points (may be empty)
 
     /**
      * Constructor for the Dungeon data object.
@@ -58,7 +59,8 @@ public class Dungeon {
                    @NotNull List<Location> coinSpawnLocations,
                    @NotNull List<Location> itemSpawnLocations,
                    @NotNull List<DeathCage> deathCages,
-                   @Nullable Location safeExitLocation) {
+                   @Nullable Location safeExitLocation,
+                   @NotNull List<Location> playerSpawnLocations) {
 
         this.instanceId = UUID.randomUUID();
         this.teamId = Objects.requireNonNull(teamId, "Team ID cannot be null");
@@ -75,6 +77,7 @@ public class Dungeon {
         this.coinSpawnLocations = Collections.unmodifiableList(new ArrayList<>(coinSpawnLocations));
         this.itemSpawnLocations = Collections.unmodifiableList(new ArrayList<>(itemSpawnLocations));
         this.deathCages = Collections.unmodifiableList(new ArrayList<>(deathCages));
+        this.playerSpawnLocations = Collections.unmodifiableList(new ArrayList<>(playerSpawnLocations));
     }
 
     // --- Getters ---
@@ -94,6 +97,9 @@ public class Dungeon {
     @NotNull public List<DeathCage> getDeathCages() {
         return deathCages; // Already unmodifiable
     }
+
+    /** Absolute per-player spawn points (empty if no PLAYER_SPAWN markers were defined). */
+    @NotNull public List<Location> getPlayerSpawnLocations() { return playerSpawnLocations; } // Already unmodifiable
 
     /**
      * Gets the absolute safe exit location, or null if no segment template defined one.

@@ -5,6 +5,7 @@ import com.clarkson.sot.dungeon.segment.PlacedSegment;
 import com.clarkson.sot.dungeon.segment.Segment;
 import com.clarkson.sot.dungeon.segment.Segment.RelativeEntryPoint;
 import com.clarkson.sot.dungeon.segment.SegmentType;
+import com.clarkson.sot.dungeon.segment.SegmentRotation;
 import com.clarkson.sot.dungeon.segment.Direction; // Assuming this is the correct package
 import com.clarkson.sot.utils.StructureLoader;
 import com.clarkson.sot.entities.Area; // May be needed for collision detection
@@ -39,33 +40,37 @@ public class DungeonGenerator {
     private final Plugin plugin;
     private final StructureLoader structureLoader;
     private List<Segment> availableSegments; // Templates loaded from files
-    private final Random random;
-    private static final int MAX_DEPTH = 10; // Example
-    private static final int MAX_TOTAL_SEGMENTS = 50; // Example
+    private Random random; // non-final so tests can seed it for determinism
+    private static final int MAX_DEPTH = 12; // Deepest vault (gold) maxes at 10, leaving headroom.
+    private static final int MAX_TOTAL_SEGMENTS = 120; // Safety cap; a full dungeon fans out well under this.
     // Track placed vaults/keys during generation
     private Set<VaultColor> keysPlacedInDFS;
     private Set<VaultColor> vaultsPlacedInDFS;
 
     // --- Generation Configuration ---
-    // Example Depth Ranges for Vaults (Min inclusive, Max inclusive)
+    // Depth ranges (min/max inclusive) for vaults. Every max MUST be < MAX_DEPTH so the forced
+    // placement at range.max can actually fire (DFS stops placing once depth >= MAX_DEPTH). Ordered
+    // shallow -> deep: green nearest the hub, gold furthest.
     private static final Map<VaultColor, MinMax> VAULT_DEPTH_RANGES = Map.of(
-        VaultColor.GREEN, new MinMax(3, 6),    // Green near hub
-        VaultColor.BLUE,  new MinMax(7, 10),
-        VaultColor.RED,   new MinMax(10, 14),
-        VaultColor.GOLD,  new MinMax(13, 15)   // Gold furthest
+        VaultColor.GREEN, new MinMax(2, 4),
+        VaultColor.BLUE,  new MinMax(3, 6),
+        VaultColor.RED,   new MinMax(5, 8),
+        VaultColor.GOLD,  new MinMax(7, 10)
     );
-    // Example Depth Ranges for Keys
+    // Depth ranges for keys (blue key is hub metadata, handled separately). Kept generally shallower
+    // than the matching vault so a key is findable, and all within MAX_DEPTH.
      private static final Map<VaultColor, MinMax> KEY_DEPTH_RANGES = Map.of(
-         // Blue key handled separately
-         VaultColor.GREEN, new MinMax(5, 9),
-         VaultColor.RED,   new MinMax(4, 8), // Puzzle room for Red Key
-         VaultColor.GOLD,  new MinMax(8, 12) // Lava parkour for Gold Key
+         VaultColor.RED,   new MinMax(2, 6),
+         VaultColor.GREEN, new MinMax(3, 7),
+         VaultColor.GOLD,  new MinMax(5, 9)
      );
 
-    // Probabilities (0.0 to 1.0)
-    private static final double VAULT_SPAWN_CHANCE_NORMAL = 0.20; // 20% chance within range (but before last 2 depths)
-    private static final double VAULT_SPAWN_CHANCE_HIGH = 0.50;  // 50% chance at depth MAX-1
-    // Similar probabilities could be defined for keys
+    // Placement probabilities (0.0 to 1.0). Vault and key placement share the same scheme: a normal
+    // chance within range, a higher chance one below the max, and a forced placement at/after the max.
+    private static final double VAULT_SPAWN_CHANCE_NORMAL = 0.20;
+    private static final double VAULT_SPAWN_CHANCE_HIGH   = 0.50;
+    private static final double KEY_SPAWN_CHANCE_NORMAL   = 0.30;
+    private static final double KEY_SPAWN_CHANCE_HIGH      = 0.60;
 
 
     // --- Constructor ---
@@ -84,6 +89,17 @@ public class DungeonGenerator {
         this.keysPlacedInDFS = new HashSet<>();
         this.vaultsPlacedInDFS = new HashSet<>();
         // throw new UnsupportedOperationException("Constructor implementation not provided."); // Remove throw if implementing
+    }
+
+    // --- Test hooks (package-private) ---
+    /** Injects segment templates directly, bypassing disk loading. For unit tests only. */
+    void setAvailableSegmentsForTest(@NotNull List<Segment> segments) {
+        this.availableSegments = new ArrayList<>(segments);
+    }
+
+    /** Seeds the RNG so a generation run is deterministic. For unit tests only. */
+    void setRandomSeedForTest(long seed) {
+        this.random = new Random(seed);
     }
 
     // --- Public API Methods ---
@@ -151,7 +167,7 @@ public class DungeonGenerator {
      */
     @Nullable
     public DungeonBlueprint generateDungeonLayout() {
-        int maxRetries = 5; // Example retry limit
+        int maxRetries = 20; // Blueprint stage does no world I/O, so retries are cheap.
         for (int attempt = 1; attempt <= maxRetries; attempt++) {
             plugin.getLogger().info("Starting dungeon layout generation attempt " + attempt + "/" + maxRetries + "...");
             DungeonBlueprint blueprint = attemptGeneration();
@@ -202,27 +218,14 @@ public class DungeonGenerator {
         // Vaults (including Blue) must be placed by the DFS in other segments.
 
 
-        // --- Start DFS for each Colored Branch + Key Branches ---
-        List<RelativeEntryPoint> hubExits = new ArrayList<>(hubTemplate.getEntryPoints());
+        // --- Start DFS from every hub exit ---
+        // Vault/key placement is opportunistic (any branch can host any not-yet-placed vault/key when it
+        // reaches the right depth via a connecting direction), so no branch is tied to a specific color.
+        List<RelativeEntryPoint> hubExits = new ArrayList<>(hubPlacedSegment.getRotatedEntryPoints());
         Collections.shuffle(hubExits, random);
 
-        // Define branches needed: 3 Vaults (R, G, Gold) + potentially dedicated key branches or general filler
-        VaultColor[] targetVaults = {VaultColor.RED, VaultColor.GREEN, VaultColor.GOLD, VaultColor.BLUE};
-        // Maybe add BLUE here if you want a dedicated Blue Vault branch? Or let it be placed opportunistically?
-        // Let's assume for now we need dedicated branches for R, G, Gold vaults.
-        int vaultBranchIndex = 0;
-        List<VaultColor> branchesToGenerate = new ArrayList<>(Arrays.asList(targetVaults));
-        // Consider adding null entries to branchesToGenerate if you want non-vault specific paths for keys
-
         for (RelativeEntryPoint hubEntryPoint : hubExits) {
-            VaultColor branchColor = null;
-            if (vaultBranchIndex < branchesToGenerate.size()) {
-                branchColor = branchesToGenerate.get(vaultBranchIndex++);
-                plugin.getLogger().info("Starting DFS from hub exit " + hubEntryPoint.getDirection() + " for branch: " + branchColor);
-            } else {
-                plugin.getLogger().info("Starting DFS from hub exit " + hubEntryPoint.getDirection() + " for general/key path (targetBranchColor=null).");
-            }
-            generatePathRecursive(hubPlacedSegment, hubEntryPoint, placedSegments, occupiedOrigins, 1, branchColor);
+            generatePathRecursive(hubPlacedSegment, hubEntryPoint, placedSegments, occupiedOrigins, 1);
         }
 
 
@@ -268,11 +271,15 @@ public class DungeonGenerator {
             return null; // Validation failed for this attempt
         }
 
+        Vector timerBaseRelativeLocation = selectTimerBaseRelativeLocation(placedSegments);
+        List<Vector> playerSpawnRelativeLocations = selectPlayerSpawnRelativeLocations(placedSegments);
+
         // --- Create and Return Blueprint ---
         return new DungeonBlueprint(
                 placedSegments, hubRelativeLocation, vaultMarkerRelativeLocations, keySpawnRelativeLocations,
                 sandSpawnRelativeLocations, coinSpawnRelativeLocations, itemSpawnRelativeLocations,
-                blueprintBounds, safeExitRelativeLocation
+                blueprintBounds, safeExitRelativeLocation, timerBaseRelativeLocation,
+                playerSpawnRelativeLocations
         );
     }
 
@@ -287,15 +294,13 @@ public class DungeonGenerator {
      * @param placedSegments    (In/Out) List of all segments placed so far in the blueprint.
      * @param occupiedOrigins   (In/Out) Set of BlockVector3 relative origins already occupied.
      * @param currentDepth      The current depth (number of segments) from the hub segment.
-     * @param targetBranchColor The VaultColor this branch is intended to lead to, or null if it's a general/key path.
      */
     private void generatePathRecursive(
             @NotNull PlacedSegment currentSegment,
             @NotNull RelativeEntryPoint connectionPoint,
             @NotNull List<PlacedSegment> placedSegments,
             @NotNull Set<BlockVector3> occupiedOrigins,
-            int currentDepth,
-            @Nullable VaultColor targetBranchColor) {
+            int currentDepth) {
 
         // --- Base Cases / Termination Conditions ---
         if (currentDepth >= MAX_DEPTH) {
@@ -306,25 +311,19 @@ public class DungeonGenerator {
             return; // Reached overall dungeon size limit
         }
 
-        // --- Select Next Segment Template ---
+        // --- Select Next Segment (template + rotation) ---
         Direction requiredDirection = connectionPoint.getDirection().getOpposite();
-        Segment nextSegmentTemplate = selectNextSegment(
-            currentSegment.getSegmentTemplate(),
-            requiredDirection,
-            currentDepth,
-            targetBranchColor
-        );
+        Placement next = selectNextSegment(requiredDirection, currentDepth);
 
         // If no suitable segment found, this path ends (backtrack)
-        if (nextSegmentTemplate == null) {
-            // plugin.getLogger().finest("DFS dead end at depth " + currentDepth + " from " + currentSegment.getName() + " facing " + connectionPoint.getDirection());
+        if (next == null) {
             return;
         }
 
-        // --- Calculate Placement ---
-        RelativeEntryPoint nextEntryPoint = nextSegmentTemplate.findEntryPointByDirection(requiredDirection);
+        // --- Calculate Placement (using the ROTATED entry that faces requiredDirection) ---
+        RelativeEntryPoint nextEntryPoint = rotatedEntryByDirection(next.template, next.steps, requiredDirection);
         if (nextEntryPoint == null) {
-             plugin.getLogger().warning("Segment " + nextSegmentTemplate.getName() + " selected but missing required entry point " + requiredDirection + ". Stopping branch.");
+             plugin.getLogger().warning("Segment " + next.template.getName() + " selected but missing required entry point " + requiredDirection + " after rotation. Stopping branch.");
              return; // Should not happen if selectNextSegment filters correctly
         }
         BlockVector3 currentSegmentOrigin = BlockVector3.at(
@@ -334,48 +333,58 @@ public class DungeonGenerator {
         ); // Relative origin
         BlockVector3 nextSegmentOrigin = calculatePlacementOrigin(currentSegmentOrigin, connectionPoint, nextEntryPoint);
 
-        // --- Check Collision ---
-        if (checkCollision(nextSegmentOrigin, nextSegmentTemplate, occupiedOrigins, placedSegments)) {
-            // plugin.getLogger().finest("DFS collision detected for " + nextSegmentTemplate.getName() + " at " + nextSegmentOrigin + ". Stopping branch.");
+        // --- Check Collision (rotated footprint) ---
+        if (checkCollision(nextSegmentOrigin, next.template, next.steps, occupiedOrigins, placedSegments)) {
             return; // Collision detected, stop this branch
         }
 
         // --- Place Segment ---
         Location relativeNextOriginLoc = new Location(null, nextSegmentOrigin.x(), nextSegmentOrigin.y(), nextSegmentOrigin.z());
-        PlacedSegment nextPlacedSegment = new PlacedSegment(nextSegmentTemplate, relativeNextOriginLoc, currentDepth); // Pass currentDepth
+        PlacedSegment nextPlacedSegment = new PlacedSegment(next.template, relativeNextOriginLoc, currentDepth, next.steps);
 
         placedSegments.add(nextPlacedSegment);
         occupiedOrigins.add(nextSegmentOrigin);
-        // plugin.getLogger().finer("DFS placed segment " + nextSegmentTemplate.getName() + " at relative origin " + nextSegmentOrigin + " (Depth: " + currentDepth + ", Branch: "+ targetBranchColor + ")");
 
-        // --- Update Global Placed Vaults/Keys Tracking ---
-        VaultColor placedVault = nextSegmentTemplate.getContainedVault();
-        if (placedVault != null) {
-            if (vaultsPlacedInDFS.add(placedVault)) { // .add() returns true if the element was not already present
-                 plugin.getLogger().info("Placed " + placedVault + " vault segment (" + nextSegmentTemplate.getName() + ") at depth " + currentDepth);
-            }
+        // --- Update Global Placed Vaults/Keys Tracking (colour is rotation-independent) ---
+        VaultColor placedVault = next.template.getContainedVault();
+        if (placedVault != null && vaultsPlacedInDFS.add(placedVault)) {
+            plugin.getLogger().info("Placed " + placedVault + " vault segment (" + next.template.getName() + ") at depth " + currentDepth);
         }
-        VaultColor placedKey = nextSegmentTemplate.getContainedVaultKey();
-         // We don't track the blue key this way as it's placed specially
-        if (placedKey != null && placedKey != VaultColor.BLUE) {
-             if (keysPlacedInDFS.add(placedKey)) {
-                  plugin.getLogger().info("Placed " + placedKey + " key segment (" + nextSegmentTemplate.getName() + ") at depth " + currentDepth);
-             }
+        VaultColor placedKey = next.template.getContainedVaultKey();
+        if (placedKey != null && placedKey != VaultColor.BLUE && keysPlacedInDFS.add(placedKey)) {
+            plugin.getLogger().info("Placed " + placedKey + " key segment (" + next.template.getName() + ") at depth " + currentDepth);
         }
 
-
-        // --- Recursive Calls for New Segment's Outgoing Connections ---
-        // Shuffle exits to add more randomness to path exploration order
-        List<RelativeEntryPoint> outgoingExits = new ArrayList<>(nextSegmentTemplate.getEntryPoints());
+        // --- Recurse over the new segment's ROTATED outgoing exits ---
+        List<RelativeEntryPoint> outgoingExits = new ArrayList<>(nextPlacedSegment.getRotatedEntryPoints());
         Collections.shuffle(outgoingExits, random);
-
         for (RelativeEntryPoint outgoingEntryPoint : outgoingExits) {
             // Don't go back through the entry point we just came from
             if (outgoingEntryPoint.getDirection() != requiredDirection) {
-                // Pass the targetBranchColor down the same branch
-                generatePathRecursive(nextPlacedSegment, outgoingEntryPoint, placedSegments, occupiedOrigins, currentDepth + 1, targetBranchColor);
+                generatePathRecursive(nextPlacedSegment, outgoingEntryPoint, placedSegments, occupiedOrigins, currentDepth + 1);
             }
         }
+    }
+
+    /** A chosen segment template plus the Y rotation (0..3) to apply when placing it. */
+    private static final class Placement {
+        final Segment template;
+        final int steps;
+        Placement(Segment template, int steps) { this.template = template; this.steps = steps; }
+    }
+
+    /** The rotated entry of {@code template} (under {@code steps}) that faces {@code dir}, or null. */
+    @Nullable
+    private RelativeEntryPoint rotatedEntryByDirection(@NotNull Segment template, int steps, @NotNull Direction dir) {
+        BlockVector3 size = template.getSize();
+        for (RelativeEntryPoint ep : template.getEntryPoints()) {
+            if (SegmentRotation.rotateDirection(ep.getDirection(), steps) == dir) {
+                return new RelativeEntryPoint(
+                        SegmentRotation.rotatePoint(ep.getRelativePosition(), steps, size),
+                        dir);
+            }
+        }
+        return null;
     }
 
     /**
@@ -398,117 +407,91 @@ public class DungeonGenerator {
     }
 
     /**
-     * Selects a suitable segment template to connect to the current path based on various criteria,
-     * including the target vault color for the current branch and depth-based probabilities.
+     * Selects a suitable segment template to connect to the current path.
+     * <p>
+     * Placement is <b>opportunistic and branch-agnostic</b>: any not-yet-placed vault or key whose depth
+     * range includes {@code currentDepth} is placed on whichever branch reaches it first via a connecting
+     * direction (forced at the range max, higher chance just below it, a normal chance within range).
+     * Vault/key segments are otherwise kept out of the filler pool so they only enter through this
+     * prioritized path. Returns null when nothing connects here (the branch dead-ends and DFS backtracks).
      *
-     * @param previousSegment   The template of the segment being connected *from*.
      * @param requiredDirection The direction the new segment needs an entry point for (opposite of the connection).
-     * @param currentDepth      The current depth in the dungeon, used for applying depth-based rules.
-     * @param targetBranchColor The VaultColor this branch is intended to lead to, or null. Used for prioritizing segments.
-     * @return A suitable Segment template randomly chosen from valid candidates, or null if no suitable segment is found.
+     * @param currentDepth      The current depth in the dungeon, used for depth-gated vault/key placement.
+     * @return A suitable {template, rotation} placement, or null if none is found.
      */
     @Nullable
-    private Segment selectNextSegment(
-            @NotNull Segment previousSegment,
+    private Placement selectNextSegment(
             @NotNull Direction requiredDirection,
-            int currentDepth,
-            @Nullable VaultColor targetBranchColor
+            int currentDepth
             ) {
 
-        // 1. Filter basic candidates (must connect, not hub, not immediate backtrack maybe)
-        List<Segment> candidates = availableSegments.stream()
-                .filter(s -> s.getType() != SegmentType.HUB) // Cannot place another hub
-                .filter(s -> s.hasEntryPointInDirection(requiredDirection)) // Must have correct entry point
-                // Optional: Prevent placing the exact same segment type immediately?
-                // .filter(s -> s.getType() != previousSegment.getType() || s.getType() == SegmentType.CORRIDOR)
-                .collect(Collectors.toList());
-
-        if (candidates.isEmpty()) {
-            return null; // No segments can physically connect
-        }
-
-        // 2. Prioritize Vault Placement if on a Vault Branch
-        if (targetBranchColor != null && !vaultsPlacedInDFS.contains(targetBranchColor)) {
-            MinMax range = VAULT_DEPTH_RANGES.get(targetBranchColor);
-            if (range != null && currentDepth >= range.min && currentDepth <= range.max) {
-                // Find segments containing the target vault
-                 List<Segment> vaultCandidates = candidates.stream()
-                         .filter(s -> s.getContainedVault() == targetBranchColor)
-                         .collect(Collectors.toList());
-
-                 if (!vaultCandidates.isEmpty()) {
-                     boolean shouldPlaceVault = false;
-                     if (currentDepth == range.max) {
-                         shouldPlaceVault = true; // Force placement at max depth
-                         plugin.getLogger().finest("Attempting forced vault placement for " + targetBranchColor + " at depth " + currentDepth);
-                     } else if (currentDepth == range.max - 1 && random.nextDouble() < VAULT_SPAWN_CHANCE_HIGH) {
-                         shouldPlaceVault = true; // High chance at depth max-1
-                         plugin.getLogger().finest("High chance vault roll succeeded for " + targetBranchColor + " at depth " + currentDepth);
-                     } else if (random.nextDouble() < VAULT_SPAWN_CHANCE_NORMAL) {
-                         shouldPlaceVault = true; // Normal chance within range
-                         plugin.getLogger().finest("Normal chance vault roll succeeded for " + targetBranchColor + " at depth " + currentDepth);
-                     }
-
-                     if (shouldPlaceVault) {
-                         // Return a random segment from the vault candidates
-                         return vaultCandidates.get(random.nextInt(vaultCandidates.size()));
-                     }
-                 } else {
-                     // Log if we are forced to place but have no candidates
-                     if (currentDepth == range.max) {
-                          plugin.getLogger().warning("Forced vault placement failed for " + targetBranchColor + " at depth " + currentDepth + ": No suitable vault segments found!");
-                          // This branch will likely fail validation later, DFS will backtrack naturally if possible
-                     }
-                 }
+        // 1. All {template, rotation} placements that can physically connect here — a segment fits if
+        //    SOME rotation gives it an entry facing requiredDirection.
+        List<Placement> candidates = new ArrayList<>();
+        for (Segment s : availableSegments) {
+            if (s.getType() == SegmentType.HUB) continue; // Cannot place another hub
+            for (int steps = 0; steps < 4; steps++) {
+                if (rotatedEntryByDirection(s, steps, requiredDirection) != null) {
+                    candidates.add(new Placement(s, steps));
+                }
             }
-            // If vault placement wasn't triggered/possible, remove vault segments for this color from general pool
-            // to avoid placing it too early or accidentally.
-            final VaultColor finalTarget = targetBranchColor; // Needed for lambda
-             candidates.removeIf(s -> s.getContainedVault() == finalTarget);
         }
-
-         // 3. Prioritize Key Placement (if not on a vault branch or vault not placed)
-         // Example: Prioritize Red Key in Puzzle Room
-         if (!keysPlacedInDFS.contains(VaultColor.RED)) {
-             MinMax range = KEY_DEPTH_RANGES.get(VaultColor.RED);
-             if (range != null && currentDepth >= range.min && currentDepth <= range.max) {
-                 List<Segment> keyCandidates = candidates.stream()
-                         .filter(s -> s.getType() == SegmentType.PUZZLE && s.getContainedVaultKey() == VaultColor.RED)
-                         .collect(Collectors.toList());
-                 if (!keyCandidates.isEmpty()) {
-                     // Add probability logic if desired, or just place if found
-                     plugin.getLogger().finest("Prioritizing Red Key placement at depth " + currentDepth);
-                     return keyCandidates.get(random.nextInt(keyCandidates.size()));
-                 }
-             }
-         }
-         // Prioritize Gold Key: the gold key room is the unique segment where containedVaultKey == GOLD.
-         // No type filter needed — the key metadata alone identifies the correct segment.
-         if (!keysPlacedInDFS.contains(VaultColor.GOLD)) {
-              MinMax range = KEY_DEPTH_RANGES.get(VaultColor.GOLD);
-              if (range != null && currentDepth >= range.min && currentDepth <= range.max) {
-                  List<Segment> keyCandidates = candidates.stream()
-                          .filter(s -> s.getContainedVaultKey() == VaultColor.GOLD)
-                          .collect(Collectors.toList());
-                  if (!keyCandidates.isEmpty()) {
-                      plugin.getLogger().finest("Prioritizing Gold Key placement at depth " + currentDepth);
-                      return keyCandidates.get(random.nextInt(keyCandidates.size()));
-                  }
-              }
-          }
-         // Add similar logic for Green Key if needed
-
-
-        // 4. Filter out segments containing *any* vault or key if they shouldn't be placed now
-         candidates.removeIf(s -> s.getContainedVault() != null && (targetBranchColor == null || s.getContainedVault() != targetBranchColor)); // Remove vaults not matching branch target
-         candidates.removeIf(s -> s.getContainedVaultKey() != null && s.getContainedVaultKey() != VaultColor.BLUE); // Remove segments containing R,G,Gold keys unless prioritized above
-
-        // 5. Final Selection from remaining candidates
         if (candidates.isEmpty()) {
-            return null; // No suitable non-vault/non-key segment found
+            return null; // Nothing can connect, even rotated
         }
-        // Choose randomly from the suitable remaining candidates
+
+        // 2. Opportunistic vault placement — any missing vault whose range includes this depth.
+        for (VaultColor color : VaultColor.values()) {
+            if (vaultsPlacedInDFS.contains(color)) continue;
+            MinMax range = VAULT_DEPTH_RANGES.get(color);
+            if (range == null || currentDepth < range.min || currentDepth > range.max) continue;
+            List<Placement> vaultCandidates = candidates.stream()
+                    .filter(p -> p.template.getContainedVault() == color)
+                    .collect(Collectors.toList());
+            if (vaultCandidates.isEmpty()) continue;
+            if (shouldPlace(currentDepth, range, VAULT_SPAWN_CHANCE_NORMAL, VAULT_SPAWN_CHANCE_HIGH)) {
+                plugin.getLogger().finest("Placing " + color + " vault at depth " + currentDepth);
+                return vaultCandidates.get(random.nextInt(vaultCandidates.size()));
+            }
+        }
+
+        // 3. Opportunistic key placement — RED/GREEN/GOLD (blue key is hub metadata, placed separately).
+        for (VaultColor color : new VaultColor[]{VaultColor.RED, VaultColor.GREEN, VaultColor.GOLD}) {
+            if (keysPlacedInDFS.contains(color)) continue;
+            MinMax range = KEY_DEPTH_RANGES.get(color);
+            if (range == null || currentDepth < range.min || currentDepth > range.max) continue;
+            List<Placement> keyCandidates = candidates.stream()
+                    .filter(p -> p.template.getContainedVaultKey() == color)
+                    .collect(Collectors.toList());
+            if (keyCandidates.isEmpty()) continue;
+            if (shouldPlace(currentDepth, range, KEY_SPAWN_CHANCE_NORMAL, KEY_SPAWN_CHANCE_HIGH)) {
+                // Prefer a PUZZLE room if one exists (future-proof); today key rooms are plain END rooms.
+                List<Placement> puzzle = keyCandidates.stream()
+                        .filter(p -> p.template.getType() == SegmentType.PUZZLE)
+                        .collect(Collectors.toList());
+                List<Placement> pick = puzzle.isEmpty() ? keyCandidates : puzzle;
+                plugin.getLogger().finest("Placing " + color + " key at depth " + currentDepth);
+                return pick.get(random.nextInt(pick.size()));
+            }
+        }
+
+        // 4. Filler pool: never a vault, and never a non-blue key (those enter only via 2/3 above).
+        candidates.removeIf(p -> p.template.getContainedVault() != null);
+        candidates.removeIf(p -> p.template.getContainedVaultKey() != null && p.template.getContainedVaultKey() != VaultColor.BLUE);
+        if (candidates.isEmpty()) {
+            return null;
+        }
         return candidates.get(random.nextInt(candidates.size()));
+    }
+
+    /**
+     * Depth-gated placement decision shared by vaults and keys: forced at (or past) the range max, a
+     * higher chance one depth below the max, and a normal chance elsewhere within range.
+     */
+    private boolean shouldPlace(int currentDepth, @NotNull MinMax range, double normalChance, double highChance) {
+        if (currentDepth >= range.max) return true;
+        if (currentDepth == range.max - 1) return random.nextDouble() < highChance;
+        return random.nextDouble() < normalChance;
     }
 
     @NotNull
@@ -541,6 +524,7 @@ public class DungeonGenerator {
     private boolean checkCollision(
             @NotNull BlockVector3 potentialOrigin,
             @NotNull Segment newSegmentTemplate,
+            int rotationSteps,
             @NotNull Set<BlockVector3> occupiedOrigins,
             @NotNull List<PlacedSegment> placedSegments) {
 
@@ -551,19 +535,28 @@ public class DungeonGenerator {
         }
 
         // 2. Advanced Bounding Box Check (More Accurate, Slower)
-        Area potentialBounds = calculatePotentialBounds(newSegmentTemplate, potentialOrigin);
-        // Check against all previously placed segments
+        // Connected segments meet at a shared doorway plane: the connecting entries sit on each
+        // segment's boundary face (e.g. a SOUTH entry at z=size-1 aligned with the neighbour's NORTH
+        // entry at z=0), so the two boxes touch on that plane by design. Use a STRICT overlap test so
+        // face-touching is allowed and only real volumetric overlap (interiors intersecting) counts as
+        // a collision — Area.intersects is inclusive and would reject every legitimate connection.
+        Area potentialBounds = calculatePotentialBounds(newSegmentTemplate, rotationSteps, potentialOrigin);
+        Location pMin = potentialBounds.getMinPoint();
+        Location pMax = potentialBounds.getMaxPoint();
         for (PlacedSegment existingSegment : placedSegments) {
-            // Get the relative bounds of the existing segment
-            // PlacedSegment.getWorldBounds() returns an Area with relative Locations (null world) in this blueprint context
             Area existingBounds = existingSegment.getWorldBounds();
+            Location eMin = existingBounds.getMinPoint();
+            Location eMax = existingBounds.getMaxPoint();
 
-            // Check if the potential new bounds intersect with the existing bounds
-            if (potentialBounds.intersects(existingBounds)) { // Assumes Area.intersects works correctly with relative coords
+            boolean overlap =
+                    pMin.getX() < eMax.getX() && pMax.getX() > eMin.getX() &&
+                    pMin.getY() < eMax.getY() && pMax.getY() > eMin.getY() &&
+                    pMin.getZ() < eMax.getZ() && pMax.getZ() > eMin.getZ();
+            if (overlap) {
                  plugin.getLogger().finest("Collision detected (Bounds): " + newSegmentTemplate.getName()
-                     + " at " + potentialOrigin + " intersects with " + existingSegment.getName()
-                     + " at " + existingSegment.getWorldOrigin().toVector()); // Debug logging
-                 return true; // Volumes overlap
+                     + " at " + potentialOrigin + " overlaps " + existingSegment.getName()
+                     + " at " + existingSegment.getWorldOrigin().toVector());
+                 return true; // Interiors overlap
             }
         }
 
@@ -580,9 +573,9 @@ public class DungeonGenerator {
      * @return An Area object representing the relative bounds.
      */
     @NotNull
-    private Area calculatePotentialBounds(@NotNull Segment segmentTemplate, @NotNull BlockVector3 relativeOrigin) {
-        // Get segment size
-        BlockVector3 size = segmentTemplate.getSize();
+    private Area calculatePotentialBounds(@NotNull Segment segmentTemplate, int rotationSteps, @NotNull BlockVector3 relativeOrigin) {
+        // Rotated footprint (90°/270° swap X and Z).
+        BlockVector3 size = SegmentRotation.rotateSize(segmentTemplate.getSize(), rotationSteps);
         if (size == null || size.x() <= 0 || size.y() <= 0 || size.z() <= 0) {
             // Handle invalid size, maybe return a zero-size area at origin or throw exception
             plugin.getLogger().warning("Calculating potential bounds for segment " + segmentTemplate.getName() + " with invalid size: " + size);
@@ -709,11 +702,61 @@ public class DungeonGenerator {
             boolean fromHub = template.getType() == SegmentType.HUB;
             if (best != null && !(fromHub && !bestFromHub)) continue;
 
+            BlockVector3 rot = placedSegment.getRotatedOffset(offset);
             best = placedSegment.getWorldOrigin().toVector().clone()
-                    .add(new Vector(offset.x(), offset.y(), offset.z()));
+                    .add(new Vector(rot.x(), rot.y(), rot.z()));
             bestFromHub = fromHub;
         }
         return best;
+    }
+
+    /**
+     * Picks the blueprint-relative base of the visual sand-timer column (the {@code TIMER} marker), with
+     * a HUB template winning over any other segment. Null if no template defines one.
+     */
+    @Nullable
+    static Vector selectTimerBaseRelativeLocation(@NotNull List<PlacedSegment> placedSegments) {
+        Vector best = null;
+        boolean bestFromHub = false;
+        for (PlacedSegment placedSegment : placedSegments) {
+            Segment template = placedSegment.getSegmentTemplate();
+            if (template == null) continue;
+            BlockVector3 offset = template.getTimerOffset();
+            if (offset == null) continue;
+
+            boolean fromHub = template.getType() == SegmentType.HUB;
+            if (best != null && !(fromHub && !bestFromHub)) continue;
+
+            BlockVector3 rot = placedSegment.getRotatedOffset(offset);
+            best = placedSegment.getWorldOrigin().toVector().clone()
+                    .add(new Vector(rot.x(), rot.y(), rot.z()));
+            bestFromHub = fromHub;
+        }
+        return best;
+    }
+
+    /**
+     * Collects the blueprint-relative per-player spawn points from {@code PLAYER_SPAWN} markers.
+     * A HUB template's spawns win: if any HUB defines spawns those are used exclusively; otherwise
+     * every segment's spawns are gathered. Empty when no template defines any (callers fall back to
+     * the hub location).
+     */
+    @NotNull
+    static List<Vector> selectPlayerSpawnRelativeLocations(@NotNull List<PlacedSegment> placedSegments) {
+        List<Vector> hubSpawns = new ArrayList<>();
+        List<Vector> otherSpawns = new ArrayList<>();
+        for (PlacedSegment placedSegment : placedSegments) {
+            Segment template = placedSegment.getSegmentTemplate();
+            if (template == null) continue;
+            boolean fromHub = template.getType() == SegmentType.HUB;
+            Vector origin = placedSegment.getWorldOrigin().toVector();
+            for (BlockVector3 offset : template.getPlayerSpawnOffsets()) {
+                BlockVector3 rot = placedSegment.getRotatedOffset(offset);
+                Vector abs = origin.clone().add(new Vector(rot.x(), rot.y(), rot.z()));
+                (fromHub ? hubSpawns : otherSpawns).add(abs);
+            }
+        }
+        return !hubSpawns.isEmpty() ? hubSpawns : otherSpawns;
     }
 
     /**
@@ -757,8 +800,8 @@ public class DungeonGenerator {
             VaultColor vaultColor = template.getContainedVault();
             BlockVector3 vaultOffset = template.getVaultOffset(); // Offset relative to segment origin
             if (vaultColor != null && vaultOffset != null) {
-                // Calculate final relative position: Segment Origin + Offset
-                Vector vaultRelativePos = segmentRelativeOrigin.clone().add(new Vector(vaultOffset.x(), vaultOffset.y(), vaultOffset.z()));
+                // Calculate final relative position: Segment Origin + rotated offset
+                Vector vaultRelativePos = addRotated(segmentRelativeOrigin, placedSegment, vaultOffset);
                 // Only add if this color hasn't been placed yet (first one found wins)
                 if (vaultMarkerRelativeLocations.putIfAbsent(vaultColor, vaultRelativePos) == null) {
                      plugin.getLogger().finer("Consolidated " + vaultColor + " vault marker location: " + vaultRelativePos);
@@ -772,8 +815,8 @@ public class DungeonGenerator {
             BlockVector3 keyOffset = template.getKeyOffset(); // Offset relative to segment origin
              // Ignore Blue Key consolidation - handled separately by VaultManager relative to Hub
             if (keyColor != null && keyOffset != null && keyColor != VaultColor.BLUE) {
-                // Calculate final relative position: Segment Origin + Offset
-                Vector keyRelativePos = segmentRelativeOrigin.clone().add(new Vector(keyOffset.x(), keyOffset.y(), keyOffset.z()));
+                // Calculate final relative position: Segment Origin + rotated offset
+                Vector keyRelativePos = addRotated(segmentRelativeOrigin, placedSegment, keyOffset);
                 // Only add if this color hasn't been placed yet
                 if (keySpawnRelativeLocations.putIfAbsent(keyColor, keyRelativePos) == null) {
                     plugin.getLogger().finer("Consolidated " + keyColor + " key spawn location: " + keyRelativePos);
@@ -787,7 +830,7 @@ public class DungeonGenerator {
             if (sandOffsets != null) {
                 for (BlockVector3 offset : sandOffsets) {
                     if (offset != null) {
-                        sandSpawnRelativeLocations.add(segmentRelativeOrigin.clone().add(new Vector(offset.x(), offset.y(), offset.z())));
+                        sandSpawnRelativeLocations.add(addRotated(segmentRelativeOrigin, placedSegment, offset));
                     }
                 }
             }
@@ -797,7 +840,7 @@ public class DungeonGenerator {
              if (coinOffsets != null) {
                 for (BlockVector3 offset : coinOffsets) {
                      if (offset != null) {
-                         coinSpawnRelativeLocations.add(segmentRelativeOrigin.clone().add(new Vector(offset.x(), offset.y(), offset.z())));
+                         coinSpawnRelativeLocations.add(addRotated(segmentRelativeOrigin, placedSegment, offset));
                      }
                  }
              }
@@ -807,12 +850,18 @@ public class DungeonGenerator {
              if (itemOffsets != null) {
                 for (BlockVector3 offset : itemOffsets) {
                      if (offset != null) {
-                         itemSpawnRelativeLocations.add(segmentRelativeOrigin.clone().add(new Vector(offset.x(), offset.y(), offset.z())));
+                         itemSpawnRelativeLocations.add(addRotated(segmentRelativeOrigin, placedSegment, offset));
                      }
                  }
              }
         }
         plugin.getLogger().fine("Feature consolidation complete.");
+    }
+
+    /** origin + the placement's rotated version of a template offset, as a Bukkit Vector. */
+    private static Vector addRotated(@NotNull Vector origin, @NotNull PlacedSegment placed, @NotNull BlockVector3 offset) {
+        BlockVector3 r = placed.getRotatedOffset(offset);
+        return origin.clone().add(new Vector(r.x(), r.y(), r.z()));
     }
 
     // Helper class for depth ranges
