@@ -25,9 +25,9 @@ public class VisualSandTimerDisplay {
     // TODO: Consider changing dependency from SoTTeam to TeamTimer or Supplier<Integer>
     // if SoTTeam no longer directly holds remainingSeconds after refactoring.
     private final SoTTeam team; // Source of the remaining time data
-    private final Location bottomLocation; // Block *below* the lowest sand block
-    private final Location topLocation;    // Highest possible sand block location
-    private final int totalHeight;         // Max number of sand blocks possible (topY - bottomY)
+    private Location bottomLocation; // Block *below* the lowest sand block
+    private Location topLocation;    // Highest possible sand block location
+    private int totalHeight;         // Max number of sand blocks possible (topY - bottomY)
 
     private BukkitTask visualUpdateTask; // The Bukkit scheduler task for updates
     private int lastKnownVisualBlocks = -1; // Tracks the last calculated target block count
@@ -77,6 +77,35 @@ public class VisualSandTimerDisplay {
              plugin.getLogger().log(Level.INFO, "VisualSandTimerDisplay created for team " + team.getTeamName() + ". Height: " + totalHeight + " blocks.");
         }
         this.lastKnownVisualBlocks = -1; // Initialize tracking
+    }
+
+    /**
+     * Moves the (not-yet-rendered) column to a new bottom/top before visual updates start — used to
+     * anchor a team's timer in its dungeon hub once the hub exists. No-op (with a warning) if updates
+     * are already running, since that would orphan the previously placed sand blocks.
+     *
+     * @return true if the column was relocated.
+     */
+    public boolean relocate(Location newBottom, Location newTop) {
+        if (visualUpdateTask != null && !visualUpdateTask.isCancelled()) {
+            plugin.getLogger().warning("Ignoring visual timer relocate for team " + team.getTeamName()
+                    + ": updates already running.");
+            return false;
+        }
+        if (newBottom == null || newTop == null || newBottom.getWorld() == null
+                || !Objects.equals(newBottom.getWorld(), newTop.getWorld())
+                || newBottom.getBlockX() != newTop.getBlockX() || newBottom.getBlockZ() != newTop.getBlockZ()
+                || newBottom.getBlockY() >= newTop.getBlockY()) {
+            plugin.getLogger().warning("Ignoring invalid visual timer relocate for team " + team.getTeamName());
+            return false;
+        }
+        this.bottomLocation = newBottom.clone();
+        this.topLocation = newTop.clone();
+        this.totalHeight = newTop.getBlockY() - newBottom.getBlockY();
+        this.lastKnownVisualBlocks = -1;
+        plugin.getLogger().info("Relocated visual timer for team " + team.getTeamName()
+                + " to " + newBottom.toVector() + " (height " + totalHeight + ").");
+        return true;
     }
 
     /**

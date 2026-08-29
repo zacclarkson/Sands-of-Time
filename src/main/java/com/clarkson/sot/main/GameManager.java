@@ -221,6 +221,15 @@ public class GameManager {
             }
             teamDungeonManagers.put(teamId, teamDungeon); // Store the manager
 
+            // 2b. Move the visual sand timer from its lobby fallback into this team's hub, if the hub
+            //     defines a TIMER marker. Safe here because the display hasn't rendered blocks yet
+            //     (timers start below). Falls back to the lobby column when no marker exists.
+            Location timerBase = teamDungeon.getTimerBaseLocation();
+            if (timerBase != null) {
+                Location timerTop = timerBase.clone().add(0, VisualTimerLayout.COLUMN_HEIGHT_BLOCKS, 0);
+                team.relocateVisualTimer(timerBase, timerTop);
+            }
+
             // 3. Assign each player to their own death cage
             assignPlayerCages(teamId, team);
 

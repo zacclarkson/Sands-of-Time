@@ -51,6 +51,9 @@ public enum BuilderMode {
             false),
     TIMER_DEPOSIT("Timer Deposit",
             "Right-click to mark an interact point where players place collected sand onto the timer.",
+            false),
+    TIMER("Timer",
+            "Right-click to mark the base of the visual sand-timer column in the HUB. One per HUB.",
             false);
 
     private final String displayName;

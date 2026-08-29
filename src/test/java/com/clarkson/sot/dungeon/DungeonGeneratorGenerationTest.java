@@ -56,7 +56,7 @@ class DungeonGeneratorGenerationTest {
                 null, List.of(), null,
                 List.of(), List.of(),
                 null,
-                null, List.of(), null, List.of());
+                null, List.of(), null, List.of(), null);
     }
 
     /** Hub with `exits` straight SOUTH exits (z=4) spaced 6 apart in x, so branches stay in disjoint columns. */
@@ -73,7 +73,7 @@ class DungeonGeneratorGenerationTest {
                 null, List.of(), null,
                 List.of(), List.of(),
                 null,
-                null, List.of(), null, List.of());
+                null, List.of(), null, List.of(), null);
     }
 
     /** Hub whose exits face only WEST (x=0), spaced 6 apart in z. Connecting to NORTH-entry rooms is
@@ -91,7 +91,7 @@ class DungeonGeneratorGenerationTest {
                 null, List.of(), null,
                 List.of(), List.of(),
                 null,
-                null, List.of(), null, List.of());
+                null, List.of(), null, List.of(), null);
     }
 
     private static Segment corridorNS() {

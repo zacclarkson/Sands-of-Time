@@ -25,7 +25,7 @@ class DungeonSafeExitTest {
     private DungeonBlueprint blueprint(Vector safeExitRelative) {
         Area bounds = new Area(new Location(null, 0, 0, 0), new Location(null, 15, 7, 15));
         return new DungeonBlueprint(List.of(), new Vector(0, 0, 0), Map.of(), Map.of(),
-                List.of(), List.of(), List.of(), bounds, safeExitRelative);
+                List.of(), List.of(), List.of(), bounds, safeExitRelative, null);
     }
 
     private Dungeon dungeon(Location safeExit) {

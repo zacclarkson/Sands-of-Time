@@ -380,6 +380,10 @@ public class StructureSaver {
                     segmentTemplate.getDeathCageOffsets(), "deathCageLocations", segmentName));
             json.add("sandTimerLocations", serializeBlockVectorList(
                     segmentTemplate.getSandTimerOffsets(), "sandTimerLocations", segmentName));
+            BlockVector3 timer = segmentTemplate.getTimerOffset();
+            if (timer != null) {
+                json.add("timerLocationOffset", serializeBlockVector3(timer));
+            }
 
             return json;
 

@@ -74,6 +74,7 @@ public class DungeonManager {
 
     // The consolidated data object with ABSOLUTE locations for this instance
     private Dungeon dungeonData;
+    private Location timerBaseLocation; // Absolute base of the visual sand timer; null if no TIMER marker
 
     /**
      * Constructor for a team's specific DungeonManager instance.
@@ -123,6 +124,8 @@ public class DungeonManager {
         Location absHubLocation = dungeonOrigin.clone().add(blueprintData.getHubRelativeLocation());
         Vector safeExitRelative = blueprintData.getSafeExitRelativeLocation();
         Location absSafeExitLocation = (safeExitRelative != null) ? dungeonOrigin.clone().add(safeExitRelative) : null;
+        Vector timerBaseRelative = blueprintData.getTimerBaseRelativeLocation();
+        this.timerBaseLocation = (timerBaseRelative != null) ? dungeonOrigin.clone().add(timerBaseRelative) : null;
 
 
         // --- 2. Paste Schematics (Populates placedSegmentsInWorld) ---
@@ -410,6 +413,9 @@ public class DungeonManager {
     @NotNull public World getWorld() { return world; }
     @NotNull public UUID getTeamId() { return teamId; }
     @Nullable public Dungeon getDungeonData() { return dungeonData; } // Can be null before init finishes
+
+    /** Absolute base of this instance's visual sand-timer column, or null if the hub has no TIMER marker. */
+    @Nullable public Location getTimerBaseLocation() { return (timerBaseLocation != null) ? timerBaseLocation.clone() : null; }
     @NotNull public List<PlacedSegment> getPlacedSegmentsInWorld() { return Collections.unmodifiableList(this.placedSegmentsInWorld); }
 
     /** Finds the PlacedSegment (with absolute world coords) at a given absolute world location within this instance. */

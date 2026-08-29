@@ -185,6 +185,7 @@ public class SaveSegmentCommand implements CommandExecutor, TabCompleter {
         BlockVector3 safeExitOffset            = null;
         SegmentBound safeExitBound             = null;
         BlockVector3 bankOffset                = null;
+        BlockVector3 timerOffset               = null;
         List<BlockVector3> deathCageOffsets    = new ArrayList<>();
         List<BlockVector3> sandTimerOffsets    = new ArrayList<>();
         VaultColor containedVault              = null;
@@ -340,6 +341,14 @@ public class SaveSegmentCommand implements CommandExecutor, TabCompleter {
                 case "TIMER_DEPOSIT":
                     sandTimerOffsets.add(relPos);
                     break;
+                case "TIMER": {
+                    if (timerOffset != null) {
+                        warn(player, "Multiple TIMER markers — only one allowed. Using first.");
+                    } else {
+                        timerOffset = relPos;
+                    }
+                    break;
+                }
                 case "COIN_SPAWN": {
                     coinSpawns.add(relPos);
                     Integer val = pdc.get(COIN_VALUE_KEY, PersistentDataType.INTEGER);
@@ -427,6 +436,9 @@ public class SaveSegmentCommand implements CommandExecutor, TabCompleter {
                         bankOffset != null ? NamedTextColor.GREEN : NamedTextColor.GRAY)));
         player.sendMessage(info("Death Cages",    deathCageOffsets.size()));
         player.sendMessage(info("Timer Deposits", sandTimerOffsets.size()));
+        player.sendMessage(Component.text("  Timer: ", NamedTextColor.WHITE)
+                .append(Component.text(timerOffset != null ? "yes" : "none",
+                        timerOffset != null ? NamedTextColor.GREEN : NamedTextColor.GRAY)));
 
         // A hub without an exit still saves; escaping just falls back to the hub location.
         if (segmentType == SegmentType.HUB && safeExitBound == null) {
@@ -447,7 +459,7 @@ public class SaveSegmentCommand implements CommandExecutor, TabCompleter {
                     vaultDoorBound, gates, leverOffset,
                     sandSacrifices, mobSpawners,
                     safeExitOffset,
-                    bankOffset, deathCageOffsets, safeExitBound, sandTimerOffsets
+                    bankOffset, deathCageOffsets, safeExitBound, sandTimerOffsets, timerOffset
             );
         } catch (Exception e) {
             plugin.getLogger().log(Level.SEVERE, "Error constructing Segment for " + segmentName, e);

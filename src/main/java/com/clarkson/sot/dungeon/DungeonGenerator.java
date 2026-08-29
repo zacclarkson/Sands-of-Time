@@ -271,11 +271,13 @@ public class DungeonGenerator {
             return null; // Validation failed for this attempt
         }
 
+        Vector timerBaseRelativeLocation = selectTimerBaseRelativeLocation(placedSegments);
+
         // --- Create and Return Blueprint ---
         return new DungeonBlueprint(
                 placedSegments, hubRelativeLocation, vaultMarkerRelativeLocations, keySpawnRelativeLocations,
                 sandSpawnRelativeLocations, coinSpawnRelativeLocations, itemSpawnRelativeLocations,
-                blueprintBounds, safeExitRelativeLocation
+                blueprintBounds, safeExitRelativeLocation, timerBaseRelativeLocation
         );
     }
 
@@ -693,6 +695,31 @@ public class DungeonGenerator {
             Segment template = placedSegment.getSegmentTemplate();
             if (template == null) continue;
             BlockVector3 offset = template.getSafeExitOffset();
+            if (offset == null) continue;
+
+            boolean fromHub = template.getType() == SegmentType.HUB;
+            if (best != null && !(fromHub && !bestFromHub)) continue;
+
+            BlockVector3 rot = placedSegment.getRotatedOffset(offset);
+            best = placedSegment.getWorldOrigin().toVector().clone()
+                    .add(new Vector(rot.x(), rot.y(), rot.z()));
+            bestFromHub = fromHub;
+        }
+        return best;
+    }
+
+    /**
+     * Picks the blueprint-relative base of the visual sand-timer column (the {@code TIMER} marker), with
+     * a HUB template winning over any other segment. Null if no template defines one.
+     */
+    @Nullable
+    static Vector selectTimerBaseRelativeLocation(@NotNull List<PlacedSegment> placedSegments) {
+        Vector best = null;
+        boolean bestFromHub = false;
+        for (PlacedSegment placedSegment : placedSegments) {
+            Segment template = placedSegment.getSegmentTemplate();
+            if (template == null) continue;
+            BlockVector3 offset = template.getTimerOffset();
             if (offset == null) continue;
 
             boolean fromHub = template.getType() == SegmentType.HUB;

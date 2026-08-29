@@ -96,6 +96,7 @@ public class ToolListener implements Listener {
     private static final String MT_DEATH_CAGE       = "DEATH_CAGE";
     private static final String MT_DEATH_REVIVE     = "DEATH_REVIVE"; // cosmetic revive-point preview
     private static final String MT_TIMER_DEPOSIT    = "TIMER_DEPOSIT";
+    private static final String MT_TIMER            = "TIMER";
     private static final String MT_ICON             = "ICON";   // cosmetic floating icon
     private static final String MT_LABEL            = "LABEL";  // cosmetic floating text label
 
@@ -260,6 +261,10 @@ public class ToolListener implements Listener {
             case TIMER_DEPOSIT:
                 placeBlockMarker(event, player, MT_TIMER_DEPOSIT, Material.HOPPER, 0.6f, null, -1,
                         new ItemStack(Material.SAND), Component.text("Timer Deposit", NamedTextColor.YELLOW));
+                break;
+            case TIMER:
+                placeBlockMarker(event, player, MT_TIMER, Material.SAND, 0.6f, null, -1,
+                        new ItemStack(Material.CLOCK), Component.text("Timer", NamedTextColor.GOLD));
                 break;
         }
     }
