@@ -126,6 +126,7 @@ public class SoT extends JavaPlugin {
         this.getCommand("sotsavesegment").setExecutor(new SaveSegmentCommand(this));
         this.getCommand("sotclearmarkers").setExecutor(new ClearMarkersCommand(this, builderSessionManager));
         this.getCommand("sotundo").setExecutor(new UndoMarkerCommand(this, builderSessionManager));
+        this.getCommand("sotreloadsegments").setExecutor(new ReloadSegmentsCommand(this, gameManager));
 
         GameCommand gameCmd = new GameCommand(this, gameManager);
         this.getCommand("sot").setExecutor(gameCmd);

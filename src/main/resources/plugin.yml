@@ -34,6 +34,11 @@ commands:
     usage: /<command>
     permission: sot.admin.builder
 
+  sotreloadsegments:
+    description: Reloads segment templates from disk without restarting the server.
+    usage: /<command>
+    permission: sot.admin.savesegment
+
   # --- Game Control Commands ---
   sot:
     description: Main command for Sands of Time game control and location setup.
