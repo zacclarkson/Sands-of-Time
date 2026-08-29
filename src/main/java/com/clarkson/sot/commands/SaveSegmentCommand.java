@@ -191,7 +191,8 @@ public class SaveSegmentCommand implements CommandExecutor {
             // BOUND_CORNER1 are frame pieces; ICON/LABEL are the themed icons and floating labels.
             if ("ENTRY_FRAME".equals(type) || "BOUND_FRAME".equals(type)
                     || "BOUND_CORNER1".equals(type)
-                    || "ICON".equals(type) || "LABEL".equals(type)) {
+                    || "ICON".equals(type) || "LABEL".equals(type)
+                    || "DEATH_REVIVE".equals(type)) {
                 continue;
             }
 

@@ -94,6 +94,7 @@ public class ToolListener implements Listener {
     private static final String MT_MOB_SPAWNER      = "MOB_SPAWNER";
     private static final String MT_BANK             = "BANK";
     private static final String MT_DEATH_CAGE       = "DEATH_CAGE";
+    private static final String MT_DEATH_REVIVE     = "DEATH_REVIVE"; // cosmetic revive-point preview
     private static final String MT_TIMER_DEPOSIT    = "TIMER_DEPOSIT";
     private static final String MT_ICON             = "ICON";   // cosmetic floating icon
     private static final String MT_LABEL            = "LABEL";  // cosmetic floating text label
@@ -124,6 +125,8 @@ public class ToolListener implements Listener {
     // marker's centre may sit and still count as "looked at".
     private static final double MARKER_REACH         = 6.0;
     private static final double MARKER_SELECT_RADIUS  = 0.75;
+    // Death-cage revive point preview: a lodestone this many blocks toward the builder's facing.
+    private static final int    DEATH_REVIVE_DIST     = 2;
     private static final float  MARKER_ICON_SCALE   = 0.45f;
     private static final double MARKER_ICON_HEIGHT  = 1.0;  // floating icon height above cell floor
     private static final float  COIN_MARKER_SCALE   = 0.6f;
@@ -252,8 +255,7 @@ public class ToolListener implements Listener {
                         new ItemStack(Material.GOLD_INGOT), Component.text("Bank", NamedTextColor.GREEN));
                 break;
             case DEATH_CAGE:
-                placeBlockMarker(event, player, MT_DEATH_CAGE, Material.IRON_BARS, 0.7f, null, -1,
-                        new ItemStack(Material.SKELETON_SKULL), Component.text("Death Cage", NamedTextColor.RED));
+                placeDeathCageMarker(event, player);
                 break;
             case TIMER_DEPOSIT:
                 placeBlockMarker(event, player, MT_TIMER_DEPOSIT, Material.HOPPER, 0.6f, null, -1,
@@ -793,6 +795,80 @@ public class ToolListener implements Listener {
             plugin.getLogger().log(Level.SEVERE, "Failed to spawn point marker: " + markerType, e);
             player.sendMessage(Component.text("Error placing marker entity.", NamedTextColor.RED));
         }
+    }
+
+    /**
+     * Places a death-cage marker plus a cosmetic preview of where its revive/sacrifice point would
+     * sit: a lodestone (the block a teammate interacts with to revive, per {@link com.clarkson.sot.dungeon.DeathCage})
+     * {@link #DEATH_REVIVE_DIST} blocks toward the builder's horizontal facing. The preview shares the
+     * cage's group so undo/clear/left-click remove both, and it is tagged {@link #MT_DEATH_REVIVE} so
+     * the save scan skips it — the revive location is auto-derived at runtime (a later pass), and this
+     * only shows the builder roughly where it lands.
+     */
+    private void placeDeathCageMarker(PlayerInteractEvent event, Player player) {
+        Location cell = validatedAirCell(event, player);
+        if (cell == null) return;
+
+        World world = player.getWorld();
+        int bx = cell.getBlockX(), by = cell.getBlockY(), bz = cell.getBlockZ();
+        double cx = bx + 0.5, cz = bz + 0.5;
+        final String groupId = UUID.randomUUID().toString();
+
+        try {
+            // Cage anchor (the data marker) + skull icon + label.
+            spawnGroupedBlock(world, bx, by, bz, Material.IRON_BARS, 0.7f, groupId, MT_DEATH_CAGE);
+            spawnIcon(world, cx, by + MARKER_ICON_HEIGHT, cz, groupId,
+                    new ItemStack(Material.SKELETON_SKULL), MARKER_ICON_SCALE);
+            spawnLabel(world, cx, by + MARKER_LABEL_HEIGHT, cz, groupId,
+                    Component.text("Death Cage", NamedTextColor.RED));
+
+            // Revive-point preview (cosmetic): a lodestone toward the builder's facing.
+            int[] dir = horizontalCardinal(player);
+            int rx = bx + dir[0] * DEATH_REVIVE_DIST, rz = bz + dir[1] * DEATH_REVIVE_DIST;
+            spawnGroupedBlock(world, rx, by, rz, Material.LODESTONE, 0.5f, groupId, MT_DEATH_REVIVE);
+            spawnLabel(world, rx + 0.5, by + MARKER_LABEL_HEIGHT, rz + 0.5, groupId,
+                    Component.text("Revive", NamedTextColor.AQUA));
+
+            sessionManager.getSession(player).pushUndo(groupId);
+            player.sendActionBar(Component.text("Placed Death Cage", NamedTextColor.GREEN)
+                    .append(Component.text(" (revive preview toward your facing)", NamedTextColor.GRAY)));
+
+        } catch (Exception e) {
+            plugin.getLogger().log(Level.SEVERE, "Failed to spawn death cage marker", e);
+            player.sendMessage(Component.text("Error placing marker entity.", NamedTextColor.RED));
+        }
+    }
+
+    /** Spawns a centred sub-block BlockDisplay in an integer cell, tagged into the given group. */
+    private void spawnGroupedBlock(World world, int bx, int by, int bz, Material material, float scale,
+                                   String groupId, String markerType) {
+        final float off = (1.0f - scale) / 2.0f;
+        final BlockData blockData = material.createBlockData();
+        world.spawn(new Location(world, bx, by, bz), BlockDisplay.class, display -> {
+            display.setBlock(blockData);
+            display.setGravity(false);
+            display.setInvulnerable(true);
+            display.setPersistent(true);
+            display.setTransformation(new Transformation(
+                    new Vector3f(off, off, off),
+                    new AxisAngle4f(0f, 0f, 0f, 1f),
+                    new Vector3f(scale, scale, scale),
+                    new AxisAngle4f(0f, 0f, 0f, 1f)
+            ));
+            PersistentDataContainer pdc = display.getPersistentDataContainer();
+            pdc.set(BUILD_MARKER_TAG, PersistentDataType.BYTE, (byte) 1);
+            pdc.set(BOUND_GROUP_KEY, PersistentDataType.STRING, groupId);
+            pdc.set(MARKER_TYPE_KEY, PersistentDataType.STRING, markerType);
+        });
+    }
+
+    /** Nearest horizontal cardinal (as {dx, dz}) the player is facing; defaults to +Z if looking straight down. */
+    private int[] horizontalCardinal(Player player) {
+        Vector dir = player.getEyeLocation().getDirection();
+        double x = dir.getX(), z = dir.getZ();
+        if (Math.abs(x) < 1e-6 && Math.abs(z) < 1e-6) return new int[]{0, 1};
+        if (Math.abs(x) >= Math.abs(z)) return new int[]{x > 0 ? 1 : -1, 0};
+        return new int[]{0, z > 0 ? 1 : -1};
     }
 
     /**

@@ -47,7 +47,7 @@ public enum BuilderMode {
             "Right-click to mark where players bank coins (the Sphinx / bank spot). One per HUB.",
             false),
     DEATH_CAGE("Death Cage",
-            "Right-click to mark a death/respawn cage. Place 1-4 (one per player); revive points are auto-derived.",
+            "Right-click to mark a death/respawn cage. Place 1-4 (one per player). A lodestone 'Revive' preview appears 2 blocks toward your facing — aim before you click.",
             false),
     TIMER_DEPOSIT("Timer Deposit",
             "Right-click to mark an interact point where players place collected sand onto the timer.",
