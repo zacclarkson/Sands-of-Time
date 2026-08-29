@@ -156,8 +156,9 @@ public class FloorLoot implements FloorItem {
                  float scale = 0.7f; // Adjust scale as needed
                  // Rotate 90 degrees around X-axis to make it appear flat on the ground
                  AxisAngle4f rotation = new AxisAngle4f((float) Math.toRadians(90), 1f, 0f, 0f);
-                 // Adjust vertical translation if needed (e.g., slightly lower)
-                 Vector3f translation = new Vector3f(0f, -0.2f, 0f);
+                 // No downward translation: let the item rest on top of the floor surface
+                 // (the +0.1 spawn offset above). A negative Y here sinks it into the floor.
+                 Vector3f translation = new Vector3f(0f, 0f, 0f);
                  Transformation transformation = new Transformation(
                          translation,
                          rotation,
