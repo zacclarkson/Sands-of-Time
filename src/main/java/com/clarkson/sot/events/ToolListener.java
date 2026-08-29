@@ -33,8 +33,8 @@ import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.inventory.meta.components.CustomModelDataComponent;
 import org.bukkit.persistence.PersistentDataContainer;
 import org.bukkit.persistence.PersistentDataType;
-import org.bukkit.util.RayTraceResult;
 import org.bukkit.util.Transformation;
+import org.bukkit.util.Vector;
 import org.joml.AxisAngle4f;
 import org.joml.Quaternionf;
 import org.joml.Vector3f;
@@ -92,6 +92,10 @@ public class ToolListener implements Listener {
     private static final String MT_COIN_SPAWN       = "COIN_SPAWN";
     private static final String MT_ITEM_SPAWN       = "ITEM_SPAWN";
     private static final String MT_MOB_SPAWNER      = "MOB_SPAWNER";
+    private static final String MT_BANK             = "BANK";
+    private static final String MT_DEATH_CAGE       = "DEATH_CAGE";
+    private static final String MT_DEATH_REVIVE     = "DEATH_REVIVE"; // cosmetic revive-point preview
+    private static final String MT_TIMER_DEPOSIT    = "TIMER_DEPOSIT";
     private static final String MT_ICON             = "ICON";   // cosmetic floating icon
     private static final String MT_LABEL            = "LABEL";  // cosmetic floating text label
 
@@ -115,6 +119,14 @@ public class ToolListener implements Listener {
     private static final double MARKER_LABEL_HEIGHT = 1.3;  // point-marker label height above cell floor
     private static final double ENTRY_LABEL_HEIGHT  = 2.2;  // entry-point label, above the arrow
     private static final double BOUND_LABEL_EXTRA   = 1.2;  // bound-frame label, above the top edge
+    private static final float  BOUND_FRAME_SCALE   = 0.9f;  // sub-block frame cubes, centred in their cell
+    // Marker selection (left-click remove / entry-point rotate): Display entities have no usable
+    // hitbox, so we ray-proximity pick instead. Reach in blocks, and how far off the look ray a
+    // marker's centre may sit and still count as "looked at".
+    private static final double MARKER_REACH         = 6.0;
+    private static final double MARKER_SELECT_RADIUS  = 0.75;
+    // Death-cage revive point preview: a lodestone this many blocks toward the builder's facing.
+    private static final int    DEATH_REVIVE_DIST     = 2;
     private static final float  MARKER_ICON_SCALE   = 0.45f;
     private static final double MARKER_ICON_HEIGHT  = 1.0;  // floating icon height above cell floor
     private static final float  COIN_MARKER_SCALE   = 0.6f;
@@ -189,6 +201,7 @@ public class ToolListener implements Listener {
                 break;
             case VAULT_DOOR:
             case GATE:
+            case SAFE_EXIT:
                 handleBoundFirstOrSecondClick(event, player, session, mode);
                 break;
             case VAULT_MARKER: {
@@ -222,10 +235,6 @@ public class ToolListener implements Listener {
                 placeBlockMarker(event, player, MT_SAND_SACRIFICE, SACRIFICE_MATERIAL, 0.5f, null, -1,
                         null, Component.text("Sacrifice", NamedTextColor.GOLD));
                 break;
-            case SAFE_EXIT:
-                placeBlockMarker(event, player, MT_SAFE_EXIT, Material.END_PORTAL_FRAME, 0.5f, null, -1,
-                        new ItemStack(Material.ENDER_PEARL), Component.text("Safe Exit", NamedTextColor.GREEN));
-                break;
             case COIN_SPAWN: {
                 int val = session.getCoinValue();
                 placeItemMarker(event, player, MT_COIN_SPAWN, buildCoinItem(val),
@@ -241,6 +250,17 @@ public class ToolListener implements Listener {
                 placeBlockMarker(event, player, MT_MOB_SPAWNER, Material.SPAWNER, 0.5f, null, -1,
                         new ItemStack(Material.ZOMBIE_HEAD), Component.text("Mob Spawner", NamedTextColor.RED));
                 break;
+            case BANK:
+                placeBlockMarker(event, player, MT_BANK, Material.EMERALD_BLOCK, 0.6f, null, -1,
+                        new ItemStack(Material.GOLD_INGOT), Component.text("Bank", NamedTextColor.GREEN));
+                break;
+            case DEATH_CAGE:
+                placeDeathCageMarker(event, player);
+                break;
+            case TIMER_DEPOSIT:
+                placeBlockMarker(event, player, MT_TIMER_DEPOSIT, Material.HOPPER, 0.6f, null, -1,
+                        new ItemStack(Material.SAND), Component.text("Timer Deposit", NamedTextColor.YELLOW));
+                break;
         }
     }
 
@@ -252,15 +272,12 @@ public class ToolListener implements Listener {
         // First check: is the player looking at an existing entry-point anchor? -> rotate
         Predicate<Entity> anchorFilter = e ->
                 e instanceof BlockDisplay
-                && e.getPersistentDataContainer().has(BUILD_MARKER_TAG, PersistentDataType.BYTE)
                 && MT_ENTRY_POINT.equals(e.getPersistentDataContainer()
                         .get(MARKER_TYPE_KEY, PersistentDataType.STRING));
 
-        RayTraceResult ray = player.getWorld().rayTraceEntities(
-                player.getEyeLocation(), player.getEyeLocation().getDirection(), 6.0, anchorFilter);
-
-        if (ray != null && ray.getHitEntity() instanceof BlockDisplay) {
-            rotateEntryPointFrame((BlockDisplay) ray.getHitEntity(), player);
+        Entity anchor = findLookedAtMarker(player, MARKER_REACH, anchorFilter);
+        if (anchor instanceof BlockDisplay) {
+            rotateEntryPointFrame((BlockDisplay) anchor, player);
             return;
         }
 
@@ -498,16 +515,17 @@ public class ToolListener implements Listener {
                                 ? session.getVaultColor().getGlassMaterial()
                                 : Material.PURPLE_STAINED_GLASS)
                         : Material.GRAY_STAINED_GLASS;
+                final float cornerOffset = (1.0f - BOUND_FRAME_SCALE) / 2.0f;
                 BlockDisplay bd = player.getWorld().spawn(
-                        corner.clone().add(0.5, 0.0, 0.5), BlockDisplay.class, display -> {
+                        corner.getBlock().getLocation(), BlockDisplay.class, display -> {
                     display.setBlock(mat.createBlockData());
                     display.setGravity(false);
                     display.setInvulnerable(true);
                     display.setPersistent(true);
                     display.setTransformation(new Transformation(
-                            new Vector3f(0f, 0f, 0f),
+                            new Vector3f(cornerOffset, cornerOffset, cornerOffset),
                             new AxisAngle4f(0f, 0f, 0f, 1f),
-                            new Vector3f(0.9f, 0.9f, 0.9f),
+                            new Vector3f(BOUND_FRAME_SCALE, BOUND_FRAME_SCALE, BOUND_FRAME_SCALE),
                             new AxisAngle4f(0f, 0f, 0f, 1f)
                     ));
                     PersistentDataContainer pdc = display.getPersistentDataContainer();
@@ -535,12 +553,26 @@ public class ToolListener implements Listener {
             }
             session.clearPendingBound();
 
-            // Spawn the perimeter frame
-            String markerType = (mode == BuilderMode.VAULT_DOOR) ? MT_VAULT_DOOR : MT_GATE;
-            VaultColor color = (mode == BuilderMode.VAULT_DOOR) ? session.getVaultColor() : null;
-            Material frameMat = (mode == BuilderMode.VAULT_DOOR)
-                    ? (color != null ? color.getGlassMaterial() : Material.PURPLE_STAINED_GLASS)
-                    : Material.GRAY_STAINED_GLASS;
+            // Spawn the perimeter frame — material and marker type depend on the bound mode.
+            String markerType;
+            VaultColor color = null;
+            Material frameMat;
+            switch (mode) {
+                case VAULT_DOOR:
+                    markerType = MT_VAULT_DOOR;
+                    color = session.getVaultColor();
+                    frameMat = (color != null) ? color.getGlassMaterial() : Material.PURPLE_STAINED_GLASS;
+                    break;
+                case SAFE_EXIT:
+                    markerType = MT_SAFE_EXIT;
+                    frameMat = Material.PURPLE_STAINED_GLASS; // evokes the nether portal
+                    break;
+                case GATE:
+                default:
+                    markerType = MT_GATE;
+                    frameMat = Material.GRAY_STAINED_GLASS;
+                    break;
+            }
 
             spawnBoundFrame(player, corner1, corner2, markerType, frameMat, color);
         }
@@ -608,9 +640,14 @@ public class ToolListener implements Listener {
         BlockData blockData = material.createBlockData();
         boolean isFirstEntity = true;
         final String vaultColorName = (vaultColor != null) ? vaultColor.name() : null;
+        // A BlockDisplay's position is its own corner, so to centre a scaled block inside its
+        // integer cell we spawn at the integer corner and translate by (1 - scale)/2 on each axis
+        // (same convention as placeBlockMarker). Spawning at pos+0.5 with a zero translation would
+        // put the block's corner at the cell centre and grow outward — the off-centre frame bug.
+        final float frameOffset = (1.0f - BOUND_FRAME_SCALE) / 2.0f;
 
         for (int[] pos : perimeterPositions) {
-            Location spawnLoc = new Location(player.getWorld(), pos[0] + 0.5, pos[1], pos[2] + 0.5);
+            Location spawnLoc = new Location(player.getWorld(), pos[0], pos[1], pos[2]);
             boolean isAnchor = isFirstEntity;
             try {
                 player.getWorld().spawn(spawnLoc, BlockDisplay.class, display -> {
@@ -619,9 +656,9 @@ public class ToolListener implements Listener {
                     display.setInvulnerable(true);
                     display.setPersistent(true);
                     display.setTransformation(new Transformation(
-                            new Vector3f(0f, 0f, 0f),
+                            new Vector3f(frameOffset, frameOffset, frameOffset),
                             new AxisAngle4f(0f, 0f, 0f, 1f),
-                            new Vector3f(0.9f, 0.9f, 0.9f),
+                            new Vector3f(BOUND_FRAME_SCALE, BOUND_FRAME_SCALE, BOUND_FRAME_SCALE),
                             new AxisAngle4f(0f, 0f, 0f, 1f)
                     ));
                     PersistentDataContainer pdc = display.getPersistentDataContainer();
@@ -645,17 +682,23 @@ public class ToolListener implements Listener {
         }
 
         // Floating label centred above the top edge of the frame.
-        Component boundLabel = MT_VAULT_DOOR.equals(markerType)
-                ? Component.text("Vault Door" + (vaultColor != null ? " " + vaultColor.name() : ""),
-                        vaultColor != null ? vaultColor.getTextColor() : NamedTextColor.LIGHT_PURPLE)
-                : Component.text("Gate", NamedTextColor.GRAY);
+        Component boundLabel;
+        if (MT_VAULT_DOOR.equals(markerType)) {
+            boundLabel = Component.text("Vault Door" + (vaultColor != null ? " " + vaultColor.name() : ""),
+                    vaultColor != null ? vaultColor.getTextColor() : NamedTextColor.LIGHT_PURPLE);
+        } else if (MT_SAFE_EXIT.equals(markerType)) {
+            boundLabel = Component.text("Safe Exit", NamedTextColor.GREEN);
+        } else {
+            boundLabel = Component.text("Gate", NamedTextColor.GRAY);
+        }
         spawnLabel(player.getWorld(), (minX + maxX) / 2.0 + 0.5, maxY + BOUND_LABEL_EXTRA,
                 (minZ + maxZ) / 2.0 + 0.5, groupId, boundLabel);
 
         sessionManager.getSession(player).pushUndo(groupId);
 
         String colorLabel = (vaultColor != null) ? " (" + vaultColor.name() + ")" : "";
-        String displayName = MT_VAULT_DOOR.equals(markerType) ? "Vault Door" : "Gate";
+        String displayName = MT_VAULT_DOOR.equals(markerType) ? "Vault Door"
+                : MT_SAFE_EXIT.equals(markerType) ? "Safe Exit" : "Gate";
         int width  = (dz <= dx && dz <= dy) ? (maxX - minX + 1) : (maxZ - minZ + 1);
         int height = maxY - minY + 1;
         player.sendActionBar(Component.text(
@@ -752,6 +795,80 @@ public class ToolListener implements Listener {
             plugin.getLogger().log(Level.SEVERE, "Failed to spawn point marker: " + markerType, e);
             player.sendMessage(Component.text("Error placing marker entity.", NamedTextColor.RED));
         }
+    }
+
+    /**
+     * Places a death-cage marker plus a cosmetic preview of where its revive/sacrifice point would
+     * sit: a lodestone (the block a teammate interacts with to revive, per {@link com.clarkson.sot.dungeon.DeathCage})
+     * {@link #DEATH_REVIVE_DIST} blocks toward the builder's horizontal facing. The preview shares the
+     * cage's group so undo/clear/left-click remove both, and it is tagged {@link #MT_DEATH_REVIVE} so
+     * the save scan skips it — the revive location is auto-derived at runtime (a later pass), and this
+     * only shows the builder roughly where it lands.
+     */
+    private void placeDeathCageMarker(PlayerInteractEvent event, Player player) {
+        Location cell = validatedAirCell(event, player);
+        if (cell == null) return;
+
+        World world = player.getWorld();
+        int bx = cell.getBlockX(), by = cell.getBlockY(), bz = cell.getBlockZ();
+        double cx = bx + 0.5, cz = bz + 0.5;
+        final String groupId = UUID.randomUUID().toString();
+
+        try {
+            // Cage anchor (the data marker) + skull icon + label.
+            spawnGroupedBlock(world, bx, by, bz, Material.IRON_BARS, 0.7f, groupId, MT_DEATH_CAGE);
+            spawnIcon(world, cx, by + MARKER_ICON_HEIGHT, cz, groupId,
+                    new ItemStack(Material.SKELETON_SKULL), MARKER_ICON_SCALE);
+            spawnLabel(world, cx, by + MARKER_LABEL_HEIGHT, cz, groupId,
+                    Component.text("Death Cage", NamedTextColor.RED));
+
+            // Revive-point preview (cosmetic): a lodestone toward the builder's facing.
+            int[] dir = horizontalCardinal(player);
+            int rx = bx + dir[0] * DEATH_REVIVE_DIST, rz = bz + dir[1] * DEATH_REVIVE_DIST;
+            spawnGroupedBlock(world, rx, by, rz, Material.LODESTONE, 0.5f, groupId, MT_DEATH_REVIVE);
+            spawnLabel(world, rx + 0.5, by + MARKER_LABEL_HEIGHT, rz + 0.5, groupId,
+                    Component.text("Revive", NamedTextColor.AQUA));
+
+            sessionManager.getSession(player).pushUndo(groupId);
+            player.sendActionBar(Component.text("Placed Death Cage", NamedTextColor.GREEN)
+                    .append(Component.text(" (revive preview toward your facing)", NamedTextColor.GRAY)));
+
+        } catch (Exception e) {
+            plugin.getLogger().log(Level.SEVERE, "Failed to spawn death cage marker", e);
+            player.sendMessage(Component.text("Error placing marker entity.", NamedTextColor.RED));
+        }
+    }
+
+    /** Spawns a centred sub-block BlockDisplay in an integer cell, tagged into the given group. */
+    private void spawnGroupedBlock(World world, int bx, int by, int bz, Material material, float scale,
+                                   String groupId, String markerType) {
+        final float off = (1.0f - scale) / 2.0f;
+        final BlockData blockData = material.createBlockData();
+        world.spawn(new Location(world, bx, by, bz), BlockDisplay.class, display -> {
+            display.setBlock(blockData);
+            display.setGravity(false);
+            display.setInvulnerable(true);
+            display.setPersistent(true);
+            display.setTransformation(new Transformation(
+                    new Vector3f(off, off, off),
+                    new AxisAngle4f(0f, 0f, 0f, 1f),
+                    new Vector3f(scale, scale, scale),
+                    new AxisAngle4f(0f, 0f, 0f, 1f)
+            ));
+            PersistentDataContainer pdc = display.getPersistentDataContainer();
+            pdc.set(BUILD_MARKER_TAG, PersistentDataType.BYTE, (byte) 1);
+            pdc.set(BOUND_GROUP_KEY, PersistentDataType.STRING, groupId);
+            pdc.set(MARKER_TYPE_KEY, PersistentDataType.STRING, markerType);
+        });
+    }
+
+    /** Nearest horizontal cardinal (as {dx, dz}) the player is facing; defaults to +Z if looking straight down. */
+    private int[] horizontalCardinal(Player player) {
+        Vector dir = player.getEyeLocation().getDirection();
+        double x = dir.getX(), z = dir.getZ();
+        if (Math.abs(x) < 1e-6 && Math.abs(z) < 1e-6) return new int[]{0, 1};
+        if (Math.abs(x) >= Math.abs(z)) return new int[]{x > 0 ? 1 : -1, 0};
+        return new int[]{0, z > 0 ? 1 : -1};
     }
 
     /**
@@ -903,19 +1020,13 @@ public class ToolListener implements Listener {
     // -------------------------------------------------------------------------
 
     private void handleLeftClick(Player player) {
-        Predicate<Entity> filter = e ->
-                e instanceof Display
-                && e.getPersistentDataContainer().has(BUILD_MARKER_TAG, PersistentDataType.BYTE);
+        Entity hit = findLookedAtMarker(player, MARKER_REACH, null);
 
-        RayTraceResult ray = player.getWorld().rayTraceEntities(
-                player.getEyeLocation(), player.getEyeLocation().getDirection(), 6.0, filter);
-
-        if (ray == null || ray.getHitEntity() == null) {
+        if (hit == null) {
             player.sendActionBar(Component.text("No marker in sight.", NamedTextColor.GRAY));
             return;
         }
 
-        Entity hit = ray.getHitEntity();
         PersistentDataContainer pdc = hit.getPersistentDataContainer();
         String markerType = pdc.getOrDefault(MARKER_TYPE_KEY, PersistentDataType.STRING, "Unknown");
 
@@ -935,6 +1046,53 @@ public class ToolListener implements Listener {
     // -------------------------------------------------------------------------
     // Helpers
     // -------------------------------------------------------------------------
+
+    /**
+     * Finds the build-marker Display the player is looking at.
+     * <p>
+     * {@link org.bukkit.World#rayTraceEntities} can't be used here: Display entities
+     * (Block/Item/Text) carry a zero-size bounding box, so a ray almost never intersects them. Instead
+     * we take every nearby marker, project its visual centre onto the look ray, and pick the nearest
+     * one lying within {@link #MARKER_SELECT_RADIUS} of the ray and in front of the player.
+     *
+     * @param extra optional additional predicate (e.g. only entry-point anchors); may be null.
+     * @return the closest matching marker entity, or null if none is being looked at.
+     */
+    @Nullable
+    private Entity findLookedAtMarker(Player player, double maxDist, @Nullable Predicate<Entity> extra) {
+        Location eye = player.getEyeLocation();
+        Vector dir = eye.getDirection().normalize();
+        Vector eyeVec = eye.toVector();
+
+        Entity best = null;
+        double bestT = Double.MAX_VALUE;
+        for (Entity e : player.getNearbyEntities(maxDist, maxDist, maxDist)) {
+            if (!(e instanceof Display)) continue;
+            if (!e.getPersistentDataContainer().has(BUILD_MARKER_TAG, PersistentDataType.BYTE)) continue;
+            if (extra != null && !extra.test(e)) continue;
+
+            Vector toCentre = markerCentre(e).subtract(eyeVec);
+            double t = toCentre.dot(dir);                     // distance along the look direction
+            if (t < 0 || t > maxDist) continue;               // behind the player, or out of reach
+            double perp = toCentre.distance(dir.clone().multiply(t)); // perpendicular offset from the ray
+            if (perp > MARKER_SELECT_RADIUS) continue;
+            if (t < bestT) { bestT = t; best = e; }
+        }
+        return best;
+    }
+
+    /**
+     * Approximate visual centre of a marker Display as a Vector. BlockDisplays are spawned at their
+     * integer cell corner (their scaled block sits centred in the cell), so their centre is +0.5 on
+     * each axis; Item/Text displays are already positioned at their visual centre.
+     */
+    private Vector markerCentre(Entity e) {
+        Location l = e.getLocation();
+        if (e instanceof BlockDisplay) {
+            return l.toVector().add(new Vector(0.5, 0.5, 0.5));
+        }
+        return l.toVector();
+    }
 
     /**
      * Removes all BUILD_MARKER_TAG entities in the world that share the given group ID.

@@ -92,9 +92,22 @@
             </plugin>
         </plugins>
         <resources>
+            <!-- Text resources (plugin.yml uses ${project.version}) are filtered. -->
             <resource>
                 <directory>src/main/resources</directory>
                 <filtering>true</filtering>
+                <excludes>
+                    <exclude>bundled_segments/**</exclude>
+                </excludes>
+            </resource>
+            <!-- Bundled segment templates + binary schematics are copied byte-for-byte;
+                 filtering would corrupt the .schem. -->
+            <resource>
+                <directory>src/main/resources</directory>
+                <filtering>false</filtering>
+                <includes>
+                    <include>bundled_segments/**</include>
+                </includes>
             </resource>
         </resources>
     </build>

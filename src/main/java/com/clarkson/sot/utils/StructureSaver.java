@@ -361,11 +361,25 @@ public class StructureSaver {
             if (safeExit != null) {
                 json.add("safeExitOffset", serializeBlockVector3(safeExit));
             }
+            SegmentBound safeExitBound = segmentTemplate.getSafeExitBound();
+            if (safeExitBound != null) {
+                json.add("safeExitBound", serializeSegmentBound(safeExitBound));
+            }
 
             json.add("sandSacrificeLocations", serializeBlockVectorList(
                     segmentTemplate.getSandSacrificeLocations(), "sandSacrificeLocations", segmentName));
             json.add("mobSpawnerLocations", serializeBlockVectorList(
                     segmentTemplate.getMobSpawnerLocations(), "mobSpawnerLocations", segmentName));
+
+            // --- Serialize hub features ---
+            BlockVector3 bank = segmentTemplate.getBankOffset();
+            if (bank != null) {
+                json.add("bankLocationOffset", serializeBlockVector3(bank));
+            }
+            json.add("deathCageLocations", serializeBlockVectorList(
+                    segmentTemplate.getDeathCageOffsets(), "deathCageLocations", segmentName));
+            json.add("sandTimerLocations", serializeBlockVectorList(
+                    segmentTemplate.getSandTimerOffsets(), "sandTimerLocations", segmentName));
 
             return json;
 

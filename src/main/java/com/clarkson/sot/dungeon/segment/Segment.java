@@ -51,6 +51,20 @@ public class Segment {
     // --- Safe Exit ---
     /** The block players interact with to escape the dungeon; null if this segment has no exit. */
     @Nullable private final BlockVector3 safeExitOffset;
+    /**
+     * The 2D safe-exit portal opening (nether portal), null if undefined. When present,
+     * {@link #safeExitOffset} is a representative cell of this bound (its min) kept for the legacy
+     * point-based escape path until walk-through escape is implemented.
+     */
+    @Nullable private final SegmentBound safeExitBound;
+
+    // --- Hub features ---
+    /** Coin-bank interact point (Sphinx / bank spot); null if this segment has no bank. */
+    @Nullable private final BlockVector3 bankOffset;
+    /** Death/respawn cage positions (max 4; revive points auto-derived at runtime). */
+    private final List<BlockVector3> deathCageOffsets;
+    /** Interact points where players deposit collected sand onto the timer. */
+    private final List<BlockVector3> sandTimerOffsets;
 
     /**
      * Full constructor. Called by SaveSegmentCommand and StructureLoader.
@@ -75,7 +89,12 @@ public class Segment {
             @Nullable BlockVector3 leverOffset,
             @NotNull  List<BlockVector3> sandSacrificeLocations,
             @NotNull  List<BlockVector3> mobSpawnerLocations,
-            @Nullable BlockVector3 safeExitOffset
+            @Nullable BlockVector3 safeExitOffset,
+            // Hub features
+            @Nullable BlockVector3 bankOffset,
+            @NotNull  List<BlockVector3> deathCageOffsets,
+            @Nullable SegmentBound safeExitBound,
+            @NotNull  List<BlockVector3> sandTimerOffsets
     ) {
         Objects.requireNonNull(name, "name");
         Objects.requireNonNull(schematicFileName, "schematicFileName");
@@ -102,6 +121,10 @@ public class Segment {
         this.sandSacrificeLocations = new ArrayList<>(sandSacrificeLocations);
         this.mobSpawnerLocations    = new ArrayList<>(mobSpawnerLocations);
         this.safeExitOffset         = safeExitOffset;
+        this.safeExitBound          = safeExitBound;
+        this.bankOffset             = bankOffset;
+        this.deathCageOffsets       = new ArrayList<>(deathCageOffsets);
+        this.sandTimerOffsets       = new ArrayList<>(sandTimerOffsets);
     }
 
     // --- Core getters ---
@@ -142,6 +165,12 @@ public class Segment {
 
     // --- Safe exit getter ---
     @Nullable public BlockVector3 getSafeExitOffset()  { return safeExitOffset; }
+    @Nullable public SegmentBound getSafeExitBound()   { return safeExitBound; }
+
+    // --- Hub feature getters ---
+    @Nullable public BlockVector3 getBankOffset()             { return bankOffset; }
+    @NotNull  public List<BlockVector3> getDeathCageOffsets() { return Collections.unmodifiableList(deathCageOffsets); }
+    @NotNull  public List<BlockVector3> getSandTimerOffsets() { return Collections.unmodifiableList(sandTimerOffsets); }
 
     // --- Entry-point helpers ---
     public boolean hasEntryPointInDirection(@NotNull Direction dir) {

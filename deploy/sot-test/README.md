@@ -38,17 +38,22 @@ Reloading SoT re-runs its `onEnable`, which reloads segment templates from disk 
 `plugman reload SoT` is enough after saving a new segment; a full `docker restart sot-test` is only
 needed for server/JVM/other-plugin changes (or if PlugManX itself is being installed).
 
-## First game (build a HUB segment — required for /sot start)
+## First game (a HUB segment is bundled)
 
-The plugin ships no segment templates, and dungeon generation needs at least one `HUB`. Once:
+The plugin **ships a bundled `hub` segment** (see `src/main/resources/bundled_segments/`), which
+`onEnable` auto-installs into `data/plugins/SoT/` on a fresh server — so `/sot start` works out of the
+box: `/sot setup` → `/sot start` teleports you to the dungeon hub and starts the sand timer. `/sot end`
+tears it down; `/sot setup <numTeams>` spreads multiple online players across teams.
 
-1. Join the server, then: `/sotbuilder` → `/sotmode <mode> [arg]` to place markers → WorldEdit-select
-   the region → `/sotsavesegment hub HUB` (writes `data/plugins/SoT/hub.json` +
-   `schematics/hub.schem`).
-2. `docker exec sot-test rcon-cli plugman reload SoT` to reload the plugin and pick up the new
-   segment (or `docker restart sot-test`).
-3. `/sot setup` → `/sot start` → you are teleported to the dungeon hub and the sand timer starts.
-   `/sot end` tears it down. `/sot setup <numTeams>` spreads multiple online players across teams.
+To build your **own** hub (or more segments) instead:
+
+1. `/sotbuilder` → `/sotmode <mode> [arg]` to place markers → WorldEdit-select the region →
+   `/sotsavesegment hub HUB` (writes `data/plugins/SoT/hub.json` + `schematics/hub.schem`).
+2. `/sotreloadsegments` (or `docker exec sot-test rcon-cli plugman reload SoT`) to load it without a
+   restart.
+3. To version-control it, run `scripts/pull-segments.sh` from your dev machine — it scp's the saved
+   `*.json` + `schematics/*.schem` into `bundled_segments/` and regenerates the manifest; commit the
+   result and it ships in the next build.
 
 ## Auto-deploy from CI (optional)
 

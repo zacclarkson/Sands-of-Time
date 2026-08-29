@@ -29,7 +29,8 @@ class DungeonGeneratorSafeExitTest {
                 0, null, null, null, null,
                 null, List.of(), null,
                 List.of(), List.of(),
-                safeExitOffset);
+                safeExitOffset,
+                null, List.of(), null, List.of());
     }
 
     /** Places a template at a relative origin, the way the generator does during a blueprint run. */

@@ -131,6 +131,16 @@ public class DungeonGenerator {
         plugin.getLogger().info("Successfully loaded " + this.availableSegments.size() + " segment templates.");
         return true;
     }
+
+    /** Number of segment templates currently loaded (for reload feedback). */
+    public int getLoadedSegmentCount() {
+        return (availableSegments == null) ? 0 : availableSegments.size();
+    }
+
+    /** True if a HUB template is currently loaded (dungeon generation needs one). */
+    public boolean hasHubTemplate() {
+        return findHubTemplate() != null;
+    }
     /**
      * Generates the dungeon layout blueprint using DFS. This is the main entry point
      * for creating the relative structure of the dungeon before it's instantiated.

@@ -67,10 +67,17 @@ manually (see `integration-test/README.md`); it is **not** part of CI.
   unit tests live. Sidebar rows keep a permanent invisible score entry each and only their
   scoreboard-team prefix is rewritten, because rewriting the entries themselves would make the whole
   sidebar flicker once a second.
-- **No segment templates are bundled.** Dungeon generation needs at least one `HUB` segment on disk
-  (`plugins/SoT/<name>.json` + `schematics/<name>.schem`). Build one in-game with the builder tools +
-  `/sotsavesegment <name> HUB`, then **restart** the server — there is no live reload. Until a HUB
-  exists, the plugin enables fine but `/sot start` aborts.
+- **A HUB segment is bundled and auto-installed.** Dungeon generation needs at least one `HUB` segment
+  on disk (`plugins/SoT/<name>.json` + `schematics/<name>.schem`). Templates listed in
+  `src/main/resources/bundled_segments/manifest.txt` are shipped in the jar and copied into the data
+  folder by `SoT.installBundledSegments()` on enable (**skip-if-present**, so in-game edits are never
+  clobbered) — so a fresh server has a working hub out of the box. To add/update the bundled set: build
+  in-game + `/sotsavesegment <name> HUB`, then `scripts/pull-segments.sh` to pull the files off the dev
+  server into `bundled_segments/` (regenerating the manifest) and commit. Binary `.schem` files are
+  kept byte-clean by a `.gitattributes` (`*.schem binary`) and by excluding `bundled_segments/**` from
+  Maven resource filtering (`pom.xml`). After saving a new segment on a running server, `/sotreloadsegments`
+  (refused while a game is RUNNING) loads it without a restart; templates are otherwise read only at
+  startup. Until a HUB exists, the plugin enables fine but `/sot start` aborts.
 - **The safe exit is a segment marker.** The escape point comes from a `SAFE_EXIT` marker on a
   segment template; a marker on the HUB segment wins over one on any other segment. Templates saved
   before that marker existed carry none, so `GameManager.getTeamSafeExitLocation` falls back to the

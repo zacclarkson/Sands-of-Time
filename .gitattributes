@@ -1,0 +1,6 @@
+# WorldEdit schematics are binary (gzipped NBT) — never apply text/EOL normalization.
+*.schem binary
+*.schematic binary
+
+# Shell scripts must stay LF so the shebang works when checked out on Linux.
+*.sh text eol=lf
