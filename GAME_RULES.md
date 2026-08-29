@@ -171,7 +171,7 @@ The HUB segment additionally defines these hub-only features (placed in the buil
 - **Bank** — a single interact point (`BANK` marker) marking where the banking Sphinx / bank spot lives
 - **Death cages** — 1–4 points (`DEATH_CAGE` markers), one per player, where dead players are held and respawn; each cage's revive/sacrifice point is auto-derived at runtime
 - **Timer deposits** — interact points (`TIMER_DEPOSIT` markers) where players place collected sand onto the timer to add time
-- **Timer column** — a single `TIMER` marker at the base of the visual sand-timer column; the draining sand timer stands in the hub at this marker (per team). When a HUB has no TIMER marker the timer falls back to the lobby anchor.
+- **Timer column** — a single `TIMER` marker at the base of the visual sand-timer column; the draining sand timer stands in the hub at this marker (per team). A HUB with no TIMER marker simply gets no visual column that round (the timer still counts down normally) — the column is never placed anywhere but the hub.
 
 ### Depth & Difficulty
 
