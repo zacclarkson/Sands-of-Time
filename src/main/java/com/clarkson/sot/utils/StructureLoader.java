@@ -208,6 +208,11 @@ public class StructureLoader {
                     json.getAsJsonArray("deathCageLocations"), "deathCageLocations", name, sourceFileName);
             List<BlockVector3> sandTimers = deserializeBlockVectorList(
                     json.getAsJsonArray("sandTimerLocations"), "sandTimerLocations", name, sourceFileName);
+            // Optional: templates saved before PLAYER_SPAWN existed simply have no array here.
+            List<BlockVector3> playerSpawns = json.has("playerSpawnLocations")
+                    ? deserializeBlockVectorList(json.getAsJsonArray("playerSpawnLocations"),
+                            "playerSpawnLocations", name, sourceFileName)
+                    : new ArrayList<>();
             BlockVector3 timerOffset = null;
             if (json.has("timerLocationOffset") && json.get("timerLocationOffset").isJsonObject()) {
                 timerOffset = deserializeBlockVector3(
@@ -240,7 +245,8 @@ public class StructureLoader {
                     deathCages != null ? deathCages : new ArrayList<>(),
                     safeExitBound,
                     sandTimers != null ? sandTimers : new ArrayList<>(),
-                    timerOffset
+                    timerOffset,
+                    playerSpawns != null ? playerSpawns : new ArrayList<>()
             );
 
         } catch (JsonParseException | IllegalStateException | ClassCastException | NullPointerException e) {

@@ -12,6 +12,9 @@ import org.bukkit.inventory.meta.components.CustomModelDataComponent;
 import org.bukkit.persistence.PersistentDataContainer;
 import org.bukkit.persistence.PersistentDataType;
 import org.bukkit.plugin.Plugin;
+import org.bukkit.util.Transformation;
+import org.joml.AxisAngle4f;
+import org.joml.Vector3f;
 
 import java.util.List;
 import java.util.Objects;
@@ -153,9 +156,17 @@ public class CoinStack implements FloorItem {
                  display.setGravity(false);
                  display.setPersistent(false); // Don't save these entities across server restarts
                  display.setInvulnerable(true);
-                 // TODO: Adjust ItemDisplay Transformation (size, rotation, alignment) if desired
-                 // Example: display.setTransformation(new Transformation(...));
-                 // Example: display.setBillboard(Display.Billboard.CENTER); // Make it face the player
+                 // Lie flat on the ground: 90 deg around X tips the upright item face-down.
+                 // Leave the billboard at its default FIXED so this rotation is honored
+                 // (a CENTER billboard would face the camera and cancel it).
+                 float scale = 0.7f;
+                 AxisAngle4f rotation = new AxisAngle4f((float) Math.toRadians(90), 1f, 0f, 0f);
+                 Vector3f translation = new Vector3f(0f, -0.2f, 0f);
+                 display.setTransformation(new Transformation(
+                         translation,
+                         rotation,
+                         new Vector3f(scale, scale, scale),
+                         new AxisAngle4f(0f, 0f, 0f, 1f)));
 
                  // 9. Add PDC Tags to the ENTITY for identification during gameplay/pickup
                  PersistentDataContainer pdc = display.getPersistentDataContainer();

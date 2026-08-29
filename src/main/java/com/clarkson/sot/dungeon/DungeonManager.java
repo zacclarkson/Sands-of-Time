@@ -8,12 +8,15 @@ import com.clarkson.sot.events.FloorItemManager;
 import com.clarkson.sot.main.GameManager;
 
 // Bukkit/WorldEdit imports
+import com.clarkson.sot.events.SegmentBuilderKeys;
 import org.bukkit.Location;
 import org.bukkit.Material;
+import org.bukkit.NamespacedKey;
 import org.bukkit.World;
 import org.bukkit.block.Block;
 import org.bukkit.entity.Entity; // Import Entity
 import org.bukkit.entity.Player; // Import Player
+import org.bukkit.persistence.PersistentDataType;
 import org.bukkit.plugin.Plugin;
 import org.bukkit.util.Vector;
 import com.sk89q.worldedit.math.BlockVector3;
@@ -121,6 +124,7 @@ public class DungeonManager {
         List<Location> absSandSpawns = calculateAbsoluteLocations(blueprintData.getSandSpawnRelativeLocations());
         List<Location> absCoinSpawns = calculateAbsoluteLocations(blueprintData.getCoinSpawnRelativeLocations());
         List<Location> absItemSpawns = calculateAbsoluteLocations(blueprintData.getItemSpawnRelativeLocations());
+        List<Location> absPlayerSpawns = calculateAbsoluteLocations(blueprintData.getPlayerSpawnRelativeLocations());
         Location absHubLocation = dungeonOrigin.clone().add(blueprintData.getHubRelativeLocation());
         Vector safeExitRelative = blueprintData.getSafeExitRelativeLocation();
         Location absSafeExitLocation = (safeExitRelative != null) ? dungeonOrigin.clone().add(safeExitRelative) : null;
@@ -134,6 +138,10 @@ public class DungeonManager {
              return false;
         }
         plugin.getLogger().info("Pasted all " + placedSegmentsInWorld.size() + " segment schematics for team " + teamId);
+
+        // Strip any builder-marker Display entities baked into older schematics (saved before we
+        // stopped copying entities). Without this they render as floating markers during play.
+        removeBakedBuildMarkers();
 
 
         // --- 3. Create Dungeon Data Object ---
@@ -159,7 +167,7 @@ public class DungeonManager {
                 teamId, world, dungeonOrigin, blueprintData,
                 absHubLocation, absVaultMarkers, absKeySpawns,
                 absSandSpawns, absCoinSpawns, absItemSpawns,
-                deathCages, absSafeExitLocation
+                deathCages, absSafeExitLocation, absPlayerSpawns
             );
              plugin.getLogger().info("Created Dungeon data object for team " + teamId);
          } catch (Exception e) {
@@ -439,6 +447,37 @@ public class DungeonManager {
      * Clears the area using WorldEdit and removes non-player entities.
      * Also clears state from associated managers.
      */
+    /**
+     * Removes builder-marker Display entities that were baked into a segment schematic (segments
+     * saved while StructureSaver still copied entities). Marker entities are tagged with
+     * {@link SegmentBuilderKeys#BUILD_MARKER_TAG}; players and gameplay entities are left untouched.
+     */
+    private void removeBakedBuildMarkers() {
+        if (blueprintData == null) return;
+        Area relativeBounds = blueprintData.getRelativeBounds();
+        Location absMinLoc = dungeonOrigin.clone().add(relativeBounds.getMinPoint().toVector());
+        Location absMaxLoc = dungeonOrigin.clone().add(relativeBounds.getMaxPoint().toVector());
+        NamespacedKey markerKey = new NamespacedKey(plugin, SegmentBuilderKeys.BUILD_MARKER_TAG);
+        try {
+            Collection<Entity> entitiesInBounds = world.getNearbyEntities(new org.bukkit.util.BoundingBox(
+                    absMinLoc.getX(), absMinLoc.getY(), absMinLoc.getZ(),
+                    absMaxLoc.getX() + 1, absMaxLoc.getY() + 1, absMaxLoc.getZ() + 1));
+            int removed = 0;
+            for (Entity entity : entitiesInBounds) {
+                if (entity instanceof Player) continue;
+                if (entity.getPersistentDataContainer().has(markerKey, PersistentDataType.BYTE)) {
+                    entity.remove();
+                    removed++;
+                }
+            }
+            if (removed > 0) {
+                plugin.getLogger().info("Removed " + removed + " baked-in builder markers for team " + teamId);
+            }
+        } catch (Exception e) {
+            plugin.getLogger().log(Level.WARNING, "Error removing baked-in builder markers for team " + teamId, e);
+        }
+    }
+
     public void cleanupInstance() {
          plugin.getLogger().info("Attempting cleanup for dungeon instance of team " + teamId + " at origin " + dungeonOrigin.toVector());
 

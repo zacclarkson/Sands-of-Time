@@ -272,12 +272,14 @@ public class DungeonGenerator {
         }
 
         Vector timerBaseRelativeLocation = selectTimerBaseRelativeLocation(placedSegments);
+        List<Vector> playerSpawnRelativeLocations = selectPlayerSpawnRelativeLocations(placedSegments);
 
         // --- Create and Return Blueprint ---
         return new DungeonBlueprint(
                 placedSegments, hubRelativeLocation, vaultMarkerRelativeLocations, keySpawnRelativeLocations,
                 sandSpawnRelativeLocations, coinSpawnRelativeLocations, itemSpawnRelativeLocations,
-                blueprintBounds, safeExitRelativeLocation, timerBaseRelativeLocation
+                blueprintBounds, safeExitRelativeLocation, timerBaseRelativeLocation,
+                playerSpawnRelativeLocations
         );
     }
 
@@ -731,6 +733,30 @@ public class DungeonGenerator {
             bestFromHub = fromHub;
         }
         return best;
+    }
+
+    /**
+     * Collects the blueprint-relative per-player spawn points from {@code PLAYER_SPAWN} markers.
+     * A HUB template's spawns win: if any HUB defines spawns those are used exclusively; otherwise
+     * every segment's spawns are gathered. Empty when no template defines any (callers fall back to
+     * the hub location).
+     */
+    @NotNull
+    static List<Vector> selectPlayerSpawnRelativeLocations(@NotNull List<PlacedSegment> placedSegments) {
+        List<Vector> hubSpawns = new ArrayList<>();
+        List<Vector> otherSpawns = new ArrayList<>();
+        for (PlacedSegment placedSegment : placedSegments) {
+            Segment template = placedSegment.getSegmentTemplate();
+            if (template == null) continue;
+            boolean fromHub = template.getType() == SegmentType.HUB;
+            Vector origin = placedSegment.getWorldOrigin().toVector();
+            for (BlockVector3 offset : template.getPlayerSpawnOffsets()) {
+                BlockVector3 rot = placedSegment.getRotatedOffset(offset);
+                Vector abs = origin.clone().add(new Vector(rot.x(), rot.y(), rot.z()));
+                (fromHub ? hubSpawns : otherSpawns).add(abs);
+            }
+        }
+        return !hubSpawns.isEmpty() ? hubSpawns : otherSpawns;
     }
 
     /**

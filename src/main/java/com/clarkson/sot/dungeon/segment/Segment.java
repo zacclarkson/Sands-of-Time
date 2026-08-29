@@ -67,6 +67,8 @@ public class Segment {
     private final List<BlockVector3> sandTimerOffsets;
     /** Base of the visual sand-timer column (hub); null if this segment has no timer. */
     @Nullable private final BlockVector3 timerOffset;
+    /** Per-player spawn positions in the hub; players are spread across these at game start. */
+    private final List<BlockVector3> playerSpawnOffsets;
 
     /**
      * Full constructor. Called by SaveSegmentCommand and StructureLoader.
@@ -97,7 +99,8 @@ public class Segment {
             @NotNull  List<BlockVector3> deathCageOffsets,
             @Nullable SegmentBound safeExitBound,
             @NotNull  List<BlockVector3> sandTimerOffsets,
-            @Nullable BlockVector3 timerOffset
+            @Nullable BlockVector3 timerOffset,
+            @NotNull  List<BlockVector3> playerSpawnOffsets
     ) {
         Objects.requireNonNull(name, "name");
         Objects.requireNonNull(schematicFileName, "schematicFileName");
@@ -129,6 +132,7 @@ public class Segment {
         this.deathCageOffsets       = new ArrayList<>(deathCageOffsets);
         this.sandTimerOffsets       = new ArrayList<>(sandTimerOffsets);
         this.timerOffset            = timerOffset;
+        this.playerSpawnOffsets     = new ArrayList<>(playerSpawnOffsets);
     }
 
     // --- Core getters ---
@@ -175,6 +179,7 @@ public class Segment {
     @Nullable public BlockVector3 getBankOffset()             { return bankOffset; }
     @NotNull  public List<BlockVector3> getDeathCageOffsets() { return Collections.unmodifiableList(deathCageOffsets); }
     @NotNull  public List<BlockVector3> getSandTimerOffsets() { return Collections.unmodifiableList(sandTimerOffsets); }
+    @NotNull  public List<BlockVector3> getPlayerSpawnOffsets() { return Collections.unmodifiableList(playerSpawnOffsets); }
     @Nullable public BlockVector3 getTimerOffset()            { return timerOffset; }
 
     // --- Entry-point helpers ---
