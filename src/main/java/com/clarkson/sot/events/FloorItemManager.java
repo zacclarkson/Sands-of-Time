@@ -1,8 +1,10 @@
 package com.clarkson.sot.events; // Or a more suitable package like com.clarkson.sot.items
 
+import com.clarkson.sot.dungeon.VaultColor;
 import com.clarkson.sot.entities.CoinStack;
 import com.clarkson.sot.entities.FloorItem;
 import com.clarkson.sot.entities.FloorLoot;
+import com.clarkson.sot.entities.Key;
 import com.clarkson.sot.main.GameManager;
 import com.clarkson.sot.main.GameState;
 import com.clarkson.sot.main.SoT;
@@ -40,6 +42,12 @@ public class FloorItemManager implements Listener {
 
     // Configuration for pickup radius (squared for efficiency)
     private static final double PICKUP_RADIUS_SQUARED = 1.5 * 1.5; // Example: 1.5 blocks
+    // FloorItem.getLocation() is the block corner, but every implementation spawns its ItemDisplay
+    // at the block centre (see CoinStack/FloorLoot/Key.spawnRepresentation). Measure to the visual
+    // so the pickup sphere is centred on what the player can actually see; keep these in step.
+    private static final double DISPLAY_OFFSET_X = 0.5;
+    private static final double DISPLAY_OFFSET_Y = 0.1;
+    private static final double DISPLAY_OFFSET_Z = 0.5;
 
     public FloorItemManager(@NotNull SoT plugin, @NotNull GameManager gameManager, @NotNull ScoreManager scoreManager) {
         this.plugin = plugin;
@@ -47,7 +55,8 @@ public class FloorItemManager implements Listener {
         this.scoreManager = scoreManager;
         this.activeFloorItems = new ConcurrentHashMap<>();
         this.itemsByTeamInstance = new ConcurrentHashMap<>();
-        plugin.getServer().getPluginManager().registerEvents(this, plugin);
+        // Registered as a listener by SoT.onEnable, which is the single registration point for the
+        // GameManager-owned manager instances. Registering here too would double-fire every event.
         plugin.getLogger().info("FloorItemManager initialized.");
     }
 
@@ -68,6 +77,40 @@ public class FloorItemManager implements Listener {
         CoinStack coinStack = new CoinStack(plugin, location, baseValue, teamId, segmentInstanceId, depth);
         trackItem(coinStack);
         plugin.getLogger().finer("Spawned CoinStack " + coinStack.getUniqueId() + " for team " + teamId);
+    }
+
+    /**
+     * Spawns a coloured vault key as a tracked floor item.
+     * <p>Unlike the dropped Item entity this replaced, the key stays on the block it was placed on,
+     * never despawns, and can only be collected by the team that owns this dungeon instance.
+     *
+     * @param location Absolute world location.
+     * @param color The vault colour this key opens.
+     * @param teamId Owning team.
+     * @param segmentInstanceId Owning segment instance.
+     * @param depth Dungeon depth.
+     * @return the tracked Key.
+     */
+    @NotNull
+    public Key spawnKey(@NotNull Location location, @NotNull VaultColor color, @NotNull UUID teamId,
+                        @NotNull UUID segmentInstanceId, int depth) {
+        Key key = new Key(plugin, location, color, teamId, segmentInstanceId, depth);
+        trackItem(key);
+        plugin.getLogger().finer("Spawned " + color + " Key " + key.getUniqueId() + " for team " + teamId);
+        return key;
+    }
+
+    /**
+     * Spawns a rusty (segment door) key as a tracked floor item.
+     * @return the tracked Key.
+     */
+    @NotNull
+    public Key spawnRustyKey(@NotNull Location location, @NotNull UUID teamId,
+                             @NotNull UUID segmentInstanceId, int depth) {
+        Key key = Key.createRustyKey(plugin, location, teamId, segmentInstanceId, depth);
+        trackItem(key);
+        plugin.getLogger().finer("Spawned rusty Key " + key.getUniqueId() + " for team " + teamId);
+        return key;
     }
 
     /**
@@ -142,6 +185,16 @@ public class FloorItemManager implements Listener {
         }
     }
 
+    /**
+     * @return A snapshot of the floor items currently tracked for a team. Empty if the team has none.
+     */
+    @NotNull
+    public List<FloorItem> getTrackedItems(@NotNull UUID teamId) {
+        Set<UUID> ids = itemsByTeamInstance.get(teamId);
+        if (ids == null) return List.of();
+        return ids.stream().map(activeFloorItems::get).filter(Objects::nonNull).toList();
+    }
+
     // --- Pickup Detection (Proximity) ---
 
     @EventHandler(priority = EventPriority.NORMAL, ignoreCancelled = true)
@@ -176,7 +229,9 @@ public class FloorItemManager implements Listener {
             FloorItem item = activeFloorItems.get(itemId);
             if (item != null && !item.isPickedUp()) {
                 // Check world first for efficiency
-                Location itemLoc = item.getLocation();
+                // Measure to the item's visual, not to the block corner it is anchored at.
+                Location itemLoc = item.getLocation()
+                        .add(DISPLAY_OFFSET_X, DISPLAY_OFFSET_Y, DISPLAY_OFFSET_Z);
                  if (itemLoc.getWorld().equals(playerLoc.getWorld())) {
                      // Use distance squared for performance
                      if (playerLoc.distanceSquared(itemLoc) <= PICKUP_RADIUS_SQUARED) {
