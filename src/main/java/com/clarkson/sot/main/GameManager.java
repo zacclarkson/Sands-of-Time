@@ -118,15 +118,18 @@ public class GameManager {
     /**
      * Sets up the participating teams for the current game instance.
      * Creates SoTTeam objects and stores them.
-     * Uses lobbyLocation to determine visual timer placement.
+     *
+     * <p>Teams start without a visual sand column: it is anchored on the hub's TIMER marker in
+     * {@link #startGame()}, once each team's dungeon has been pasted.
      *
      * @param participatingTeamIds List of UUIDs for teams participating.
      * @param allPlayersInGame     List of all players involved in the game.
      */
     public void setupGame(List<UUID> participatingTeamIds, List<Player> allPlayersInGame) {
         if (currentState != GameState.SETUP) { /* ... warning ... */ return; }
-        // Visual sand timers get anchored on the lobby here, so refuse before placing them at a
-        // fallback location. State is left alone so the admin can fix config and retry.
+        // startGame derives the dungeon world and origin from these, so refuse now rather than
+        // generating a round somewhere nobody chose. State is left alone so the admin can fix config
+        // and retry.
         if (!areLocationsConfigured()) {
             plugin.getLogger().severe("Cannot set up game: unconfigured location(s) "
                     + getUnconfiguredLocationNames() + ". Use /sot set <lobby|trapped>.");
@@ -149,19 +152,11 @@ public class GameManager {
         // ... (Validate player assignments - same as before) ...
 
         // Create SoTTeam instances for each participating team
-        int visualTimerIndex = 0; // Column slot in the lobby, one per participating team
         for (UUID teamId : participatingTeamIds) {
             TeamDefinition definition = teamManager.getTeamDefinition(teamId);
             if (definition == null) { /* ... warning ... */ continue; }
 
-            // Via the getter: it hands out a copy, so the team's timer display cannot end up holding
-            // a reference to the live lobby field.
-            Location anchor = getLobbyLocation();
-            Location visualTimerBottom = determineVisualTimerBottomLocation(definition, anchor, visualTimerIndex);
-            Location visualTimerTop = determineVisualTimerTopLocation(definition, anchor, visualTimerIndex);
-            visualTimerIndex++;
-
-            SoTTeam activeTeam = new SoTTeam(definition, plugin, this, visualTimerBottom, visualTimerTop);
+            SoTTeam activeTeam = new SoTTeam(definition, plugin, this);
             activeTeamsInGame.put(teamId, activeTeam);
             plugin.getLogger().info("Initialized SoTTeam for: " + definition.getName());
 
@@ -228,13 +223,16 @@ public class GameManager {
             }
             teamDungeonManagers.put(teamId, teamDungeon); // Store the manager
 
-            // 2b. Move the visual sand timer from its lobby fallback into this team's hub, if the hub
-            //     defines a TIMER marker. Safe here because the display hasn't rendered blocks yet
-            //     (timers start below). Falls back to the lobby column when no marker exists.
+            // 2b. Anchor the team's visual sand column on its hub's TIMER marker. This is the only
+            //     place the column ever gets a location: with no marker the team plays without one
+            //     rather than having a stray pillar of sand appear at the lobby.
             Location timerBase = teamDungeon.getTimerBaseLocation();
             if (timerBase != null) {
                 Location timerTop = timerBase.clone().add(0, VisualTimerLayout.COLUMN_HEIGHT_BLOCKS, 0);
                 team.relocateVisualTimer(timerBase, timerTop);
+            } else {
+                plugin.getLogger().warning("Hub defines no TIMER marker; visual sand column disabled"
+                        + " for team " + team.getTeamName() + " this round.");
             }
 
             // 3. Assign each player to their own death cage
@@ -384,6 +382,21 @@ public class GameManager {
          checkGameEndCondition(); // Check if game should end now
     }
 
+    /**
+     * Whether a team member should be pulled back to the lobby when the round ends.
+     *
+     * <p>Everyone except the players locked in by their timer. {@link #handleTeamTimerEnd} only
+     * <i>queues</i> the trapped teleport ({@code runTask} = next tick) and then calls
+     * {@link #checkGameEndCondition} synchronously, so on the last team's expiry
+     * {@link #endGameInternal} runs in that same tick and queues its lobby teleport <i>behind</i>
+     * the trapped one. Teleporting a trapped player here would therefore silently undo the
+     * trapping — which is exactly what used to happen in a single-team round, where the game
+     * always ends on the tick the team is trapped.
+     */
+    static boolean returnsToLobbyAtGameEnd(PlayerStatus status) {
+        return status != PlayerStatus.TRAPPED_TIMER_OUT;
+    }
+
     /** Checks if all active teams' timers have expired. */
     private void checkGameEndCondition() {
         if (currentState != GameState.RUNNING) return;
@@ -400,8 +413,9 @@ public class GameManager {
 
         for (SoTTeam team : activeTeamsInGame.values()) {
             if (team.isTimerRunning()) team.stopTimer();
-            // Tear down the visual sand column too. A hub column is inside the dungeon bounds and
-            // gets air-filled by cleanupInstance below, but a lobby-fallback column is not.
+            // Tear down the visual sand column too. cleanupInstance below air-fills the dungeon
+            // bounds, which covers it, but this also disarms the display and keeps its own block
+            // count honest for the next round.
             team.clearVisualTimer();
         }
 
@@ -412,10 +426,13 @@ public class GameManager {
         // --- Final score calculations & display ---
         displayFinalScores();
 
-        // Teleport remaining players to lobby (snapshot once; the field is mutable)
+        // Teleport remaining players to lobby (snapshot once; the field is mutable).
+        // The status must be read here rather than inside the task below — clearAllStates() runs
+        // further down in this same tick, so by the time the task fires every status is gone.
         final Location lobbyDestination = getLobbyLocation();
         for (SoTTeam team : activeTeamsInGame.values()) {
             for (UUID memberId : team.getMemberUUIDs()) {
+                if (!returnsToLobbyAtGameEnd(playerStateManager.getStatus(memberId))) continue;
                 Player player = Bukkit.getPlayer(memberId);
                 if (player != null && player.isOnline()) {
                     Bukkit.getScheduler().runTask(plugin, () -> {
@@ -528,16 +545,17 @@ public class GameManager {
         playerStateManager.updateStatus(playerUUID, PlayerStatus.ESCAPED_SAFE);
         scoreManager.playerEscaped(playerUUID);
 
-        // Teleport to safe exit
-        Location safeExit = getTeamSafeExitLocation(teamId);
-        if (safeExit != null) {
-            Bukkit.getScheduler().runTask(plugin, () -> {
-                if (player.isValid()) {
-                    player.teleport(safeExit.clone().add(0.5, 0.1, 0.5));
-                    player.sendMessage(Component.text("You escaped safely!", NamedTextColor.GREEN));
-                }
-            });
-        }
+        // Out of the dungeon and out of the round: escaping is irreversible, so send them back to
+        // the lobby rather than leaving them standing at the exit block inside the dungeon.
+        // ESCAPED_SAFE already bars them from escaping again (EscapeListener) and from spending
+        // sand (SandManager); the lobby puts them physically out of reach of the dungeon too.
+        final Location lobbyDestination = getLobbyLocation();
+        Bukkit.getScheduler().runTask(plugin, () -> {
+            if (player.isValid()) {
+                player.teleport(lobbyDestination);
+                player.sendMessage(Component.text("You escaped safely!", NamedTextColor.GREEN));
+            }
+        });
 
         // Notify team
         NamedTextColor teamColor = teamManager.getTeamColor(teamId);
@@ -729,32 +747,6 @@ public class GameManager {
     public UUID getTeamIdForLocation(Location location) { /* ... (Implementation remains the same) ... */ return null;}
     /** Gets the DungeonManager instance for a specific team. */
     @Nullable public DungeonManager getTeamDungeonManager(UUID teamId) { return teamDungeonManagers.get(teamId); }
-    /**
-     * Determines the bottom location (the block below the sand column) for a team's visual timer.
-     * Returns null if the anchor has no loaded world, which disables that team's display.
-     */
-    @Nullable
-    private Location determineVisualTimerBottomLocation(TeamDefinition teamDef, Location anchorLocation, int teamIndex) {
-        if (!hasVisualTimerWorld(teamDef, anchorLocation)) return null;
-        return VisualTimerLayout.bottomLocation(anchorLocation, teamIndex);
-    }
-
-    /**
-     * Determines the top location (the highest sand block) for a team's visual timer.
-     * Returns null if the anchor has no loaded world, which disables that team's display.
-     */
-    @Nullable
-    private Location determineVisualTimerTopLocation(TeamDefinition teamDef, Location anchorLocation, int teamIndex) {
-        if (!hasVisualTimerWorld(teamDef, anchorLocation)) return null;
-        return VisualTimerLayout.topLocation(anchorLocation, teamIndex);
-    }
-
-    private boolean hasVisualTimerWorld(TeamDefinition teamDef, Location anchorLocation) {
-        if (anchorLocation != null && anchorLocation.getWorld() != null) return true;
-        plugin.getLogger().warning("Lobby anchor has no loaded world; visual timer disabled for team "
-                + (teamDef != null ? teamDef.getName() : "unknown"));
-        return false;
-    }
 
     // --- Standard Getters ---
     public GameState getCurrentState() { return currentState; }

@@ -34,6 +34,13 @@ public class VisualSandTimerDisplay {
 
     private BukkitTask visualUpdateTask; // The Bukkit scheduler task for updates
     private int lastKnownVisualBlocks = -1; // Tracks the last calculated target block count
+    /**
+     * Whether the column is allowed to touch blocks yet. False until {@link #startVisualUpdates()},
+     * so a display created at {@code /sot setup} — before the dungeon exists and before
+     * {@link #relocate} has anchored it in the team's hub — never renders sand at a placeholder
+     * location. Every block-writing path is gated on this.
+     */
+    private boolean armed = false;
 
     // Configuration constants
     /** How many seconds of the logical timer each sand block represents. */
@@ -83,9 +90,10 @@ public class VisualSandTimerDisplay {
     }
 
     /**
-     * Moves the (not-yet-rendered) column to a new bottom/top before visual updates start — used to
-     * anchor a team's timer in its dungeon hub once the hub exists. No-op (with a warning) if updates
-     * are already running, since that would orphan the previously placed sand blocks.
+     * Moves the column to a new bottom/top before visual updates start — used to anchor a team's
+     * timer in its dungeon hub once the hub exists. Any sand already standing at the old position is
+     * cleared first, so a relocation can never orphan blocks. No-op (with a warning) if updates are
+     * already running.
      *
      * @return true if the column was relocated.
      */
@@ -102,6 +110,7 @@ public class VisualSandTimerDisplay {
             plugin.getLogger().warning("Ignoring invalid visual timer relocate for team " + team.getTeamName());
             return false;
         }
+        clearColumn();
         this.bottomLocation = newBottom.clone();
         this.topLocation = newTop.clone();
         this.totalHeight = newTop.getBlockY() - newBottom.getBlockY();
@@ -126,6 +135,10 @@ public class VisualSandTimerDisplay {
             return;
         }
 
+        // Arm before the first sync: this is the point where the column is finally anchored where it
+        // belongs (the team's hub) and is allowed to place blocks.
+        armed = true;
+
         // Perform an initial sync to set the correct number of blocks
         plugin.getLogger().fine("Performing initial visual sync for team " + team.getTeamName());
         syncVisualState(); // Set initial state based on current time
@@ -149,13 +162,19 @@ public class VisualSandTimerDisplay {
     }
 
     /**
-     * Stops updates and clears every sand block in the column back to air. Used by end-of-game
-     * cleanup: a column relocated into the dungeon hub is wiped by the dungeon air-fill, but a
-     * lobby-fallback column (hub had no TIMER marker) sits outside every cleanup region and would
-     * otherwise be left standing between rounds.
+     * Stops updates, clears every sand block in the column back to air and disarms the display, so
+     * the same object can be re-anchored and re-rendered for another round. Used by end-of-game
+     * cleanup: the dungeon air-fill already wipes the hub, but this keeps the column's own state
+     * honest and covers a column standing outside the cleanup region.
      */
     public void stopAndClear() {
         stopVisualUpdates();
+        clearColumn();
+        armed = false;
+    }
+
+    /** Sets every sand block in the current column back to air, without physics. */
+    private void clearColumn() {
         if (totalHeight <= 0) return;
         World world = bottomLocation.getWorld();
         if (world == null) return;
@@ -175,7 +194,7 @@ public class VisualSandTimerDisplay {
      */
     private void updateVisuals() {
         // Stop if task was cancelled externally or height is invalid
-        if (totalHeight <= 0 || visualUpdateTask == null || visualUpdateTask.isCancelled()) {
+        if (!armed || totalHeight <= 0 || visualUpdateTask == null || visualUpdateTask.isCancelled()) {
             stopVisualUpdates(); // Ensure stopped state
             return;
         }
@@ -213,6 +232,9 @@ public class VisualSandTimerDisplay {
      * the difference. Useful after time is added or when starting/resetting the timer.
      */
     public void syncVisualState() {
+        // Not armed yet: the column has no real anchor (the dungeon may not even exist), so placing
+        // sand here would leave a stray pillar wherever the display happened to be created.
+        if (!armed) return;
         if (totalHeight <= 0) return; // Don't run for invalid timers
 
         // Get current logical time and calculate target block count

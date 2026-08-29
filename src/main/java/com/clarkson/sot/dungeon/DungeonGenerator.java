@@ -251,7 +251,9 @@ public class DungeonGenerator {
         // --- Validate Required Vaults & Keys ---
         // Validation relies on consolidateFeatureLocations having correctly populated the maps
         boolean valid = true;
-        VaultColor[] requiredKeys = {VaultColor.RED, VaultColor.GREEN, VaultColor.GOLD}; // Blue key is not placed by DFS
+        // BLUE is checked separately below: it lives on the hub, and a hub template saved before the
+        // KEY_SPAWN marker existed should still generate a (partly incomplete) dungeon.
+        VaultColor[] requiredKeys = {VaultColor.RED, VaultColor.GREEN, VaultColor.GOLD};
         VaultColor[] requiredVaults = {VaultColor.BLUE, VaultColor.RED, VaultColor.GREEN, VaultColor.GOLD}; // All 4 vaults must be placed by DFS
 
         for (VaultColor requiredColor : requiredVaults) {
@@ -265,6 +267,13 @@ public class DungeonGenerator {
                 plugin.getLogger().warning("Validation Failed: Missing key spawn location for color: " + requiredColor);
                 valid = false;
             }
+        }
+        // The blue key belongs on the hub (see GAME_RULES.md), but a hub template saved without a
+        // KEY_SPAWN marker carries none. Warn rather than fail: a dungeon missing one vault beats
+        // no dungeon at all. Add a BLUE KEY_SPAWN marker to the hub and re-save it to fix.
+        if (!keySpawnRelativeLocations.containsKey(VaultColor.BLUE)) {
+            plugin.getLogger().warning("No BLUE key spawn in any segment template; the blue vault will "
+                    + "not be openable. Add a BLUE KEY_SPAWN marker to your HUB segment and re-save it.");
         }
 
         if (!valid) {
@@ -813,8 +822,11 @@ public class DungeonGenerator {
             // --- Consolidate Key Spawn ---
             VaultColor keyColor = template.getContainedVaultKey();
             BlockVector3 keyOffset = template.getKeyOffset(); // Offset relative to segment origin
-             // Ignore Blue Key consolidation - handled separately by VaultManager relative to Hub
-            if (keyColor != null && keyOffset != null && keyColor != VaultColor.BLUE) {
+            // BLUE is consolidated like every other colour. It used to be skipped here on the
+            // assumption that VaultManager placed it relative to the hub, but no such code ever
+            // existed, so the blue key never spawned and the blue vault could not be opened. The
+            // hub is itself a placed segment, so a BLUE key marker on it flows through this path.
+            if (keyColor != null && keyOffset != null) {
                 // Calculate final relative position: Segment Origin + rotated offset
                 Vector keyRelativePos = addRotated(segmentRelativeOrigin, placedSegment, keyOffset);
                 // Only add if this color hasn't been placed yet

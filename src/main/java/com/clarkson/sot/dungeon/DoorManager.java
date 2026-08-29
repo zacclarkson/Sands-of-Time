@@ -46,11 +46,12 @@ public class DoorManager implements Listener {
     // Store active doors per team instance, mapped by their Lock Location for quick lookup
     private final Map<UUID, Map<Location, Door>> doorsByTeamAndLockLocation;
 
-    // NOTE: this class does NOT register itself as a listener -- see the note in VaultManager.
     public DoorManager(SoT plugin, GameManager gameManager) {
         this.plugin = plugin;
         this.gameManager = gameManager;
         this.doorsByTeamAndLockLocation = new ConcurrentHashMap<>();
+        // Registered as a listener by SoT.onEnable, which is the single registration point for the
+        // GameManager-owned manager instances. Registering here too would double-fire every event.
         plugin.getLogger().info("DoorManager initialized.");
     }
 

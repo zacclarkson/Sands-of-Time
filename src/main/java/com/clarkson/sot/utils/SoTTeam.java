@@ -41,26 +41,25 @@ public class SoTTeam {
 
     /**
      * Constructor for an active SoTTeam instance.
+     *
+     * <p>The team starts with no visual sand column: teams are created at {@code /sot setup}, before
+     * the dungeon (and therefore the hub's TIMER marker) exists, and a column created here would have
+     * to stand at some placeholder location. {@link #relocateVisualTimer} builds it once the team's
+     * hub is known.
      */
-    public SoTTeam(TeamDefinition teamDefinition, Plugin plugin, GameManager gameManager, Location visualTimerBottom, Location visualTimerTop) {
+    public SoTTeam(TeamDefinition teamDefinition, Plugin plugin, GameManager gameManager) {
         this.teamDefinition = Objects.requireNonNull(teamDefinition, "TeamDefinition cannot be null");
         this.plugin = Objects.requireNonNull(plugin, "Plugin cannot be null");
         this.gameManager = Objects.requireNonNull(gameManager, "GameManager cannot be null");
         this.memberUUIDs = new HashSet<>();
+        this.visualTimerDisplay = null;
 
-        // Create Visual Timer Display
-        if (visualTimerBottom != null && visualTimerTop != null && visualTimerBottom.getWorld() != null && visualTimerTop.getWorld() != null) {
-            this.visualTimerDisplay = new VisualSandTimerDisplay(plugin, this, visualTimerBottom, visualTimerTop);
-        } else {
-            plugin.getLogger().log(Level.WARNING, "Visual timer locations invalid for team " + teamDefinition.getName() + ". Visual timer disabled.");
-            this.visualTimerDisplay = null;
-        }
-
-        // Create the TeamTimer instance
+        // Create the TeamTimer instance. The visual display is attached later, if the team's hub
+        // defines a TIMER marker.
         this.teamTimer = new TeamTimer(
                 plugin,
                 () -> this.gameManager.handleTeamTimerEnd(this), // Updated callback
-                this.visualTimerDisplay,
+                null,
                 DEFAULT_START_SECONDS,
                 TeamTimer.DEFAULT_MAX_TIMER_SECONDS,
                 TeamTimer.DEFAULT_TIMER_INTERVAL_TICKS
@@ -89,12 +88,22 @@ public class SoTTeam {
 
 
     /**
-     * Moves this team's visual sand-timer column to a new bottom/top before the timer starts. Used to
-     * anchor the column in the team's dungeon hub (it is created against the lobby at setup time, before
-     * the hub exists). No-op if the team has no visual timer.
+     * Anchors this team's visual sand-timer column at the given bottom/top, creating the display on
+     * first call and moving it on any later one. Called from {@code GameManager.startGame} once the
+     * team's dungeon hub has been pasted and its TIMER marker resolved to a world location — a hub
+     * with no TIMER marker never calls this, so the team simply plays without a sand column rather
+     * than getting one somewhere arbitrary.
      */
     public void relocateVisualTimer(Location bottom, Location top) {
-        if (visualTimerDisplay != null) {
+        if (bottom == null || top == null || bottom.getWorld() == null || top.getWorld() == null) {
+            plugin.getLogger().log(Level.WARNING, "Invalid visual timer location for team "
+                    + getTeamName() + ". Visual timer disabled.");
+            return;
+        }
+        if (visualTimerDisplay == null) {
+            visualTimerDisplay = new VisualSandTimerDisplay(plugin, this, bottom, top);
+            teamTimer.setVisualNotifier(visualTimerDisplay);
+        } else {
             visualTimerDisplay.relocate(bottom, top);
         }
     }

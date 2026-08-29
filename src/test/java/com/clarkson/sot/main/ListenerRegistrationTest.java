@@ -17,12 +17,16 @@ import static org.mockito.Mockito.*;
 /**
  * Pins the single listener-registration point (the duplicated-warning bug).
  *
- * <p>{@link VaultManager}, {@link DoorManager} and {@link FloorItemManager} used to call
- * {@code registerEvents(this, plugin)} in their own constructors, while {@link SoT#onEnable()}
+ * <p>{@link VaultManager}, {@link DoorManager} and {@link FloorItemManager} each called
+ * {@code registerEvents(this, plugin)} in their own constructor, while {@link SoT#onEnable()}
  * registered the very same instances again. Bukkit does not de-duplicate — it just appends a
  * second {@code RegisteredListener} — so every handler body ran twice and a single right-click
- * on a vault printed each message twice. {@code SoT.onEnable()} is the only place that may
- * register these, so their constructors must not touch the {@link PluginManager} at all.
+ * on a vault printed each message twice. #81 fixed {@code VaultManager} and
+ * {@code FloorItemManager}; {@code DoorManager} was the one left over.
+ *
+ * <p>All three are covered here because the invariant is the pattern, not the one bug:
+ * {@code SoT.onEnable()} is the only place that may register these, so their constructors must
+ * not touch the {@link PluginManager} at all.
  */
 class ListenerRegistrationTest {
 
