@@ -59,6 +59,9 @@ import java.util.stream.Collectors;
  */
 public class SaveSegmentCommand implements CommandExecutor {
 
+    /** Blocks beyond the selection to also scan, so just-outside markers can be reported. */
+    private static final int OUTSIDE_SCAN_PAD = 2;
+
     private final SoT plugin;
     private final StructureSaver structureSaver;
     private final WorldEditPlugin worldEdit;
@@ -147,12 +150,21 @@ public class SaveSegmentCommand implements CommandExecutor {
             return true;
         }
 
-        // --- Collect all build marker entities inside the selection ---
-        BoundingBox bbox = new BoundingBox(
-                selMin.x(), selMin.y(), selMin.z(),
-                selMin.x() + size.x(), selMin.y() + size.y(), selMin.z() + size.z()
+        // --- Collect build marker entities in and just around the selection ---
+        // Inclusive block bounds of the WorldEdit selection.
+        final int minX = selMin.x(), minY = selMin.y(), minZ = selMin.z();
+        final int maxX = minX + size.x() - 1, maxY = minY + size.y() - 1, maxZ = minZ + size.z() - 1;
+
+        // Scan a box padded by OUTSIDE_SCAN_PAD blocks so markers sitting just outside the selection
+        // are seen and can be reported (an entry-point anchor sits one cell beyond its wall). Whether
+        // a marker is actually inside is decided per-entity by an explicit inclusive block-range test
+        // below — not by BoundingBox overlap, which is edge-exclusive and unreliable for the zero-size
+        // bounding boxes of Display entities.
+        BoundingBox scanBox = new BoundingBox(
+                minX - OUTSIDE_SCAN_PAD,       minY - OUTSIDE_SCAN_PAD,       minZ - OUTSIDE_SCAN_PAD,
+                maxX + 1 + OUTSIDE_SCAN_PAD,   maxY + 1 + OUTSIDE_SCAN_PAD,   maxZ + 1 + OUTSIDE_SCAN_PAD
         );
-        Collection<Entity> entities = player.getWorld().getNearbyEntities(bbox,
+        Collection<Entity> entities = player.getWorld().getNearbyEntities(scanBox,
                 e -> e instanceof Display
                   && e.getPersistentDataContainer().has(BUILD_MARKER_TAG, PersistentDataType.BYTE));
 
@@ -182,17 +194,28 @@ public class SaveSegmentCommand implements CommandExecutor {
         // Placement warnings, collected then reported once so a busy segment doesn't spam chat.
         List<BlockVector3> entriesOffEdge = new ArrayList<>();   // entry not on the face it faces
         List<String> markersOffGround     = new ArrayList<>();   // floor marker with no solid block below
+        List<String> markersOutside       = new ArrayList<>();   // data marker outside the selection
 
         for (Entity entity : entities) {
             PersistentDataContainer pdc = entity.getPersistentDataContainer();
             String type = pdc.getOrDefault(MARKER_TYPE_KEY, PersistentDataType.STRING, "");
 
+            // Explicit inclusive block-range test — WYSIWYG, and immune to zero-size-box edge quirks.
+            int bx = entity.getLocation().getBlockX();
+            int by = entity.getLocation().getBlockY();
+            int bz = entity.getLocation().getBlockZ();
+            boolean inside = bx >= minX && bx <= maxX && by >= minY && by <= maxY && bz >= minZ && bz <= maxZ;
+            if (!inside) {
+                // A data marker (not a cosmetic/frame piece) just outside won't be saved — flag it.
+                if (!type.isEmpty() && !isCosmeticType(type)) {
+                    markersOutside.add(type + " at " + bx + "," + by + "," + bz);
+                }
+                continue;
+            }
+
             // Skip cosmetic entities — data lives on the anchor only. ENTRY_FRAME/BOUND_FRAME/
             // BOUND_CORNER1 are frame pieces; ICON/LABEL are the themed icons and floating labels.
-            if ("ENTRY_FRAME".equals(type) || "BOUND_FRAME".equals(type)
-                    || "BOUND_CORNER1".equals(type)
-                    || "ICON".equals(type) || "LABEL".equals(type)
-                    || "DEATH_REVIVE".equals(type)) {
+            if (isCosmeticType(type)) {
                 continue;
             }
 
@@ -348,6 +371,11 @@ public class SaveSegmentCommand implements CommandExecutor {
             warn(player, markersOffGround.size() + " floor marker(s) with no solid block below "
                     + "(will spawn floating): " + String.join("; ", limit(markersOffGround, 8)));
         }
+        if (!markersOutside.isEmpty()) {
+            warn(player, markersOutside.size() + " marker(s) are OUTSIDE your selection and were NOT "
+                    + "saved — grow the selection to include them (entry-point anchors sit one block "
+                    + "beyond their wall). Missing: " + String.join("; ", limit(markersOutside, 8)));
+        }
 
         if (!gates.isEmpty() && leverOffset == null) {
             player.sendMessage(Component.text(
@@ -447,6 +475,21 @@ public class SaveSegmentCommand implements CommandExecutor {
     // -------------------------------------------------------------------------
     // Helpers
     // -------------------------------------------------------------------------
+
+    /** Cosmetic / frame marker types that carry no saved data (skipped by the scan). */
+    private boolean isCosmeticType(String type) {
+        switch (type) {
+            case "ENTRY_FRAME":
+            case "BOUND_FRAME":
+            case "BOUND_CORNER1":
+            case "ICON":
+            case "LABEL":
+            case "DEATH_REVIVE":
+                return true;
+            default:
+                return false;
+        }
+    }
 
     /** Floor-resting marker types that should sit on solid ground. */
     private boolean isFloorMarker(String type) {
