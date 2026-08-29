@@ -1,0 +1,3 @@
+# WorldEdit schematics are binary (gzipped NBT) — never apply text/EOL normalization.
+*.schem binary
+*.schematic binary
