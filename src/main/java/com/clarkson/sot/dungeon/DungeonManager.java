@@ -28,6 +28,8 @@ import com.sk89q.worldedit.extent.clipboard.io.ClipboardFormat;
 import com.sk89q.worldedit.extent.clipboard.io.ClipboardFormats;
 import com.sk89q.worldedit.extent.clipboard.io.ClipboardReader;
 import com.sk89q.worldedit.session.ClipboardHolder;
+import com.sk89q.worldedit.math.Vector3;
+import com.sk89q.worldedit.math.transform.AffineTransform;
 import com.sk89q.worldedit.EditSession;
 import com.sk89q.worldedit.function.operation.Operation;
 import com.sk89q.worldedit.function.operation.Operations;
@@ -212,15 +214,18 @@ public class DungeonManager {
                 Vector relativeOriginVec = blueprintSegment.getWorldOrigin().toVector();
                 Location absoluteOriginLoc = dungeonOrigin.clone().add(relativeOriginVec);
 
+                int rotationSteps = blueprintSegment.getRotationSteps();
+
                 // Call pasting logic, passing the single EditSession
-                boolean success = pasteSchematic(template, absoluteOriginLoc, editSession); // Pass session
+                boolean success = pasteSchematic(template, absoluteOriginLoc, rotationSteps, editSession); // Pass session
                 if (!success) {
                     plugin.getLogger().severe("Failed to paste schematic '" + template.getSchematicFileName() + "' for team " + teamId + " at " + absoluteOriginLoc.toVector());
                     overallSuccess = false; // Mark failure but continue pasting others if desired
                     // return false; // Option: Stop immediately on first failure
                 } else {
-                     // Only add to placedSegmentsInWorld if successfully pasted
-                     PlacedSegment worldSegment = new PlacedSegment(template, absoluteOriginLoc, blueprintSegment.getDepth());
+                     // Only add to placedSegmentsInWorld if successfully pasted (carry the rotation so
+                     // world-space feature/entry lookups stay correct).
+                     PlacedSegment worldSegment = new PlacedSegment(template, absoluteOriginLoc, blueprintSegment.getDepth(), rotationSteps);
                      this.placedSegmentsInWorld.add(worldSegment);
                      plugin.getLogger().finer("Pasted segment " + template.getName() + " for team " + teamId + " at " + absoluteOriginLoc.toVector());
                 }
@@ -245,7 +250,7 @@ public class DungeonManager {
      * @param editSession The EditSession to use for the paste operation.
      * @return true if pasting was successful, false otherwise.
      */
-    private boolean pasteSchematic(Segment template, Location pasteOrigin, EditSession editSession) { // Added EditSession parameter
+    private boolean pasteSchematic(Segment template, Location pasteOrigin, int rotationSteps, EditSession editSession) {
         File schematicDir = new File(plugin.getDataFolder(), "schematics");
         File schematicFile = new File(schematicDir, template.getSchematicFileName());
 
@@ -264,15 +269,26 @@ public class DungeonManager {
             try (ClipboardReader reader = format.getReader(new FileInputStream(schematicFile))) {
                 Clipboard clipboard = reader.read();
 
-                // --- Use the provided EditSession ---
-                // No need to create a new one here
-                Operation operation = new ClipboardHolder(clipboard)
-                        .createPaste(editSession) // Use passed-in session
-                        .to(BlockVector3.at(pasteOrigin.getBlockX(), pasteOrigin.getBlockY(), pasteOrigin.getBlockZ()))
+                // Rotate about Y by the placement's step count. WorldEdit rotates the clipboard about
+                // its origin, which can push blocks negative; shift the paste target by the rotated
+                // footprint's min corner so the rotated segment's min corner lands exactly on
+                // pasteOrigin — matching SegmentRotation.rotatePoint used for the marker offsets.
+                AffineTransform transform = new AffineTransform().rotateY(90.0 * (((rotationSteps % 4) + 4) % 4));
+                int[] rmin = rotatedFootprintMin(template.getSize(), transform);
+
+                BlockVector3 to = BlockVector3.at(
+                        pasteOrigin.getBlockX() - rmin[0],
+                        pasteOrigin.getBlockY(),
+                        pasteOrigin.getBlockZ() - rmin[1]);
+
+                ClipboardHolder holder = new ClipboardHolder(clipboard);
+                holder.setTransform(transform); // setTransform returns void, so cannot be chained
+                Operation operation = holder
+                        .createPaste(editSession)
+                        .to(to)
                         .ignoreAirBlocks(true) // Paste non-air blocks
                         .build();
                 Operations.complete(operation); // Queue and complete the operation within the session
-                // --- Removed the local EditSession try-with-resources block ---
             }
             return true;
         } catch (IOException | WorldEditException e) {
@@ -282,6 +298,23 @@ public class DungeonManager {
             plugin.getLogger().log(Level.SEVERE, "Unexpected error pasting schematic " + template.getSchematicFileName(), e);
             return false;
         }
+    }
+
+    /**
+     * Min X/Z (as {x,z}, rounded) of a segment's footprint {@code [0,size-1]} after {@code transform},
+     * used to shift the paste so the rotated segment's min corner lands on its placement origin.
+     */
+    private static int[] rotatedFootprintMin(BlockVector3 size, AffineTransform transform) {
+        int sx = size.x() - 1, sz = size.z() - 1;
+        double minX = Double.POSITIVE_INFINITY, minZ = Double.POSITIVE_INFINITY;
+        for (int x : new int[]{0, sx}) {
+            for (int z : new int[]{0, sz}) {
+                Vector3 v = transform.apply(Vector3.at(x, 0, z));
+                minX = Math.min(minX, v.getX());
+                minZ = Math.min(minZ, v.getZ());
+            }
+        }
+        return new int[]{(int) Math.round(minX), (int) Math.round(minZ)};
     }
 
 

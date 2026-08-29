@@ -76,6 +76,24 @@ class DungeonGeneratorGenerationTest {
                 null, List.of(), null, List.of());
     }
 
+    /** Hub whose exits face only WEST (x=0), spaced 6 apart in z. Connecting to NORTH-entry rooms is
+     *  only possible if the generator rotates them, so this exercises rotation specifically. */
+    private static Segment hubWestOnly(int exits) {
+        List<RelativeEntryPoint> entries = new ArrayList<>();
+        for (int i = 0; i < exits; i++) {
+            entries.add(ep(0, 1, 2 + i * 6, Direction.WEST));
+        }
+        int sizeZ = 2 + (exits - 1) * 6 + 3;
+        return new Segment(
+                "hub", SegmentType.HUB, "hub.schem", BlockVector3.at(5, 5, sizeZ),
+                entries, List.of(), List.of(), List.of(),
+                0, null, null, null, null,
+                null, List.of(), null,
+                List.of(), List.of(),
+                null,
+                null, List.of(), null, List.of());
+    }
+
     private static Segment corridorNS() {
         return room("cor_ns", SegmentType.CORRIDOR,
                 List.of(ep(2, 1, 0, Direction.NORTH), ep(2, 1, 4, Direction.SOUTH)), null, null);
@@ -118,6 +136,26 @@ class DungeonGeneratorGenerationTest {
         assertTrue(bp.getKeySpawnRelativeLocations().keySet()
                         .containsAll(List.of(VaultColor.RED, VaultColor.GREEN, VaultColor.GOLD)),
                 "RED/GREEN/GOLD keys placed, got: " + bp.getKeySpawnRelativeLocations().keySet());
+    }
+
+    @Test
+    void generatesViaRotationWhenTheHubFacesOnlyOneWay() {
+        // All rooms are defined with NORTH entries; the hub only offers WEST exits. This can only
+        // connect if the generator rotates segments to present the needed direction.
+        List<Segment> set = fullSet();
+        set.removeIf(s -> s.getType() == SegmentType.HUB);
+        set.add(0, hubWestOnly(8));
+        generator.setAvailableSegmentsForTest(set);
+
+        DungeonBlueprint bp = generator.generateDungeonLayout();
+
+        assertNotNull(bp, "generation should finish via rotation");
+        assertTrue(bp.getVaultMarkerRelativeLocations().keySet()
+                        .containsAll(List.of(VaultColor.BLUE, VaultColor.RED, VaultColor.GREEN, VaultColor.GOLD)),
+                "all four vaults placed via rotation, got: " + bp.getVaultMarkerRelativeLocations().keySet());
+        assertTrue(bp.getKeySpawnRelativeLocations().keySet()
+                        .containsAll(List.of(VaultColor.RED, VaultColor.GREEN, VaultColor.GOLD)),
+                "keys placed via rotation, got: " + bp.getKeySpawnRelativeLocations().keySet());
     }
 
     @Test

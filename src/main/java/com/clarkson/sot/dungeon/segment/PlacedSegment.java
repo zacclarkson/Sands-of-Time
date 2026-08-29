@@ -26,27 +26,58 @@ public class PlacedSegment {
     private final Location worldOrigin;    // The absolute world location OR relative blueprint origin
     private final Area worldBounds;        // The calculated absolute world bounds OR relative blueprint bounds
     private final int depth;               // Depth from the hub (Hub = 0)
+    private final int rotationSteps;       // Y-axis rotation applied to the template: 0..3 (× 90°)
 
     /**
-     * Creates an instance representing a placed segment template.
+     * Creates an unrotated placed segment.
+     */
+    public PlacedSegment(@NotNull Segment segmentTemplate, @NotNull Location worldOrigin, int depth) {
+        this(segmentTemplate, worldOrigin, depth, 0);
+    }
+
+    /**
+     * Creates a placed segment, optionally rotated about Y.
      *
      * @param segmentTemplate The world-independent Segment template.
      * @param worldOrigin     The absolute world location OR relative blueprint origin (min corner) where the template is placed.
      * @param depth           The depth of this segment from the dungeon hub (Hub is depth 0).
+     * @param rotationSteps   Y-axis rotation in 90° steps (normalised to 0..3); bounds/features rotate with it.
      */
-    public PlacedSegment(@NotNull Segment segmentTemplate, @NotNull Location worldOrigin, int depth) {
+    public PlacedSegment(@NotNull Segment segmentTemplate, @NotNull Location worldOrigin, int depth, int rotationSteps) {
         this.segmentTemplate = Objects.requireNonNull(segmentTemplate, "Segment template cannot be null");
         this.worldOrigin = Objects.requireNonNull(worldOrigin, "World origin location cannot be null");
-        // World can be null for blueprint placement, so remove the null check on worldOrigin.getWorld() for blueprint stage.
-        // Objects.requireNonNull(worldOrigin.getWorld(), "World origin location must have a valid world for absolute placement");
+        this.depth = depth;
+        this.rotationSteps = SegmentRotation.norm(rotationSteps);
 
-        this.depth = depth; // Assign depth
-
-        // Calculate the bounds based on origin and template size
-        BlockVector3 size = segmentTemplate.getSize();
-        // Use clone() defensively. Subtract 1 because size includes the origin block.
+        // Bounds use the ROTATED footprint (90°/270° swap X and Z). Subtract 1 because size includes the origin block.
+        BlockVector3 size = SegmentRotation.rotateSize(segmentTemplate.getSize(), this.rotationSteps);
         Location maxPoint = worldOrigin.clone().add(size.x() - 1, size.y() - 1, size.z() - 1);
-        this.worldBounds = new Area(worldOrigin, maxPoint); // Assumes Area constructor takes min, max
+        this.worldBounds = new Area(worldOrigin, maxPoint);
+    }
+
+    /** Y-axis rotation applied to this placement, in 90° steps (0..3). */
+    public int getRotationSteps() { return rotationSteps; }
+
+    /** The template's footprint size after this placement's rotation. */
+    @NotNull public BlockVector3 getRotatedSize() {
+        return SegmentRotation.rotateSize(segmentTemplate.getSize(), rotationSteps);
+    }
+
+    /** Rotates a template-relative offset into this placement's rotated frame. */
+    @NotNull public BlockVector3 getRotatedOffset(@NotNull BlockVector3 templateOffset) {
+        return SegmentRotation.rotatePoint(templateOffset, rotationSteps, segmentTemplate.getSize());
+    }
+
+    /** This placement's entry points with positions and directions rotated into the placed frame. */
+    @NotNull public List<Segment.RelativeEntryPoint> getRotatedEntryPoints() {
+        BlockVector3 size = segmentTemplate.getSize();
+        List<Segment.RelativeEntryPoint> out = new ArrayList<>();
+        for (Segment.RelativeEntryPoint ep : segmentTemplate.getEntryPoints()) {
+            out.add(new Segment.RelativeEntryPoint(
+                    SegmentRotation.rotatePoint(ep.getRelativePosition(), rotationSteps, size),
+                    SegmentRotation.rotateDirection(ep.getDirection(), rotationSteps)));
+        }
+        return out;
     }
 
     // --- Getters ---
