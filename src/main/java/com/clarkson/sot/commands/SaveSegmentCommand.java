@@ -26,6 +26,9 @@ import net.kyori.adventure.text.format.NamedTextColor;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.NamespacedKey;
+import org.bukkit.block.Block;
+import org.bukkit.block.BlockFace;
+import org.bukkit.util.Vector;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.CommandSender;
@@ -172,6 +175,10 @@ public class SaveSegmentCommand implements CommandExecutor {
 
         int totalCoins = 0;
 
+        // Placement warnings, collected then reported once so a busy segment doesn't spam chat.
+        List<BlockVector3> entriesOffEdge = new ArrayList<>();   // entry not on the face it faces
+        List<String> markersOffGround     = new ArrayList<>();   // floor marker with no solid block below
+
         for (Entity entity : entities) {
             PersistentDataContainer pdc = entity.getPersistentDataContainer();
             String type = pdc.getOrDefault(MARKER_TYPE_KEY, PersistentDataType.STRING, "");
@@ -186,6 +193,12 @@ public class SaveSegmentCommand implements CommandExecutor {
 
             BlockVector3 relPos = toRelative(entity.getLocation(), selMin);
 
+            // Floor markers (loot, coins, spawners, sand) should rest on solid ground so items and
+            // mobs don't spawn floating. Warn (don't block) if the block directly below is not solid.
+            if (isFloorMarker(type) && !hasSolidGroundBelow(entity.getLocation())) {
+                markersOffGround.add(type + " at " + relPos.x() + "," + relPos.y() + "," + relPos.z());
+            }
+
             switch (type) {
                 case "ENTRY_POINT": {
                     String dirStr = pdc.get(DIRECTION_KEY, PersistentDataType.STRING);
@@ -193,6 +206,13 @@ public class SaveSegmentCommand implements CommandExecutor {
                         try {
                             Direction dir = Direction.valueOf(dirStr);
                             entryPoints.add(new RelativeEntryPoint(relPos, dir));
+                            // The arrow points OUT of the segment, so the entry must sit on the
+                            // selection face it faces (e.g. an EAST entry on the max-X face). If it
+                            // doesn't, neighbours won't line up when the generator connects via
+                            // direction.getOpposite().
+                            if (!isEntryOnMatchingFace(relPos, dir, size)) {
+                                entriesOffEdge.add(relPos);
+                            }
                         } catch (IllegalArgumentException ex) {
                             warn(player, "Entry point with unknown direction '" + dirStr + "' — skipped.");
                         }
@@ -293,6 +313,18 @@ public class SaveSegmentCommand implements CommandExecutor {
         }
 
         // --- Validate ---
+        if (entryPoints.isEmpty()) {
+            warn(player, "No ENTRY_POINT markers — this segment can't connect to anything.");
+        }
+        if (!entriesOffEdge.isEmpty()) {
+            warn(player, entriesOffEdge.size() + " entry point(s) not on the segment face they point "
+                    + "toward — neighbours won't line up. Offending offsets: " + formatVecs(entriesOffEdge));
+        }
+        if (!markersOffGround.isEmpty()) {
+            warn(player, markersOffGround.size() + " floor marker(s) with no solid block below "
+                    + "(will spawn floating): " + String.join("; ", limit(markersOffGround, 8)));
+        }
+
         if (!gates.isEmpty() && leverOffset == null) {
             player.sendMessage(Component.text(
                     "Save failed: segment has " + gates.size() + " gate(s) but no LEVER marker.",
@@ -380,6 +412,57 @@ public class SaveSegmentCommand implements CommandExecutor {
     // -------------------------------------------------------------------------
     // Helpers
     // -------------------------------------------------------------------------
+
+    /** Floor-resting marker types that should sit on solid ground. */
+    private boolean isFloorMarker(String type) {
+        switch (type) {
+            case "COIN_SPAWN":
+            case "ITEM_SPAWN":
+            case "MOB_SPAWNER":
+            case "SAND_SPAWN":
+            case "SAND_SACRIFICE":
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    /** True if the block directly below this location is solid (a floor to rest on). */
+    private boolean hasSolidGroundBelow(Location loc) {
+        Block below = loc.getBlock().getRelative(BlockFace.DOWN);
+        return below.getType().isSolid();
+    }
+
+    /**
+     * True if an entry point sits on the selection face its arrow points toward. The arrow points
+     * OUT of the segment, so an EAST entry must be on the max-X face, WEST on min-X, etc. Only the
+     * single non-zero axis of the direction is checked against the selection's [0, size-1] bounds.
+     */
+    private boolean isEntryOnMatchingFace(BlockVector3 relPos, Direction dir, BlockVector3 size) {
+        Vector v = dir.getBlockVector();
+        if (v.getBlockX() > 0) return relPos.x() == size.x() - 1;
+        if (v.getBlockX() < 0) return relPos.x() == 0;
+        if (v.getBlockY() > 0) return relPos.y() == size.y() - 1;
+        if (v.getBlockY() < 0) return relPos.y() == 0;
+        if (v.getBlockZ() > 0) return relPos.z() == size.z() - 1;
+        if (v.getBlockZ() < 0) return relPos.z() == 0;
+        return false;
+    }
+
+    /** Formats up to a few BlockVector3 offsets as "x,y,z" for a compact warning line. */
+    private String formatVecs(List<BlockVector3> vecs) {
+        List<String> parts = new ArrayList<>();
+        for (BlockVector3 v : vecs) parts.add(v.x() + "," + v.y() + "," + v.z());
+        return String.join("; ", limit(parts, 8));
+    }
+
+    /** Returns the first {@code max} items, appending an ellipsis note if the list was longer. */
+    private List<String> limit(List<String> items, int max) {
+        if (items.size() <= max) return items;
+        List<String> out = new ArrayList<>(items.subList(0, max));
+        out.add("… (+" + (items.size() - max) + " more)");
+        return out;
+    }
 
     /** Converts an absolute world Location to a relative BlockVector3 offset from selMin. */
     private BlockVector3 toRelative(Location loc, BlockVector3 selMin) {
