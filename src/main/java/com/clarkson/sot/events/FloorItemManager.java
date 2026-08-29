@@ -41,13 +41,13 @@ public class FloorItemManager implements Listener {
     // Configuration for pickup radius (squared for efficiency)
     private static final double PICKUP_RADIUS_SQUARED = 1.5 * 1.5; // Example: 1.5 blocks
 
+    // NOTE: this class does NOT register itself as a listener -- see the note in VaultManager.
     public FloorItemManager(@NotNull SoT plugin, @NotNull GameManager gameManager, @NotNull ScoreManager scoreManager) {
         this.plugin = plugin;
         this.gameManager = gameManager;
         this.scoreManager = scoreManager;
         this.activeFloorItems = new ConcurrentHashMap<>();
         this.itemsByTeamInstance = new ConcurrentHashMap<>();
-        plugin.getServer().getPluginManager().registerEvents(this, plugin);
         plugin.getLogger().info("FloorItemManager initialized.");
     }
 

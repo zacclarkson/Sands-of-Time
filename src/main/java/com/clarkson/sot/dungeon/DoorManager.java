@@ -6,7 +6,6 @@ import com.clarkson.sot.dungeon.segment.PlacedSegment;
 import com.clarkson.sot.entities.Area;
 import com.clarkson.sot.entities.Door;
 import com.clarkson.sot.entities.SegmentDoor;
-import com.clarkson.sot.entities.VaultDoor;
 import com.clarkson.sot.main.GameManager;
 import com.clarkson.sot.main.GameState;
 import com.clarkson.sot.main.SoT;
@@ -33,8 +32,12 @@ import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * Manages all Door instances within active dungeon instances.
+ * Manages the segment doors within active dungeon instances.
  * Handles initialization, interaction (locking/unlocking), and state.
+ *
+ * <p>Vault marker blocks are deliberately <em>not</em> doors. {@link VaultManager} owns them
+ * end to end -- key consumption, per-team open state, rewards and the team broadcast -- so
+ * registering them here as well made a single right-click emit every message twice.
  */
 public class DoorManager implements Listener {
 
@@ -43,17 +46,17 @@ public class DoorManager implements Listener {
     // Store active doors per team instance, mapped by their Lock Location for quick lookup
     private final Map<UUID, Map<Location, Door>> doorsByTeamAndLockLocation;
 
+    // NOTE: this class does NOT register itself as a listener -- see the note in VaultManager.
     public DoorManager(SoT plugin, GameManager gameManager) {
         this.plugin = plugin;
         this.gameManager = gameManager;
         this.doorsByTeamAndLockLocation = new ConcurrentHashMap<>();
-        plugin.getServer().getPluginManager().registerEvents(this, plugin);
         plugin.getLogger().info("DoorManager initialized.");
     }
 
     /**
      * Initializes all doors for a specific dungeon instance.
-     * Creates SegmentDoor and VaultDoor objects based on the dungeon data.
+     * Creates a SegmentDoor at every connection between placed segments.
      * Should be called by DungeonManager after segments are pasted.
      *
      * @param dungeonData The Dungeon object containing absolute locations for this instance.
@@ -100,21 +103,7 @@ public class DoorManager implements Listener {
             plugin.getLogger().info("Created " + processedConnections.size() + " segment doors for team " + teamId);
         }
 
-
-        // --- Create Vault Doors ---
-        for (Map.Entry<VaultColor, Location> entry : dungeonData.getVaultMarkerLocations().entrySet()) {
-            VaultColor color = entry.getKey();
-            Location lockLoc = entry.getValue(); // Vault marker location is the lock location
-            if (lockLoc != null && lockLoc.isWorldLoaded()) {
-                // Bounds for a vault door might just be the single marker block itself
-                Area vaultBounds = new Area(lockLoc, lockLoc); // Area containing just the lock block
-                VaultDoor door = new VaultDoor(plugin, teamId, vaultBounds, lockLoc, color);
-                teamDoors.put(lockLoc, door);
-                 plugin.getLogger().finer("Created VaultDoor instance for " + color + " at " + lockLoc.toVector());
-            } else {
-                 plugin.getLogger().warning("Invalid location for " + color + " vault marker when creating VaultDoor for team " + teamId);
-            }
-        }
+        // Vault marker blocks are intentionally left out: VaultManager handles those clicks.
 
         doorsByTeamAndLockLocation.put(teamId, teamDoors);
         plugin.getLogger().info("Finished initializing " + teamDoors.size() + " doors for team instance: " + teamId);
@@ -137,7 +126,7 @@ public class DoorManager implements Listener {
      * @return The Door object, or null if no door exists for that team at that location.
      */
     @Nullable
-    private Door getDoorAtLockLocation(UUID teamId, Location lockLocation) {
+    public Door getDoorAt(UUID teamId, Location lockLocation) {
         Map<Location, Door> teamDoors = doorsByTeamAndLockLocation.get(teamId);
         if (teamDoors == null || lockLocation == null || lockLocation.getWorld() == null) {
             return null;
@@ -178,7 +167,7 @@ public class DoorManager implements Listener {
         Location clickedLocation = clickedBlock.getLocation();
 
         // Find if a door lock exists at this location for the player's team
-        Door door = getDoorAtLockLocation(teamId, clickedLocation);
+        Door door = getDoorAt(teamId, clickedLocation);
 
         if (door != null) {
             event.setCancelled(true); // We are handling this interaction
@@ -199,12 +188,7 @@ public class DoorManager implements Listener {
                 if (consumeKeyItem(player, itemInHand, door)) { // Pass door to know which key type to consume
                     // Key consumed, attempt to open the door
                     if (door.open(player)) {
-                        // Success message might depend on door type
-                        if (door instanceof VaultDoor) {
-                             player.sendMessage(Component.text("You unlocked the vault!", NamedTextColor.GOLD));
-                        } else {
-                             player.sendMessage(Component.text("You unlocked the door!", NamedTextColor.GREEN));
-                        }
+                        player.sendMessage(Component.text("You unlocked the door!", NamedTextColor.GREEN));
                     } else {
                         player.sendMessage(Component.text("The door mechanism seems stuck...", NamedTextColor.RED));
                         // TODO: Give key back?

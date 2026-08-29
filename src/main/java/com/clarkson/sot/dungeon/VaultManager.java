@@ -45,13 +45,14 @@ public class VaultManager implements Listener {
     // Key: Team UUID, Value: Set of VaultColors opened by that team
     private final Map<UUID, Set<VaultColor>> openVaultsByTeam;
 
-    // Constructor remains the same...
+    // NOTE: this class does NOT register itself as a listener. SoT.onEnable() registers the
+    // GameManager-owned instance exactly once; registering here too would add a second
+    // RegisteredListener for the same object and run every handler twice.
     public VaultManager(SoT plugin, GameManager gameManager) {
         this.plugin = Objects.requireNonNull(plugin, "Plugin cannot be null");
         this.gameManager = Objects.requireNonNull(gameManager, "GameManager cannot be null");
         this.openVaultsByTeam = new ConcurrentHashMap<>();
-        plugin.getServer().getPluginManager().registerEvents(this, plugin);
-        plugin.getLogger().info("VaultManager initialized and registered.");
+        plugin.getLogger().info("VaultManager initialized.");
     }
 
     /**
