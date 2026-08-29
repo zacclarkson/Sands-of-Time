@@ -1,5 +1,6 @@
 package com.clarkson.sot.dungeon; // Assuming package
 
+import com.clarkson.sot.events.FloorItemManager;
 import com.clarkson.sot.main.GameManager;
 import com.clarkson.sot.main.GameState;
 import com.clarkson.sot.main.SoT; // Assuming main plugin class
@@ -50,8 +51,9 @@ public class VaultManager implements Listener {
         this.plugin = Objects.requireNonNull(plugin, "Plugin cannot be null");
         this.gameManager = Objects.requireNonNull(gameManager, "GameManager cannot be null");
         this.openVaultsByTeam = new ConcurrentHashMap<>();
-        plugin.getServer().getPluginManager().registerEvents(this, plugin);
-        plugin.getLogger().info("VaultManager initialized and registered.");
+        // Registered as a listener by SoT.onEnable, which is the single registration point for the
+        // GameManager-owned manager instances. Registering here too would double-fire every event.
+        plugin.getLogger().info("VaultManager initialized.");
     }
 
     /**
@@ -74,11 +76,12 @@ public class VaultManager implements Listener {
                 plugin.getLogger().warning("Invalid location for " + color + " vault marker for team " + teamId);
             }
         }
+        UUID instanceId = dungeonData.getInstanceId();
         for (Map.Entry<VaultColor, Location> entry : dungeonData.getKeySpawnLocations().entrySet()) {
              VaultColor color = entry.getKey();
              Location loc = entry.getValue();
              if (loc != null && loc.isWorldLoaded()) {
-                 placeKeyItem(color, loc);
+                 placeKeyItem(color, loc, teamId, instanceId);
              } else {
                  plugin.getLogger().warning("Invalid location for " + color + " key spawn for team " + teamId);
              }
@@ -116,22 +119,34 @@ public class VaultManager implements Listener {
     }
 
     /**
-     * Creates and drops the key item at the specified location.
+     * Spawns the key at the specified location as a tracked {@link com.clarkson.sot.entities.Key}
+     * floor item, so it is picked up by the same proximity path as coins and floor loot.
+     * <p>This used to be a {@code dropItemNaturally} call, which was wrong three ways: the drop's
+     * random velocity slid the key off the block the builder marked, any team could walk over it,
+     * and it despawned after the vanilla five minutes — often before the round even began, since
+     * dungeons are generated at {@code /sot setup} but only become live at {@code /sot start}.
+     *
      * @param color The VaultColor of the key.
-     * @param location The absolute Location to spawn the item.
+     * @param location The absolute Location to spawn the key on.
+     * @param teamId The team whose dungeon instance owns this key.
+     * @param instanceId The dungeon instance id, used as the key's segment instance id.
      */
-    private void placeKeyItem(VaultColor color, Location location) {
-        ItemStack keyStack = createKeyItem(color);
+    private void placeKeyItem(VaultColor color, Location location, UUID teamId, UUID instanceId) {
          if (!Bukkit.isPrimaryThread()) {
-             Bukkit.getScheduler().runTask(plugin, () -> placeKeyItem(color, location));
+             Bukkit.getScheduler().runTask(plugin, () -> placeKeyItem(color, location, teamId, instanceId));
              return;
          }
+        FloorItemManager floorItemManager = gameManager.getFloorItemManager();
+        if (floorItemManager == null) {
+            plugin.getLogger().severe("Cannot spawn " + color + " key: FloorItemManager is null");
+            return;
+        }
         try {
-            Location dropLocation = location.clone().add(0.5, 0.5, 0.5);
-            location.getWorld().dropItemNaturally(dropLocation, keyStack);
-            plugin.getLogger().finer("Spawned " + color + " key item near " + location.toVector());
+            // Depth 0: depth only scales coin value (ScoreManager.calculateScaledCoinValue) and a key
+            // is worth no coins. VaultManager also has no placed-segment list to measure depth from.
+            floorItemManager.spawnKey(location, color, teamId, instanceId, 0);
         } catch (Exception e) {
-             plugin.getLogger().log(Level.SEVERE, "Failed to drop key item for " + color + " near " + location.toVector(), e);
+             plugin.getLogger().log(Level.SEVERE, "Failed to spawn key floor item for " + color + " at " + location.toVector(), e);
         }
     }
 
