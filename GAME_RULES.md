@@ -311,7 +311,10 @@ and it will naturally prefer a puzzle room once those exist.
 - Used to open standard **segment doors** (not vault doors)
 - Separate from colored vault keys
 - Right-click the door's keyhole block with a rusty key to open
-- Found throughout the dungeon
+- Found throughout the dungeon: each `ITEM_SPAWN` marker has a **20% chance** of yielding a rusty
+  key instead of rolling the loot table
+- Placement is by chance, not one guaranteed key per room, so a branch can come up short and stay
+  shut for the round
 
 ---
 
@@ -320,10 +323,13 @@ and it will naturally prefer a puzzle room once those exist.
 ### Segment Doors (Rusty Doors)
 
 - Block walls between connected segments that block passage
-- Each door has a **keyhole block** — a specific block the player right-clicks with the correct key
+- One door per **connection the generator actually made** — a segment's entry points that no
+  neighbour was attached to are sealed with plain wall instead, so no door opens onto nothing
+- Built from **dark oak planks**, filling the 3-wide x 4-tall opening around the entry point marker
+- Each door has a **keyhole block** — a block of **oxidized cut copper** one block above the entry
+  point marker, at eye level in the middle of the door
 - Opened with **rusty keys**: right-click the keyhole with a rusty key to open
 - The key is consumed on use
-- Can be any solid block material (configurable per segment)
 
 ### Gates
 
@@ -345,8 +351,10 @@ and it will naturally prefer a puzzle room once those exist.
 
 ### Door Animation
 
-- When a door is opened, it **slides downward** one block at a time
-- Each layer moves down sequentially until the entire door has descended below the lowest bound, leaving the passage clear for the player
+- When a door is opened it **sinks downward**: its topmost layer of blocks is cleared first, then
+  the next, so the wall visibly drops into the floor
+- Layers clear in sequence until the whole opening is air, leaving the passage clear for the player
+- The keyhole block clears with the layer it sits in
 - Animation tick delay: 3 ticks per layer (configurable, minimum 1)
 - Sounds: piston contract/extend during animation, iron door open/close on completion
 - Vault doors play additional sounds: end portal frame fill + player level up

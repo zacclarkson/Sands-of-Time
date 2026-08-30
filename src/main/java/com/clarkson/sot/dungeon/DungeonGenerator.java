@@ -46,6 +46,11 @@ public class DungeonGenerator {
     // Track placed vaults/keys during generation
     private Set<VaultColor> keysPlacedInDFS;
     private Set<VaultColor> vaultsPlacedInDFS;
+    /**
+     * Connections the DFS actually made, in blueprint-relative space. Each becomes a rusty-key
+     * door; entry points absent from this list opened onto nothing and get sealed instead.
+     */
+    private List<Doorway> doorwaysInDFS;
 
     // --- Generation Configuration ---
     // Depth ranges (min/max inclusive) for vaults. Every max MUST be < MAX_DEPTH so the forced
@@ -88,6 +93,7 @@ public class DungeonGenerator {
         this.random = new Random();
         this.keysPlacedInDFS = new HashSet<>();
         this.vaultsPlacedInDFS = new HashSet<>();
+        this.doorwaysInDFS = new ArrayList<>();
         // throw new UnsupportedOperationException("Constructor implementation not provided."); // Remove throw if implementing
     }
 
@@ -200,6 +206,7 @@ public class DungeonGenerator {
         // Reset placed trackers for this attempt
         keysPlacedInDFS.clear(); // Tracks Red, Green, Gold keys placed by DFS
         vaultsPlacedInDFS.clear(); // Tracks Blue, Red, Green, Gold vaults placed by DFS
+        doorwaysInDFS.clear(); // Tracks the connections this attempt actually made
 
         // --- Pre-checks ---
         if (availableSegments.isEmpty()) { /* ... error log ... */ return null; }
@@ -283,12 +290,17 @@ public class DungeonGenerator {
         Vector timerBaseRelativeLocation = selectTimerBaseRelativeLocation(placedSegments);
         List<Vector> playerSpawnRelativeLocations = selectPlayerSpawnRelativeLocations(placedSegments);
 
+        List<Doorway> doorways = new ArrayList<>(doorwaysInDFS);
+        List<Doorway> unusedOpenings = findUnusedOpenings(placedSegments, doorways);
+        plugin.getLogger().info("Layout has " + doorways.size() + " doorways and "
+                + unusedOpenings.size() + " unattached openings to seal.");
+
         // --- Create and Return Blueprint ---
         return new DungeonBlueprint(
                 placedSegments, hubRelativeLocation, vaultMarkerRelativeLocations, keySpawnRelativeLocations,
                 sandSpawnRelativeLocations, coinSpawnRelativeLocations, itemSpawnRelativeLocations,
                 blueprintBounds, safeExitRelativeLocation, timerBaseRelativeLocation,
-                playerSpawnRelativeLocations
+                playerSpawnRelativeLocations, doorways, unusedOpenings
         );
     }
 
@@ -354,6 +366,13 @@ public class DungeonGenerator {
         placedSegments.add(nextPlacedSegment);
         occupiedOrigins.add(nextSegmentOrigin);
 
+        // Record the connection we just made. Both segments meet on this one cell (see
+        // calculatePlacementOrigin), so one Doorway covers the shared opening from either side.
+        BlockVector3 doorwayCell = currentSegmentOrigin.add(connectionPoint.getRelativePosition());
+        doorwaysInDFS.add(new Doorway(
+                new Vector(doorwayCell.x(), doorwayCell.y(), doorwayCell.z()),
+                connectionPoint.getDirection()));
+
         // --- Update Global Placed Vaults/Keys Tracking (colour is rotation-independent) ---
         VaultColor placedVault = next.template.getContainedVault();
         if (placedVault != null && vaultsPlacedInDFS.add(placedVault)) {
@@ -373,6 +392,44 @@ public class DungeonGenerator {
                 generatePathRecursive(nextPlacedSegment, outgoingEntryPoint, placedSegments, occupiedOrigins, currentDepth + 1);
             }
         }
+    }
+
+    /**
+     * Every rotated entry point across {@code placedSegments} that no connection was made through.
+     *
+     * <p>Segment templates carve their doorways as open 3x4 holes, and the DFS attaches a
+     * neighbour to only some of them -- the hub template alone declares nine. The leftovers open
+     * onto nothing, so they are returned here for {@code DoorManager} to seal as plain wall rather
+     * than dress as a door that costs a rusty key and leads nowhere.
+     *
+     * @param placedSegments The segments of a finished layout, with blueprint-relative origins.
+     * @param doorways       The connections the DFS made.
+     * @return One Doorway per unattached opening, in blueprint-relative space.
+     */
+    @NotNull
+    static List<Doorway> findUnusedOpenings(@NotNull List<PlacedSegment> placedSegments,
+                                            @NotNull List<Doorway> doorways) {
+        // Keyed on BlockVector3, not Bukkit Vector: these are whole-block cells, and BlockVector3
+        // has exact integer equals/hashCode where Vector compares doubles with an epsilon.
+        Set<BlockVector3> connected = new HashSet<>();
+        for (Doorway doorway : doorways) {
+            Vector pos = doorway.getRelativePosition();
+            connected.add(BlockVector3.at(pos.getBlockX(), pos.getBlockY(), pos.getBlockZ()));
+        }
+
+        List<Doorway> unused = new ArrayList<>();
+        for (PlacedSegment placedSegment : placedSegments) {
+            Vector segmentOrigin = placedSegment.getWorldOrigin().toVector();
+            for (RelativeEntryPoint ep : placedSegment.getRotatedEntryPoints()) {
+                BlockVector3 pos = ep.getRelativePosition();
+                Vector cell = segmentOrigin.clone().add(new Vector(pos.x(), pos.y(), pos.z()));
+                BlockVector3 key = BlockVector3.at(cell.getBlockX(), cell.getBlockY(), cell.getBlockZ());
+                if (!connected.contains(key)) {
+                    unused.add(new Doorway(cell, ep.getDirection()));
+                }
+            }
+        }
+        return unused;
     }
 
     /** A chosen segment template plus the Y rotation (0..3) to apply when placing it. */
