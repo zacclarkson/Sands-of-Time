@@ -44,6 +44,13 @@ public class DungeonBlueprint {
     // no segment carries one.
     private final List<Vector> sandTimerRelativeLocations;
 
+    // Death cages (DEATH_CAGE markers) and the sacrifice points that free them (SAND_SACRIFICE
+    // markers). These two lists are index-aligned and always the same length: DungeonGenerator
+    // reconciles them, deriving a point beside any cage the templates left unpaired, so
+    // DungeonManager can zip them straight into DeathCage objects.
+    private final List<Vector> deathCageRelativeLocations;
+    private final List<Vector> sandSacrificeRelativeLocations;
+
     // Connections between segments. Each becomes a rusty-key door; the unused openings are the
     // entry points the generator never attached a neighbour to, and get sealed as plain wall.
     private final List<Doorway> doorways;
@@ -69,6 +76,8 @@ public class DungeonBlueprint {
                             @Nullable Vector bankRelativeLocation,
                             @NotNull List<Vector> playerSpawnRelativeLocations,
                             @NotNull List<Vector> sandTimerRelativeLocations,
+                            @NotNull List<Vector> deathCageRelativeLocations,
+                            @NotNull List<Vector> sandSacrificeRelativeLocations,
                             @NotNull List<Doorway> doorways,
                             @NotNull List<Doorway> unusedOpenings
                            ) {
@@ -103,6 +112,8 @@ public class DungeonBlueprint {
         this.bankRelativeLocation = (bankRelativeLocation != null) ? bankRelativeLocation.clone() : null;
         this.playerSpawnRelativeLocations = Collections.unmodifiableList(new ArrayList<>(playerSpawnRelativeLocations));
         this.sandTimerRelativeLocations = Collections.unmodifiableList(new ArrayList<>(sandTimerRelativeLocations));
+        this.deathCageRelativeLocations = Collections.unmodifiableList(new ArrayList<>(deathCageRelativeLocations));
+        this.sandSacrificeRelativeLocations = Collections.unmodifiableList(new ArrayList<>(sandSacrificeRelativeLocations));
         this.doorways = Collections.unmodifiableList(new ArrayList<>(doorways));
         this.unusedOpenings = Collections.unmodifiableList(new ArrayList<>(unusedOpenings));
     }
@@ -135,6 +146,19 @@ public class DungeonBlueprint {
 
     /** Relative sand deposit cells (empty if no segment defines a TIMER_DEPOSIT marker). */
     @NotNull public List<Vector> getSandTimerRelativeLocations() { return sandTimerRelativeLocations; }
+
+    /**
+     * Relative death cage cells. Index-aligned with {@link #getSandSacrificeRelativeLocations()}:
+     * the cage at index i is freed by the sacrifice point at index i.
+     */
+    @NotNull public List<Vector> getDeathCageRelativeLocations() { return deathCageRelativeLocations; }
+
+    /**
+     * Relative sacrifice point cells, one per death cage and in the same order. Always the same
+     * size as {@link #getDeathCageRelativeLocations()} — the generator derives a point for any cage
+     * the segment templates did not pair one with.
+     */
+    @NotNull public List<Vector> getSandSacrificeRelativeLocations() { return sandSacrificeRelativeLocations; }
 
     /** Relative base of the visual sand-timer column, or null if no segment defines a TIMER marker. */
     @Nullable public Vector getTimerBaseRelativeLocation() {

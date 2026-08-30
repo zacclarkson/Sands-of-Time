@@ -1,9 +1,11 @@
 package com.clarkson.sot.utils;
 
+import com.clarkson.sot.dungeon.DeathCage;
 import com.clarkson.sot.events.BlockProtectionListener;
 import com.clarkson.sot.main.GameManager;
 import com.clarkson.sot.main.GameState;
 import com.clarkson.sot.timer.TeamTimer;
+import com.clarkson.sot.ui.SacrificeIndicatorManager;
 
 import net.kyori.adventure.text.Component;
 import org.bukkit.Location;
@@ -14,9 +16,12 @@ import org.bukkit.block.BlockState;
 import org.bukkit.GameMode;
 import org.bukkit.damage.DamageSource;
 import org.bukkit.entity.Item;
+import org.bukkit.block.BlockFace;
+import org.bukkit.event.block.Action;
 import org.bukkit.event.block.BlockBreakEvent;
 import org.bukkit.event.block.BlockPlaceEvent;
 import org.bukkit.event.entity.PlayerDeathEvent;
+import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.inventory.EquipmentSlot;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.plugin.Plugin;
@@ -56,6 +61,8 @@ class SandManagerTest {
     private PlayerStateManager stateManager;
     private SoTTeam team;
     private PlayerMock player;
+    private SandManager sandManager;
+    private SacrificeIndicatorManager indicators;
     private final UUID teamId = UUID.randomUUID();
 
     @BeforeEach
@@ -73,6 +80,8 @@ class SandManagerTest {
         when(gameManager.getTeamManager()).thenReturn(teamManager);
         when(gameManager.getCurrentState()).thenReturn(GameState.RUNNING);
         when(gameManager.getActiveTeams()).thenReturn(Map.of(teamId, team));
+        indicators = mock(SacrificeIndicatorManager.class);
+        when(gameManager.getSacrificeIndicatorManager()).thenReturn(indicators);
         when(team.getTeamName()).thenReturn("Red Rabbits");
         when(team.getRemainingSeconds()).thenReturn(60);
 
@@ -80,7 +89,8 @@ class SandManagerTest {
         when(stateManager.getStatus(player)).thenReturn(PlayerStatus.ALIVE_IN_DUNGEON);
         when(teamManager.getPlayerTeamId(player)).thenReturn(teamId);
 
-        server.getPluginManager().registerEvents(new SandManager(gameManager, plugin), plugin);
+        sandManager = new SandManager(gameManager, plugin);
+        server.getPluginManager().registerEvents(sandManager, plugin);
     }
 
     @AfterEach
@@ -400,5 +410,231 @@ class SandManagerTest {
         assertEquals(94, totalOf(stacks));
         assertTrue(stacks.stream().allMatch(stack -> stack.getAmount() <= Material.SAND.getMaxStackSize()),
                 "an over-sized ItemStack is not something the world will accept");
+    }
+
+    // --- revive: sacrificing sand at a chest ---
+
+    /** A cage holding {@code caged}, priced by {@code deaths}, with its chest at an arbitrary cell. */
+    private DeathCage cagedTeammate(PlayerMock caged, int deaths) {
+        DeathCage cage = new DeathCage(new Location(world, 30, 65, 4), new Location(world, 30, 65, 6));
+        cage.assignPlayer(caged.getUniqueId());
+        for (int i = 0; i < deaths; i++) cage.recordDeath();
+        when(stateManager.getStatus(caged.getUniqueId())).thenReturn(PlayerStatus.DEAD_AWAITING_REVIVE);
+        when(gameManager.getTeamHubLocation(teamId)).thenReturn(new Location(world, 21, 65, 18));
+        return cage;
+    }
+
+    private int sandCount(PlayerMock p) {
+        int total = 0;
+        for (ItemStack stack : p.getInventory().getContents()) {
+            if (stack != null && stack.getType() == Material.SAND) total += stack.getAmount();
+        }
+        return total;
+    }
+
+    @Test
+    void aSingleSandFreesATeammateOnTheirFirstDeath() {
+        PlayerMock caged = server.addPlayer();
+        DeathCage cage = cagedTeammate(caged, 1);
+        player.getInventory().addItem(new ItemStack(Material.SAND, 3));
+
+        assertTrue(sandManager.attemptRevive(player, cage));
+
+        verify(stateManager).updateStatus(caged, PlayerStatus.ALIVE_IN_DUNGEON);
+        assertEquals(2, sandCount(player), "exactly one sand is spent");
+    }
+
+    @Test
+    void aPartialPaymentSpendsOneSandAndDoesNotRevive() {
+        PlayerMock caged = server.addPlayer();
+        DeathCage cage = cagedTeammate(caged, 3); // costs 3
+        player.getInventory().addItem(new ItemStack(Material.SAND, 5));
+
+        assertFalse(sandManager.attemptRevive(player, cage), "3 sand owed, only 1 paid");
+
+        assertEquals(4, sandCount(player), "one sand per click, not the whole price");
+        assertEquals(2, cage.getRemainingSand());
+        verify(stateManager, never()).updateStatus(caged, PlayerStatus.ALIVE_IN_DUNGEON);
+    }
+
+    @Test
+    void theFinalSandOfAnEscalatedPriceCompletesTheRevive() {
+        PlayerMock caged = server.addPlayer();
+        DeathCage cage = cagedTeammate(caged, 3);
+        player.getInventory().addItem(new ItemStack(Material.SAND, 5));
+
+        assertFalse(sandManager.attemptRevive(player, cage));
+        assertFalse(sandManager.attemptRevive(player, cage));
+        assertTrue(sandManager.attemptRevive(player, cage), "the third sand frees them");
+
+        assertEquals(2, sandCount(player), "three sand spent in total");
+        verify(stateManager).updateStatus(caged, PlayerStatus.ALIVE_IN_DUNGEON);
+    }
+
+    @Test
+    void twoTeammatesCanEachChipInOnTheSameRevive() {
+        PlayerMock caged = server.addPlayer();
+        PlayerMock helper = server.addPlayer();
+        when(gameManager.getTeamManager().getPlayerTeamId(helper)).thenReturn(teamId);
+        DeathCage cage = cagedTeammate(caged, 2); // costs 2
+        player.getInventory().addItem(new ItemStack(Material.SAND, 1));
+        helper.getInventory().addItem(new ItemStack(Material.SAND, 1));
+
+        assertFalse(sandManager.attemptRevive(player, cage));
+        assertTrue(sandManager.attemptRevive(helper, cage), "the second teammate finishes the job");
+
+        assertEquals(0, sandCount(player));
+        assertEquals(0, sandCount(helper));
+        verify(stateManager).updateStatus(caged, PlayerStatus.ALIVE_IN_DUNGEON);
+    }
+
+    @Test
+    void aReviverWithNoSandPaysNothingAndChangesNothing() {
+        PlayerMock caged = server.addPlayer();
+        DeathCage cage = cagedTeammate(caged, 2);
+
+        assertFalse(sandManager.attemptRevive(player, cage));
+
+        assertEquals(0, sandCount(player));
+        assertEquals(2, cage.getRemainingSand(), "no progress is banked without sand");
+        verify(stateManager, never()).updateStatus(caged, PlayerStatus.ALIVE_IN_DUNGEON);
+    }
+
+    @Test
+    void aTeammateWhoIsNotAwaitingReviveCannotBeBoughtOut() {
+        PlayerMock caged = server.addPlayer();
+        DeathCage cage = cagedTeammate(caged, 1);
+        when(stateManager.getStatus(caged.getUniqueId())).thenReturn(PlayerStatus.ALIVE_IN_DUNGEON);
+        player.getInventory().addItem(new ItemStack(Material.SAND, 3));
+
+        assertFalse(sandManager.attemptRevive(player, cage));
+
+        assertEquals(3, sandCount(player), "sand is not taken for a revive that cannot happen");
+    }
+
+    @Test
+    void anUnassignedCageTakesNoSand() {
+        DeathCage cage = new DeathCage(new Location(world, 30, 65, 4), new Location(world, 30, 65, 6));
+        player.getInventory().addItem(new ItemStack(Material.SAND, 3));
+
+        assertFalse(sandManager.attemptRevive(player, cage));
+
+        assertEquals(3, sandCount(player));
+    }
+
+    @Test
+    void aCompletedReviveClearsProgressSoTheNextDeathStartsFresh() {
+        PlayerMock caged = server.addPlayer();
+        DeathCage cage = cagedTeammate(caged, 1);
+        player.getInventory().addItem(new ItemStack(Material.SAND, 3));
+
+        assertTrue(sandManager.attemptRevive(player, cage));
+
+        assertEquals(0, cage.getSandDeposited());
+    }
+
+    // --- revive: the chest itself ---
+
+    /** Registers {@code cage}'s chest as this team's sacrifice point and builds the block. */
+    private Block sacrificeChest(DeathCage cage) {
+        Location loc = cage.getSacrificePointLocation();
+        Block block = world.getBlockAt(loc);
+        block.setType(Material.CHEST);
+        when(gameManager.isAnySacrificePointAt(any(Location.class))).thenAnswer(invocation -> {
+            Location queried = invocation.getArgument(0);
+            return queried != null && cage.isSacrificePointAt(queried);
+        });
+        when(gameManager.getDeathCageAtSacrificePoint(eq(teamId), any(Location.class))).thenAnswer(invocation -> {
+            Location queried = invocation.getArgument(1);
+            return (queried != null && cage.isSacrificePointAt(queried)) ? cage : null;
+        });
+        return block;
+    }
+
+    private PlayerInteractEvent rightClick(PlayerMock who, Block block) {
+        PlayerInteractEvent event = new PlayerInteractEvent(
+                who, Action.RIGHT_CLICK_BLOCK, who.getInventory().getItemInMainHand(),
+                block, BlockFace.UP, EquipmentSlot.HAND);
+        server.getPluginManager().callEvent(event);
+        return event;
+    }
+
+    @Test
+    void rightClickingTheSacrificeChestPaysTowardTheRevive() {
+        PlayerMock caged = server.addPlayer();
+        DeathCage cage = cagedTeammate(caged, 1);
+        Block chest = sacrificeChest(cage);
+        player.getInventory().addItem(new ItemStack(Material.SAND, 2));
+
+        PlayerInteractEvent event = rightClick(player, chest);
+
+        assertTrue(event.isCancelled(), "the vanilla chest UI must never open on a sacrifice point");
+        assertEquals(1, sandCount(player), "one sand was sacrificed");
+        verify(stateManager).updateStatus(caged, PlayerStatus.ALIVE_IN_DUNGEON);
+    }
+
+    @Test
+    void anOrdinaryChestIsLeftAlone() {
+        PlayerMock caged = server.addPlayer();
+        DeathCage cage = cagedTeammate(caged, 1);
+        sacrificeChest(cage);
+        Block plainChest = world.getBlockAt(new Location(world, 40, 65, 40));
+        plainChest.setType(Material.CHEST);
+        player.getInventory().addItem(new ItemStack(Material.SAND, 2));
+
+        PlayerInteractEvent event = rightClick(player, plainChest);
+
+        assertFalse(event.isCancelled(), "a chest that is not a sacrifice point still opens normally");
+        assertEquals(2, sandCount(player));
+    }
+
+    @Test
+    void someoneWithNoTeamCannotOpenASacrificeChest() {
+        PlayerMock caged = server.addPlayer();
+        DeathCage cage = cagedTeammate(caged, 1);
+        Block chest = sacrificeChest(cage);
+        PlayerMock outsider = server.addPlayer();
+        when(gameManager.getTeamManager().getPlayerTeamId(outsider)).thenReturn(null);
+        outsider.getInventory().addItem(new ItemStack(Material.SAND, 2));
+
+        PlayerInteractEvent event = rightClick(outsider, chest);
+
+        assertTrue(event.isCancelled(), "cancelled before the team check, so the chest stays shut");
+        assertEquals(2, sandCount(outsider), "and they pay nothing");
+        verify(stateManager, never()).updateStatus(caged, PlayerStatus.ALIVE_IN_DUNGEON);
+    }
+
+    @Test
+    void sacrificeChestsAreInertOutsideARunningGame() {
+        PlayerMock caged = server.addPlayer();
+        DeathCage cage = cagedTeammate(caged, 1);
+        Block chest = sacrificeChest(cage);
+        when(gameManager.getCurrentState()).thenReturn(GameState.ENDED);
+        player.getInventory().addItem(new ItemStack(Material.SAND, 2));
+
+        PlayerInteractEvent event = rightClick(player, chest);
+
+        assertFalse(event.isCancelled());
+        assertEquals(2, sandCount(player));
+    }
+
+    @Test
+    void theOffHandPassDoesNotChargeASecondSand() {
+        // PlayerInteractEvent fires once per hand and cancelling does not stop the second pass, so a
+        // single right-click must still cost exactly one sand.
+        PlayerMock caged = server.addPlayer();
+        DeathCage cage = cagedTeammate(caged, 3); // costs 3, so neither pass completes it
+        Block chest = sacrificeChest(cage);
+        player.getInventory().addItem(new ItemStack(Material.SAND, 5));
+
+        rightClick(player, chest);
+        PlayerInteractEvent offHand = new PlayerInteractEvent(
+                player, Action.RIGHT_CLICK_BLOCK, player.getInventory().getItemInOffHand(),
+                chest, BlockFace.UP, EquipmentSlot.OFF_HAND);
+        server.getPluginManager().callEvent(offHand);
+
+        assertEquals(4, sandCount(player), "one right-click, one sand");
+        assertEquals(2, cage.getRemainingSand());
+        assertTrue(offHand.isCancelled(), "the off-hand pass must still not open the chest");
     }
 }

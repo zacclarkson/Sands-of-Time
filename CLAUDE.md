@@ -218,6 +218,50 @@ line — so it is actionable without rediscovering it.
   breaker's own column; the listener subsumes it (every team's column, the whole live round) and the
   duplicate contradicted the Creative bypass, so it was removed along with the team lookup that only
   existed to serve it.
+- **Sacrifice points are segment markers, and the chest is what makes one exist.** `SAND_SACRIFICE`
+  and `DEATH_CAGE` markers were captured, serialized and loaded but never read — `DungeonManager`
+  invented four cages at `absHubLocation ± {3,0,3}` instead. That anchor is the hub's *origin corner*
+  (the hub is placed at `BlockVector3.ZERO`), so on the 42x15x37 bundled hub two of the four landed at
+  negative coordinates, outside the dungeon. Both markers now flow through the usual chain:
+  `Segment.getDeathCageOffsets()` / `getSandSacrificeLocations()` →
+  `DungeonGenerator.selectDeathCageRelativeLocations` / `selectSandSacrificeRelativeLocations` →
+  `reconcileSacrificePoints` → `DungeonBlueprint` → `DungeonManager` zips them into `DeathCage`s.
+  The generator guarantees the two blueprint lists are **the same length and index-aligned**, which is
+  what lets the zip run without null handling (`DeathCage`'s only constructor takes a `@NotNull` point).
+  Pairing is positional — the Nth marker frees the Nth cage — and any cage the template leaves
+  unpaired gets a point derived beside it. **`placeSacrificePoints()` is what makes a point exist**:
+  the marker records an *air* cell, so registering the `DeathCage` without writing a block leaves
+  nothing to right-click, exactly the trap `Door.buildClosed()` documents. The chest is forced to
+  `Chest.Type.SINGLE`, since two adjacent points would otherwise pair into a double chest and move the
+  block a click lands on. The derivation exists because `installBundledSegments()` is skip-if-present:
+  a re-saved `hub.json` never reaches a server that already has one, so without it every existing
+  server would stay unrevivable until someone re-saved the hub by hand.
+- **The sacrifice derivation moves every cage by one shared step.** `reconcileSacrificePoints` offsets
+  unpaired cages 2 blocks along a single cardinal direction — the dominant component of (hub centre −
+  cage centroid) — rather than resolving a direction per cage. Per-cage "toward the centre" breaks on
+  exactly the layout hubs use: the bundled hub's four cages sit in a row along X at z=4, and resolving
+  each independently flips two of them onto the X axis and leaves the row incoherent. One shared
+  translation keeps the chests in front of the row and, because translating distinct cells by a single
+  vector cannot collide them, *guarantees* no two cages share a chest. Ties and a cage sitting exactly
+  on the centre resolve to +Z so the result is deterministic; tests pin all of it.
+- **Reviving costs the dead player's death count, paid a sand at a time.** The price and the
+  part-payment live on `DeathCage`, which is already 1:1 with a player for the round, so they are torn
+  down with the dungeon and reset per round with nothing having to clear them (`SoTPlayerData.timesDied`
+  is *not* usable for this — `SoTPlayerManager` is never instantiated anywhere in `src/main`).
+  `recordDeath()` raises the price and discards leftover part-payment, so a player revived at cost 2 who
+  dies again does not inherit what was already paid. `SandManager.attemptRevive` consumes exactly one
+  sand per click and only revives on the click that completes the total, which is what lets several
+  teammates chip in. Sand paid into a revive that never completes is spent, not refunded. The interact
+  handler gates on `CHEST` and **cancels before the team lookup** — a sacrifice point is a real chest, so
+  returning early for a player with no team would let them open it.
+- **The floating sand above a chest is the activity signal, and is event-driven.** `SacrificeIndicatorManager`
+  spawns a `BlockDisplay` of sand plus a `TextDisplay` arrow and count above a chest only while its cage
+  holds someone awaiting revive; a chest with nothing above it has nobody to free. Like
+  `GameScoreboardManager` it is owned by `GameManager` and is **not** a listener, so there is nothing for
+  `SoT.onEnable()` to register — but unlike the scoreboard it runs no task, because the numbers only
+  change on death, payment, revive and timer-out. Its displays are `setPersistent(false)` and sit inside
+  the dungeon bounds, so `cleanupInstance()` removes them with every other non-player entity; `clearAll()`
+  in `tearDownRound()` is there to empty the manager's own map rather than to do the removing.
 - **Dying drops carried sand on the floor.** Nearly all of that is vanilla: `DeathListener` never
   touches `event.getDrops()`, so a death that drops the inventory scatters the sand with everything
   else and it lands, merges and despawns by the server's own rules. `SandManager.dropCarriedSandOnDeath`
