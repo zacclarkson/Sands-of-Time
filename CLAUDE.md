@@ -381,7 +381,9 @@ line — so it is actionable without rediscovering it.
   sits at segment-relative `(21, 1, 18)`, the pedestal under the sand column baked into `hub.schem`.
   **The hub must declare itself tall enough to hold the column it anchors.** The column occupies
   relative Y `timerLocationOffset.y + 1` through `+ VisualTimerLayout.COLUMN_HEIGHT_BLOCKS`, but the
-  blueprint bounds come from the template's declared `size` (`DungeonGenerator.calculateRelativeMaxBounds`),
+  blueprint bounds come from the template's declared `size` — rotated, via `PlacedSegment.getRotatedSize()`
+  (`DungeonGenerator.calculateRelativeMaxBounds`; the unrotated size under-covered any non-square segment
+  placed at 90/270 and left its overhang standing between rounds) —
   and those bounds are exactly what `DungeonManager.cleanupInstance()` air-fills between rounds.
   `hub.json` therefore declares `size.y = 17` while `hub.schem` is only 15 tall — the two extra
   layers are air and `ignoreAirBlocks` means they cost nothing to paste. Under-declare it and the top of
@@ -390,6 +392,23 @@ line — so it is actionable without rediscovering it.
   17 blocks of height** or the gap reopens. `StructureLoaderHubFeaturesTest` pins it, deriving the bound
   from the constants, and `StructureLoader.warnIfDeclaredSizeIsTooSmall` catches the general case at
   load — but only a size *below* the schematic's, since this over-declaration is the point.
+- **A location belongs to a team by *region*, not by segment.** `GameManager.getTeamIdForLocation` was a
+  stub returning null for every location — public, `@Nullable`, with a javadoc describing an
+  implementation that did not exist, so any caller trusting it silently got "no team" with no
+  exception, no log and no test failure (bug #98). It now walks `teamDungeonManagers` and returns the
+  team whose `DungeonManager.containsLocation` matches. That test is the instance's `absoluteBounds`
+  — the blueprint's relative bounds translated by the team's origin, computed once at construction and
+  now the single source `cleanupInstance()` reads too, so the region a lookup claims and the region
+  teardown clears cannot drift. Two consequences are worth knowing. **(a)** It is region-level: a
+  location in the air *between* two of a team's rooms still resolves to that team, because the whole
+  cuboid is theirs and is cleared as theirs. Use `DungeonManager.getSegmentAtLocation` when a segment
+  actually has to be there. **(b)** `TEAM_DUNGEON_SPACING` (5000 on X) is what makes it unambiguous —
+  the regions cannot overlap, so no tie-break is needed and the scan is six coordinate comparisons per
+  team, cheap enough for an event handler; a per-segment scan and the origin-distance pre-filter it
+  would need are both unnecessary. The world check lives in `regionContains`, not in `Area.contains`,
+  which compares coordinates only — every world shares a coordinate space. `isVisualTimerBlock` still
+  scans every team rather than resolving one, and deliberately: the operator who teleported into
+  someone else's hub is the case worth covering, and the answer would not change.
 - **Game locations come from `config.yml`.** `locations.lobby` and `locations.trapped` are stored as
   plain `world/x/y/z/yaw/pitch` scalars and read by `SoTConfig` (deliberately *not* Bukkit's
   `config.getLocation()`, whose serialized form needs a `==: org.bukkit.Location` marker and is not
