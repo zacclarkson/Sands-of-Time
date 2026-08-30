@@ -49,8 +49,9 @@ manually (see `integration-test/README.md`); it is **not** part of CI.
 - **Builder tools** (perm `sot.admin.builder` / `sot.admin.savesegment`): `/sotbuilder` (gives the
   BLAZE_ROD tool), `/sotmode <mode> [arg]` (switch placement mode), `/sotsavesegment <name> <type>`
   (save the WorldEdit selection + placed markers as a segment template).
-- **Game control** (perm `sot.admin.control`): `/sot setup [numTeams] | start | end | reset | set <lobby|trapped>`,
-  wired to `GameManager.setupGame/startGame/endGame/resetGame` and the location setters.
+- **Game control** (perm `sot.admin.control`): `/sot setup [numTeams] | start | end | reset | set <lobby|trapped> | seed [<value>|random]`,
+  wired to `GameManager.setupGame/startGame/endGame/resetGame`, the location setters and
+  `setDungeonSeed`.
 
 ## Architecture notes & gotchas
 
@@ -128,6 +129,27 @@ manually (see `integration-test/README.md`); it is **not** part of CI.
   assignments it is about to read. A missing HUB template is deliberately **not** a game state
   (it used to latch `ENDED` at boot); `setupGame`/`startGame` check `hasHubTemplate()` instead, so
   `/sotreloadsegments` fixes it live.
+- **Dungeon generation is seeded, and the reseed is per call, not per attempt.** `dungeon.seed` in
+  `config.yml` (read by `SoTConfig.readSeed`, applied via `GameManager.setDungeonSeed`, editable live
+  with `/sot seed`) fixes the layout; blank means each round rolls its own.
+  `DungeonGenerator.generateDungeonLayout` reseeds `random` once at the **top of the call** and logs
+  the seed either way, so an unseeded round can be replayed from `getLastUsedSeed()`. Reseeding
+  inside the 20-attempt retry loop instead would be a real bug: the attempts share one RNG stream on
+  purpose — each retry consuming fresh draws is exactly what lets a layout that failed validation
+  succeed on the next try — so a per-attempt reseed would make all 20 attempts byte-identical and
+  turn one validation failure into twenty copies of itself. Two supporting pieces are easy to miss.
+  **(a)** `StructureLoader` sorts `listFiles()` by name, because `File.listFiles` has no defined order
+  and the seed indexes into `availableSegments` (and `findHubTemplate` takes the first HUB); unsorted,
+  the same seed silently produced a different dungeon on a different machine. **(b)** Population is
+  seeded too, via *salted sub-seeds* off `GameManager.getRoundSeed()` rather than a continuation of
+  the generator's stream — `DungeonManager.populationRandom` for the rusty-key/sand rolls (identical
+  for every team, so team dungeons match item-for-item) and `VaultManager.vaultRewardSeed(seed, color)`
+  for reward scatter, which must be a pure function of seed and colour since it is drawn when a
+  player opens a vault and would otherwise depend on which team got there first. `FloorItemManager`'s
+  loot RNG is therefore a *parameter* of `spawnGenericItem`, not a field: one manager serves every
+  team, so a shared instance RNG would interleave their draws beyond any seed's reach. The
+  `UUID.randomUUID()` calls next to all this stay random — they are identity tokens for tracked
+  entities and never affect what spawns.
 - **Generation retries must not multiply the log.** `DungeonGenerator.generateDungeonLayout` retries
   `attemptGeneration` up to 20 times, so any warning inside an attempt is a candidate for being
   printed 20 times per `/sot setup`. Conditions that describe the *templates on disk* — no

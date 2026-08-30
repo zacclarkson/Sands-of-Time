@@ -65,7 +65,12 @@ public class DungeonManager {
     private final VaultManager vaultManager;
     private final FloorItemManager floorItemManager;
     private final DoorManager doorManager;
-    private final Random random; // Added for probabilities
+    /**
+     * Rusty-key and sand rolls, seeded from the round seed so a seed reproduces what is on the floor
+     * and not merely the shape of the rooms. Every team derives the same value, so every team's
+     * dungeon populates identically -- which is also the fairer behaviour for a race.
+     */
+    private final Random random;
 
     // --- Instance State ---
     private final UUID teamId;
@@ -84,6 +89,13 @@ public class DungeonManager {
      * the round. Raise this if that happens often -- the doorway count is logged at generation.
      */
     private static final double RUSTY_KEY_SPAWN_CHANCE = 0.20;
+
+    /**
+     * Mixed into the round seed for this instance's RNG. Population uses a salted sub-seed rather
+     * than continuing the generator's own stream so that it cannot be perturbed by how many draws
+     * layout generation happened to consume (a validation retry changes that count).
+     */
+    private static final long POPULATION_SEED_SALT = 0xA5A5F100D5EEDL;
 
     // The consolidated data object with ABSOLUTE locations for this instance
     private Dungeon dungeonData;
@@ -114,7 +126,19 @@ public class DungeonManager {
 
         this.placedSegmentsInWorld = new ArrayList<>();
         this.dungeonData = null;
-        this.random = new Random(); // Initialize Random
+        this.random = populationRandom(gameManager.getRoundSeed());
+    }
+
+    /**
+     * The RNG that populates a dungeon instance, derived from the seed its layout was generated
+     * from. Deliberately takes no account of the team: every team is populated from the same
+     * sub-seed and walks the same blueprint-ordered spawn lists, so every team's dungeon ends up
+     * identical. Falls back to an unseeded RNG only when no layout has been generated, which in
+     * practice means a caller constructed a DungeonManager outside {@code GameManager.startGame}.
+     */
+    @NotNull
+    static Random populationRandom(@Nullable Long roundSeed) {
+        return roundSeed != null ? new Random(roundSeed ^ POPULATION_SEED_SALT) : new Random();
     }
     /**
      * Initializes the dungeon instance in the world.
@@ -402,7 +426,7 @@ public class DungeonManager {
                          floorItemManager.spawnRustyKey(absLoc, teamId, instanceUUID, depth);
                          rustyKeyCount++;
                      } else {
-                         floorItemManager.spawnGenericItem(absLoc, teamId, instanceUUID, depth);
+                         floorItemManager.spawnGenericItem(absLoc, teamId, instanceUUID, depth, random);
                      }
                  } catch (Exception e) {
                      plugin.getLogger().log(Level.WARNING, "Error processing item spawn at " + absLoc + " for team " + teamId, e);

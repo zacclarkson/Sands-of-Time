@@ -55,7 +55,7 @@ class DungeonGeneratorWarningLoggingTest {
         Plugin plugin = mock(Plugin.class);
         when(plugin.getLogger()).thenReturn(logger);
         generator = new DungeonGenerator(plugin);
-        generator.setRandomSeedForTest(20260830L);
+        generator.setSeed(20260830L);
     }
 
     private long countAtLeast(Level level, String substring) {

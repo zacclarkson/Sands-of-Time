@@ -40,7 +40,16 @@ public class DungeonGenerator {
     private final Plugin plugin;
     private final StructureLoader structureLoader;
     private List<Segment> availableSegments; // Templates loaded from files
-    private Random random; // non-final so tests can seed it for determinism
+    /**
+     * Reseeded at the top of every {@link #generateDungeonLayout()} call, from {@link #configuredSeed}
+     * when one is set and from a fresh random draw otherwise. The value assigned in the constructor
+     * is only a placeholder so the field is never null.
+     */
+    private Random random;
+    /** Fixed seed from config.yml / {@code /sot seed}, or null to roll a new one each round. */
+    @Nullable private Long configuredSeed;
+    /** The seed the most recent generation actually used, so a random layout can be replayed. */
+    @Nullable private Long lastUsedSeed;
     private static final int MAX_DEPTH = 12; // Deepest vault (gold) maxes at 10, leaving headroom.
     private static final int MAX_TOTAL_SEGMENTS = 120; // Safety cap; a full dungeon fans out well under this.
     // Track placed vaults/keys during generation
@@ -100,7 +109,9 @@ public class DungeonGenerator {
         this.plugin = plugin;
         this.structureLoader = new StructureLoader(plugin);
         this.availableSegments = new ArrayList<>();
-        this.random = new Random();
+        this.random = new Random(); // Placeholder; generateDungeonLayout reseeds before any draw.
+        this.configuredSeed = null;
+        this.lastUsedSeed = null;
         this.keysPlacedInDFS = new HashSet<>();
         this.vaultsPlacedInDFS = new HashSet<>();
         this.doorwaysInDFS = new ArrayList<>();
@@ -113,9 +124,31 @@ public class DungeonGenerator {
         this.availableSegments = new ArrayList<>(segments);
     }
 
-    /** Seeds the RNG so a generation run is deterministic. For unit tests only. */
-    void setRandomSeedForTest(long seed) {
-        this.random = new Random(seed);
+    // --- Seeding ---
+
+    /**
+     * Fixes the seed every subsequent {@link #generateDungeonLayout()} call generates from, so the
+     * same seed always yields the same dungeon. Pass {@code null} to go back to rolling a fresh seed
+     * per round.
+     */
+    public void setSeed(@Nullable Long seed) {
+        this.configuredSeed = seed;
+    }
+
+    /** The configured fixed seed, or null when each round rolls its own. */
+    @Nullable
+    public Long getSeed() {
+        return configuredSeed;
+    }
+
+    /**
+     * The seed the most recent generation ran from, or null before anything has been generated.
+     * Feeding this back to {@link #setSeed} replays that layout exactly, which is the point of
+     * logging it: a good random dungeon can be captured after the fact.
+     */
+    @Nullable
+    public Long getLastUsedSeed() {
+        return lastUsedSeed;
     }
 
     // --- Public API Methods ---
@@ -188,6 +221,21 @@ public class DungeonGenerator {
         // tally starts from zero so the failure summary describes this call only.
         warnedOncePerGeneration.clear();
         validationFailureCounts.clear();
+
+        // Reseed once per CALL, deliberately not once per attempt. The retries below share one RNG
+        // stream on purpose -- each attempt consumes fresh draws, which is exactly what lets a layout
+        // that failed validation succeed on the next try. Reseeding inside the loop would make every
+        // attempt byte-identical and turn a single validation failure into 20 copies of itself.
+        // The deterministic unit is therefore the whole call: one seed in, one blueprint out.
+        long seed = (configuredSeed != null) ? configuredSeed : new Random().nextLong();
+        this.lastUsedSeed = seed;
+        this.random = new Random(seed);
+        if (configuredSeed != null) {
+            plugin.getLogger().info("Generating dungeon layout with configured seed " + seed + ".");
+        } else {
+            plugin.getLogger().info("Generating dungeon layout with random seed " + seed
+                    + ". Run '/sot seed " + seed + "' to replay this layout.");
+        }
         for (int attempt = 1; attempt <= maxRetries; attempt++) {
             plugin.getLogger().fine("Starting dungeon layout generation attempt " + attempt + "/" + maxRetries + "...");
             DungeonBlueprint blueprint = attemptGeneration();
