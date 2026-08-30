@@ -88,7 +88,11 @@ This plugin implements (or plans to implement) the following core features of th
   Starts the currently configured game instance.
 
 * `/sot end`
-  Forcefully ends the current game instance.
+  Forcefully ends the current game instance. Also works during the pre-game countdown.
+
+* `/sot reset`
+  Clears a finished round so another can be set up. Rounds end in the `ENDED` state and stay there
+  until you run this, so the final standings remain readable; it refuses while a game is live.
 
 * `/sot set <lobby|trapped>`
   (Admin) Stores your current position as one of the two universal game locations, writes it to `config.yml` and applies it immediately. Hub, Exit, and Cage are instance-specific and are not set this way.

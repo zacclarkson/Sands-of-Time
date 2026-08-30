@@ -522,12 +522,18 @@ public class DungeonManager {
     public void cleanupInstance() {
          plugin.getLogger().info("Attempting cleanup for dungeon instance of team " + teamId + " at origin " + dungeonOrigin.toVector());
 
-         // Ensure we have the blueprint data to calculate bounds
-         if (blueprintData == null || dungeonData == null) { // Check dungeonData too, as it confirms successful init
-             plugin.getLogger().warning("Cannot cleanup instance for team " + teamId + ": Blueprint or Dungeon data is missing.");
+         // The blueprint is what gives us the bounds, so it is the only hard requirement.
+         // dungeonData being null means initializeInstance() failed part-way — which is exactly when
+         // there are half-pasted blocks to remove, so that case must NOT skip the clear below.
+         if (blueprintData == null) {
+             plugin.getLogger().warning("Cannot cleanup instance for team " + teamId + ": Blueprint data is missing.");
              // Still attempt to clear manager states
              clearManagerStates();
              return;
+         }
+         if (dungeonData == null) {
+             plugin.getLogger().warning("Cleaning up a partially initialized dungeon for team " + teamId
+                     + "; clearing the blueprint bounds anyway.");
          }
 
          // --- 1. Calculate Absolute Bounds ---
@@ -595,13 +601,14 @@ public class DungeonManager {
      /** Helper method to clear internal state and notify managers */
      private void clearManagerStates() {
           placedSegmentsInWorld.clear();
-          if (dungeonData != null) { // Check if dungeonData was successfully created
-              // Tell managers to clear state related to this teamId
-              if (vaultManager != null) vaultManager.clearTeamState(teamId);
-              if (doorManager != null) doorManager.clearTeamState(teamId);
-              if (floorItemManager != null) floorItemManager.clearTeamState(teamId);
-              dungeonData = null; // Clear local reference
-          }
+          // Unconditional: these are keyed by teamId and no-op on a team they know nothing about,
+          // whereas gating them on dungeonData would skip cleanup for a team whose instance failed
+          // part-way through initialization — and team UUIDs are reused every round, so a leaked
+          // entry makes the next round's vaults report as already open.
+          if (vaultManager != null) vaultManager.clearTeamState(teamId);
+          if (doorManager != null) doorManager.clearTeamState(teamId);
+          if (floorItemManager != null) floorItemManager.clearTeamState(teamId);
+          dungeonData = null; // Clear local reference
           plugin.getLogger().fine("Cleared internal manager states for team " + teamId);
      }
 

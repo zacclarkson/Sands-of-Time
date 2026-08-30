@@ -160,6 +160,71 @@ class GameCommandTest {
         verify(gameManager, never()).setupGame(any(), any());
     }
 
+    // --- Consecutive rounds: /sot reset, and the guards that make a second round reachable ---
+
+    @Test
+    void resetClearsAFinishedRoundSoAnotherCanBeSetUp() {
+        when(gameManager.getCurrentState()).thenReturn(GameState.ENDED);
+        when(gameManager.resetGame()).thenReturn(true);
+
+        assertTrue(run(opPlayer(), "reset"));
+
+        verify(gameManager).resetGame();
+    }
+
+    @Test
+    void resetIsRefusedWhileARoundIsStillLive() {
+        // Tearing the round down underneath players would strand them in the dungeon.
+        for (GameState live : List.of(GameState.COUNTDOWN, GameState.RUNNING, GameState.PAUSED)) {
+            when(gameManager.getCurrentState()).thenReturn(live);
+
+            assertTrue(run(opPlayer(), "reset"), "reset should be handled in state " + live);
+        }
+
+        verify(gameManager, never()).resetGame();
+    }
+
+    @Test
+    void endWorksDuringTheCountdown() {
+        // A round started by mistake has to be abortable without waiting out the countdown.
+        when(gameManager.getCurrentState()).thenReturn(GameState.COUNTDOWN);
+
+        assertTrue(run(opPlayer(), "end"));
+
+        verify(gameManager).endGame();
+    }
+
+    @Test
+    void startReportsSuccessOnceTheCountdownBegins() {
+        // startGame() hands off to the countdown, so COUNTDOWN — not RUNNING — is the success state.
+        // Checking for RUNNING made every successful start report "Start failed" instead.
+        when(gameManager.getCurrentState()).thenReturn(GameState.SETUP, GameState.COUNTDOWN);
+
+        assertTrue(run(opPlayer(), "start"));
+
+        verify(gameManager).startGame();
+        // The failure branch is the only thing that inspects the generator, so never touching it
+        // proves the success branch was taken.
+        verify(gameManager, never()).getDungeonGenerator();
+    }
+
+    @Test
+    void startIsRefusedOnceARoundHasEnded() {
+        when(gameManager.getCurrentState()).thenReturn(GameState.ENDED);
+
+        assertTrue(run(opPlayer(), "start"));
+
+        verify(gameManager, never()).startGame();
+    }
+
+    @Test
+    void tabCompleteOffersReset() {
+        List<String> completions =
+                command.onTabComplete(opPlayer(), bukkitCommand, "sot", new String[]{"res"});
+
+        assertEquals(List.of("reset"), completions);
+    }
+
     @Test
     void tabCompleteOffersSetTargets() {
         List<String> completions =
