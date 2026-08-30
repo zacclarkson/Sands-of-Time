@@ -935,10 +935,11 @@ public class GameManager {
     /**
      * Whether the location is part of <em>any</em> active team's visual sand timer column.
      *
-     * <p>Every team, not just the one the player belongs to: {@link #getTeamIdForLocation} is still
-     * a stub, team dungeons are thousands of blocks apart so a cross-team hit cannot happen by
-     * accident, and an operator who teleported into someone else's hub is exactly the case worth
-     * covering. Costs one coordinate comparison per active team.
+     * <p>Every team, not just the one the player belongs to: an operator who teleported into someone
+     * else's hub is exactly the case worth covering, and team dungeons are thousands of blocks apart
+     * so a cross-team hit cannot happen by accident. Resolving the owning team via
+     * {@link #getTeamIdForLocation} first would buy nothing — the column check below is already one
+     * coordinate comparison per active team, and the answer would be the same.
      */
     public boolean isVisualTimerBlock(@Nullable Location location) {
         if (location == null) return false;
@@ -1057,9 +1058,42 @@ public class GameManager {
         return teamDungeonManager.getDungeonData().isBankAt(location);
     }
 
-    /** Finds the team ID associated with a given world location. */
+    /**
+     * Finds the team whose dungeon region contains the given world location.
+     *
+     * <p>Region, not segment: every team's instance owns a cuboid — the blueprint bounds translated
+     * by that team's origin, which is exactly the region {@code cleanupInstance()} air-fills at
+     * teardown — so a location in the gap between two of a team's rooms still resolves to that team.
+     * Ask {@link DungeonManager#getSegmentAtLocation} when you need a segment to actually be there.
+     *
+     * <p>Team origins are {@code TEAM_DUNGEON_SPACING} (5000 blocks on X) apart, so the regions
+     * cannot overlap and the match is unambiguous; with the bounds precomputed per instance this is
+     * six coordinate comparisons per active team, cheap enough to call from an event handler.
+     *
+     * @return the owning team's ID, or null for a location outside every team's dungeon (including
+     *         the lobby and the trapped box, which sit outside the generated regions).
+     */
     @Nullable
-    public UUID getTeamIdForLocation(Location location) { /* ... (Implementation remains the same) ... */ return null;}
+    public UUID getTeamIdForLocation(@Nullable Location location) {
+        return teamIdForLocation(teamDungeonManagers, location);
+    }
+
+    /**
+     * The lookup behind {@link #getTeamIdForLocation}, taking the map so it can be tested without
+     * standing up a whole GameManager — the same reason {@link #canResetFrom} is static.
+     */
+    @Nullable
+    static UUID teamIdForLocation(Map<UUID, DungeonManager> dungeonManagers, @Nullable Location location) {
+        if (location == null) return null;
+        for (Map.Entry<UUID, DungeonManager> entry : dungeonManagers.entrySet()) {
+            DungeonManager manager = entry.getValue();
+            if (manager != null && manager.containsLocation(location)) {
+                return entry.getKey();
+            }
+        }
+        return null;
+    }
+
     /** Gets the DungeonManager instance for a specific team. */
     @Nullable public DungeonManager getTeamDungeonManager(UUID teamId) { return teamDungeonManagers.get(teamId); }
 
