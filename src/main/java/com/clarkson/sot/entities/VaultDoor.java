@@ -9,7 +9,7 @@ import org.bukkit.Material;
 // Removed NamespacedKey, PDC, PDT, ItemMeta imports
 import org.bukkit.Sound;
 import org.bukkit.SoundCategory;
-import org.bukkit.block.Block;
+import org.bukkit.World;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.plugin.Plugin;
@@ -18,21 +18,19 @@ import org.jetbrains.annotations.Nullable;
 
 import java.util.Objects;
 import java.util.UUID;
-import java.util.logging.Level;
 
 /**
- * Represents a Vault door/mechanism.
- * Requires a specific VaultColor key, checked via ItemManager.
- * Opening changes the vault marker block.
- * Does not use the standard open/close animation from the abstract Door class.
+ * The wall of coloured blocks that seals a vault off until that vault is opened.
  *
- * <p><b>Not currently wired up.</b> {@code DoorManager} used to register one of these at every
- * vault marker block, which duplicated {@code VaultManager}'s handling of the same click (and
- * skipped the rewards it spawns -- see the TODO in {@link #open}). {@code VaultManager} owns
- * vault markers now. The class is kept for the separate "vault door" feature described in
- * GAME_RULES.md -- an opening blocked until the matching vault is opened, sized by
- * {@code Segment.getVaultDoorBound()} -- and for the key-tagging contract pinned by
- * {@code KeyItemTaggingTest}.
+ * <p>Sized by the segment template's {@code VAULT_DOOR} marker ({@code Segment.getVaultDoorBound()})
+ * and coloured by the vault that segment contains. It has <b>no keyhole and no key of its own</b>:
+ * only one key of each colour exists per dungeon and {@code VaultManager} consumes it at the vault
+ * marker, so a second keyhole here could never be opened. {@code VaultManager} calls
+ * {@code DoorManager.openVaultDoors} when it marks the matching vault open -- the marker click stays
+ * VaultManager's, this wall is DoorManager's.
+ *
+ * <p>{@link #isCorrectKey} is therefore never consulted at runtime. It survives because it is the
+ * colour-matching contract pinned by {@code KeyItemTaggingTest}.
  */
 public class VaultDoor extends Door {
 
@@ -94,42 +92,24 @@ public class VaultDoor extends Door {
     }
 
     /**
-     * Opens the Vault door. Changes the lock block to Glass.
-     * Assumes key check and consumption happened before calling.
-     * Overrides the base Door open method entirely.
+     * Opens the vault door: its blocks sink into the floor like any other door, plus the two vault
+     * fanfare sounds.
      *
-     * @param player The player who opened the vault.
-     * @return true if the vault was successfully opened, false if already open.
+     * <p>This used to set a single block to GLASS instead of animating -- a leftover from when a
+     * "vault door" meant the vault marker block itself. {@code VaultManager} owns the marker and the
+     * rewards behind it; this class is only the wall.
      */
     @Override
-    public boolean open(@NotNull Player player) {
-        if (this.isOpen) {
-            plugin.getLogger().finer("VaultDoor " + id + " (" + vaultColor + ") already open.");
-            return false;
+    public boolean open() {
+        if (!super.open()) return false;
+
+        World world = lockLocation.getWorld();
+        if (world != null) {
+            world.playSound(lockLocation, Sound.BLOCK_END_PORTAL_FRAME_FILL, SoundCategory.BLOCKS, 1.0f, 1.2f);
+            world.playSound(lockLocation, Sound.ENTITY_PLAYER_LEVELUP, SoundCategory.PLAYERS, 0.8f, 1.0f);
         }
-
-        try {
-            Block lockBlock = lockLocation.getBlock();
-            Material expectedMaterial = getClosedMaterial();
-            if (lockBlock.getType() != expectedMaterial) {
-                 plugin.getLogger().warning("VaultDoor " + id + " (" + vaultColor + ") lock block at " + lockLocation.toVector() + " was not the expected material ("+ expectedMaterial + "), was " + lockBlock.getType() + ". Still opening.");
-            }
-
-            lockBlock.setType(Material.GLASS, true); // Change to glass
-            this.isOpen = true; // Set state
-
-            player.getWorld().playSound(lockLocation, Sound.BLOCK_END_PORTAL_FRAME_FILL, SoundCategory.BLOCKS, 1.0f, 1.2f);
-            player.getWorld().playSound(lockLocation, Sound.ENTITY_PLAYER_LEVELUP, SoundCategory.PLAYERS, 0.8f, 1.0f);
-
-            plugin.getLogger().info("Opened VaultDoor " + id + " (" + vaultColor + ") at " + lockLocation.toVector() + " by " + player.getName());
-
-            // TODO: Trigger reward logic (call ScoreManager, spawn items, fire event, etc.)
-
-            return true;
-        } catch (Exception e) {
-             plugin.getLogger().log(Level.SEVERE, "Error opening VaultDoor " + id + " (" + vaultColor + ")", e);
-            return false;
-        }
+        plugin.getLogger().info("Opened " + vaultColor + " vault door " + id + " at " + lockLocation.toVector());
+        return true;
     }
 
     /**

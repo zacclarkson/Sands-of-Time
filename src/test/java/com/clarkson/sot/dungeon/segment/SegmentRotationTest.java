@@ -68,6 +68,50 @@ class SegmentRotationTest {
         }
     }
 
+    /**
+     * A bound is rotated by rotating both corners and re-deriving min/max, not by rotating min and
+     * max independently: one 90 degree step maps {@code (x,z) -> (z, sizeX-1-x)}, so the corner that
+     * was the minimum can come out the larger of the two.
+     */
+    @Test
+    void rotatedBoundReDerivesMinAndMax() {
+        SegmentBound bound = new SegmentBound(BlockVector3.at(1, 0, 0), BlockVector3.at(4, 2, 1));
+
+        for (int steps = 0; steps < 4; steps++) {
+            SegmentBound rotated = SegmentRotation.rotateBound(bound, steps, SIZE);
+
+            assertTrue(rotated.getMin().x() <= rotated.getMax().x(), "min.x <= max.x at step " + steps);
+            assertTrue(rotated.getMin().y() <= rotated.getMax().y(), "min.y <= max.y at step " + steps);
+            assertTrue(rotated.getMin().z() <= rotated.getMax().z(), "min.z <= max.z at step " + steps);
+
+            // The rotated bound must span exactly the two rotated corners, in some order.
+            BlockVector3 a = SegmentRotation.rotatePoint(bound.getMin(), steps, SIZE);
+            BlockVector3 b = SegmentRotation.rotatePoint(bound.getMax(), steps, SIZE);
+            assertEquals(Math.min(a.x(), b.x()), rotated.getMin().x(), "min.x at step " + steps);
+            assertEquals(Math.max(a.x(), b.x()), rotated.getMax().x(), "max.x at step " + steps);
+            assertEquals(Math.min(a.z(), b.z()), rotated.getMin().z(), "min.z at step " + steps);
+            assertEquals(Math.max(a.z(), b.z()), rotated.getMax().z(), "max.z at step " + steps);
+        }
+    }
+
+    @Test
+    void rotatingABoundFourTimesIsIdentity() {
+        SegmentBound bound = new SegmentBound(BlockVector3.at(1, 0, 0), BlockVector3.at(4, 2, 1));
+        SegmentBound round = SegmentRotation.rotateBound(bound, 4, SIZE);
+
+        assertEquals(bound.getMin(), round.getMin(), "min after four steps");
+        assertEquals(bound.getMax(), round.getMax(), "max after four steps");
+    }
+
+    /** A one-step rotation of an off-centre bound actually moves it -- guards a vacuous no-op. */
+    @Test
+    void rotatingABoundOnceMovesIt() {
+        SegmentBound bound = new SegmentBound(BlockVector3.at(1, 0, 0), BlockVector3.at(4, 2, 1));
+        SegmentBound rotated = SegmentRotation.rotateBound(bound, 1, SIZE);
+
+        assertNotEquals(bound.getMin(), rotated.getMin(), "a quarter turn must move the bound");
+    }
+
     // --- helpers ---
 
     private static java.util.List<BlockVector3> corners(BlockVector3 s) {

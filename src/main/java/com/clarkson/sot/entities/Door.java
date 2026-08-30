@@ -104,19 +104,29 @@ public abstract class Door {
         }
     }
 
-    public boolean open(@NotNull Player player) {
+    /**
+     * Opens this door. No player is required: the animation never used the one it was handed, and a
+     * gate is opened by a lever while a vault door is opened by its vault -- neither is a click on the
+     * door itself.
+     */
+    public boolean open() {
         if (isOpen || (currentAnimationTask != null && !currentAnimationTask.isCancelled())) return false;
-        startOpeningAnimation(player);
+        startOpeningAnimation();
         return true;
+    }
+
+    /** Convenience for the click paths, which do have a player. */
+    public boolean open(@NotNull Player player) {
+        return open();
     }
 
     public boolean close(@Nullable Player player) {
          if (!isOpen || (currentAnimationTask != null && !currentAnimationTask.isCancelled())) return false;
-         startClosingAnimation(player);
+         startClosingAnimation();
          return true;
     }
 
-    protected void startOpeningAnimation(@NotNull Player player) {
+    protected void startOpeningAnimation() {
         cancelAnimation();
         final List<Block> blocksToChange = getBlocksSorted(true); // Get blocks sorted top-to-bottom
         final World world = lockLocation.getWorld();
@@ -149,7 +159,7 @@ public abstract class Door {
          plugin.getLogger().fine("Finished opening door " + id);
      }
 
-    protected void startClosingAnimation(@Nullable Player player) {
+    protected void startClosingAnimation() {
         cancelAnimation();
         final List<Block> blocksToChange = getBlocksSorted(false); // Get blocks sorted bottom-to-top
         final Material closedMat = getClosedMaterial();

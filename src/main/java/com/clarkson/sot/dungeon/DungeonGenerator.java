@@ -943,6 +943,15 @@ public class DungeonGenerator {
                      warnOncePerGeneration("dup-vault:" + vaultColor + ":" + template.getName(),
                              "Duplicate vault marker found for color " + vaultColor + " in segment " + template.getName() + ". Keeping first one found.");
                 }
+            } else if (vaultColor != null) {
+                // A VAULT_DOOR marker sets containedVault too, so a segment saved with a vault door and
+                // no VAULT_MARKER claims a vault it cannot provide: the DFS counts the colour as placed
+                // while no marker is emitted, and every attempt then fails on the missing marker.
+                // SaveSegmentCommand refuses this now; templates saved before it can still be on disk.
+                warnOncePerGeneration("vault-no-marker:" + vaultColor + ":" + template.getName(),
+                        "Segment " + template.getName() + " claims the " + vaultColor + " vault but has no"
+                        + " VAULT_MARKER (a VAULT_DOOR marker alone sets the colour). Generation cannot"
+                        + " place that vault -- re-save the segment with a matching VAULT_MARKER.");
             }
 
             // --- Consolidate Key Spawn ---

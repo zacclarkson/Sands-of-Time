@@ -292,7 +292,7 @@ and it will naturally prefer a puzzle room once those exist.
 
 ### Vault Door
 - Each vault may have an associated vault door (a wall of colored blocks)
-- The vault door opens when the vault is opened
+- The vault door opens when the vault is opened — it needs no second key
 - Vault doors animate by removing blocks top-to-bottom with piston sounds
 - Once opened, vault doors cannot be closed again
 
@@ -324,7 +324,7 @@ and it will naturally prefer a puzzle room once those exist.
 
 ### Rusty Keys
 
-- Used to open standard **segment doors** (not vault doors)
+- Used to open standard **segment doors** — vault doors and gates take no key at all
 - Separate from colored vault keys
 - Right-click the door's keyhole block with a rusty key to open
 - Found throughout the dungeon: each `ITEM_SPAWN` marker has a **20% chance** of yielding a rusty
@@ -355,15 +355,25 @@ and it will naturally prefer a puzzle room once those exist.
 - Opened by pulling the segment's **lever**
 - A segment can have multiple gates, all opened by one lever
 - Every segment with gates **must** have exactly one lever
-- Rendered as gray stained glass in the builder tool
+- Built from **iron bars** at runtime — see-through on purpose, so players can size up what is behind
+  a gate before deciding whether to open it
+- The lever is a real lever block, written into the world when the dungeon is built. The builder
+  marker is an *air* cell, and air never registers a right-click
+- **Pulling the lever is one-way**: the segment's gates open permanently and the lever stays flipped.
+  A second pull is refused with a message
+- Rendered as gray stained glass in the builder tool (iron bars in play)
 
 ### Vault Doors
 
-- Colored block walls associated with a vault
-- Each vault door has a **keyhole block** — right-click with the matching colored key to open
-- The key is consumed on use
+- Colored block walls associated with a vault, built from that vault's own block material
+- **No keyhole and no key of their own.** A vault door opens the moment its team opens the matching
+  **vault** — there is one key per colour and it is consumed at the vault marker, so a second keyhole
+  would mean finding two keys for one reward
+- Geometry comes from the segment template's `VAULT_DOOR` marker, and the colour from the vault that
+  segment contains — so a vault door **must live in the same segment as its vault marker**
+- Animate open like every other door, plus an end-portal-frame fill and a level-up sound
 - Cannot be closed once opened
-- Rendered as purple stained glass in the builder tool
+- Rendered in the builder tool as stained glass in the vault's own colour
 
 ### Door Animation
 

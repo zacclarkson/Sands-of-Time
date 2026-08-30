@@ -4,6 +4,8 @@ package com.clarkson.sot.dungeon;
 import com.clarkson.sot.dungeon.segment.EntryPoint;
 import com.clarkson.sot.dungeon.segment.PlacedSegment;
 import com.clarkson.sot.dungeon.segment.Segment;
+import com.clarkson.sot.dungeon.segment.SegmentBound;
+import com.clarkson.sot.dungeon.segment.SegmentGeometry;
 import com.clarkson.sot.entities.Area;
 import com.clarkson.sot.events.FloorItemManager;
 import com.clarkson.sot.main.GameManager;
@@ -49,6 +51,7 @@ import java.io.FileInputStream;
 import java.io.IOException;
 import java.util.*;
 import java.util.logging.Level;
+import java.util.logging.Logger;
 import java.util.stream.Collectors;
 
 /**
@@ -195,6 +198,11 @@ public class DungeonManager {
         try {
             vaultManager.initializeForInstance(this.dungeonData);
             doorManager.initializeDoorsForInstance(this.dungeonData); // Initialize doors
+            // After the doors, so a gate overlapping an opening sealUnusedOpenings just walled off
+            // wins -- the interactive thing should.
+            doorManager.initializeGatesForInstance(teamId,
+                    resolveGateGroups(placedSegmentsInWorld, plugin.getLogger()),
+                    resolveVaultDoors(placedSegmentsInWorld, plugin.getLogger()));
             populateFloorItems(); // Spawn floor items
         } catch (Exception e) {
              plugin.getLogger().log(Level.SEVERE, "Error during feature manager initialization for team " + teamId, e);
@@ -467,6 +475,83 @@ public class DungeonManager {
     /** Absolute base of this instance's visual sand-timer column, or null if the hub has no TIMER marker. */
     @Nullable public Location getTimerBaseLocation() { return (timerBaseLocation != null) ? timerBaseLocation.clone() : null; }
     @NotNull public List<PlacedSegment> getPlacedSegmentsInWorld() { return Collections.unmodifiableList(this.placedSegmentsInWorld); }
+
+    /**
+     * Pairs each placed segment's gates with the lever that opens them, in absolute coordinates.
+     *
+     * <p>Read straight off the placed segments rather than carried on the blueprint. Doorways ride
+     * the blueprint because the DFS <em>discards</em> which connections it made and that cannot be
+     * recovered afterwards; gates discard nothing -- every GATE and LEVER marker on a placed template
+     * is used verbatim. Flattening them into a dungeon-wide list, the shape every other blueprint
+     * feature uses, would also lose the per-segment pairing that makes a lever mean anything.
+     *
+     * <p>Static and package-private so it can be tested against hand-built placements: everything
+     * else on this path needs WorldEdit and a pasted dungeon.
+     */
+    @NotNull
+    static List<GateGroup> resolveGateGroups(@NotNull List<PlacedSegment> placedSegments, @NotNull Logger log) {
+        List<GateGroup> groups = new ArrayList<>();
+        for (PlacedSegment placed : placedSegments) {
+            Segment template = placed.getSegmentTemplate();
+            if (template == null) continue;
+
+            List<SegmentBound> gates = template.getGates();
+            BlockVector3 leverOffset = template.getLeverOffset();
+
+            if (gates.isEmpty()) {
+                if (leverOffset != null) {
+                    log.fine("Segment " + template.getName() + " has a LEVER marker but no gates; ignoring it.");
+                }
+                continue;
+            }
+            if (leverOffset == null) {
+                // SaveSegmentCommand refuses this combination, so only hand-edited JSON reaches here.
+                // Leaving the gates unbuilt keeps the area open rather than sealing it behind a wall
+                // nothing can ever raise.
+                log.warning("Segment " + template.getName() + " declares " + gates.size()
+                        + " gate(s) but no lever; leaving them open. Re-save the template with a LEVER marker.");
+                continue;
+            }
+
+            List<Area> bounds = new ArrayList<>();
+            for (SegmentBound gate : gates) {
+                bounds.add(SegmentGeometry.toAbsoluteArea(placed, gate));
+            }
+            groups.add(new GateGroup(SegmentGeometry.toAbsoluteLocation(placed, leverOffset),
+                    bounds, template.getName()));
+        }
+        return groups;
+    }
+
+    /**
+     * Resolves each placed segment's vault door into an absolute wall plus the colour that opens it.
+     *
+     * <p>Two segments carrying the same colour is not an error: {@code openVaultDoors} opens every
+     * door of a colour, so a duplicate simply opens both.
+     */
+    @NotNull
+    static List<VaultDoorPlacement> resolveVaultDoors(@NotNull List<PlacedSegment> placedSegments, @NotNull Logger log) {
+        List<VaultDoorPlacement> doors = new ArrayList<>();
+        for (PlacedSegment placed : placedSegments) {
+            Segment template = placed.getSegmentTemplate();
+            if (template == null) continue;
+
+            SegmentBound bound = template.getVaultDoorBound();
+            if (bound == null) continue;
+
+            VaultColor color = template.getContainedVault();
+            if (color == null) {
+                // /sotmode VAULT_DOOR with no colour stores none on the marker, so the saved template
+                // has a wall nothing can ever open.
+                log.warning("Segment " + template.getName() + " has a vault door with no vault colour;"
+                        + " skipping it. Re-place the marker with /sotmode VAULT_DOOR <color>.");
+                continue;
+            }
+            doors.add(new VaultDoorPlacement(color, SegmentGeometry.toAbsoluteArea(placed, bound),
+                    template.getName()));
+        }
+        return doors;
+    }
 
     /** Finds the PlacedSegment (with absolute world coords) at a given absolute world location within this instance. */
     @Nullable

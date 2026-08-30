@@ -211,11 +211,27 @@ public class VaultManager implements Listener {
 
         if (consumeKeyItem(player, keyColor)) {
             markVaultOpen(teamId, clickedVaultColor);
+            openVaultDoorFor(teamId, clickedVaultColor);
             openVaultEffects(player, clickedVaultColor, clickedBlock.getLocation());
             spawnVaultRewards(teamId, clickedVaultColor, clickedBlock.getLocation());
         } else {
             player.sendMessage(Component.text("Error: Could not consume the key from your inventory!", NamedTextColor.RED));
             plugin.getLogger().warning("Failed to consume key " + keyColor + " from " + player.getName() + " even after checks passed.");
+        }
+    }
+
+    /**
+     * Sinks the matching vault door into the floor.
+     *
+     * <p>Deliberately a one-line hand-off. The vault marker click is this manager's alone (bug #65),
+     * and the wall behind it belongs to {@link DoorManager}, which built it and owns its animation
+     * task. There is no second keyhole and no second key -- opening the vault is what opens its door.
+     */
+    private void openVaultDoorFor(UUID teamId, VaultColor color) {
+        DoorManager doorManager = gameManager.getDoorManager();
+        if (doorManager == null) return;
+        if (doorManager.openVaultDoors(teamId, color) == 0) {
+            plugin.getLogger().fine("No " + color + " vault door for team " + teamId + "; nothing to open.");
         }
     }
 

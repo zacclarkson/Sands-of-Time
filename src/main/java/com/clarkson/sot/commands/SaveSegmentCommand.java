@@ -401,6 +401,16 @@ public class SaveSegmentCommand implements CommandExecutor, TabCompleter {
             player.sendMessage(Component.text(
                     "Warning: LEVER marker present but no gates found.", NamedTextColor.YELLOW));
         }
+        if (vaultDoorBound != null && vaultOffset == null) {
+            // The VAULT_DOOR marker's colour is what sets containedVault, so a segment saved like this
+            // claims to hold a vault it has no marker for. DungeonGenerator then counts the colour as
+            // placed while consolidateFeatureLocations emits no marker, and every one of its 20
+            // attempts fails validation on the missing marker -- /sot start aborts with no clear cause.
+            player.sendMessage(Component.text(
+                    "Save failed: segment has a VAULT_DOOR but no VAULT_MARKER. A vault door must live "
+                    + "in the same segment as the vault it seals.", NamedTextColor.RED));
+            return true;
+        }
         if (deathCageOffsets.size() > 4) {
             warn(player, deathCageOffsets.size() + " DEATH_CAGE markers — the runtime uses at most 4 "
                     + "(one per player); extras will be ignored.");
