@@ -1,6 +1,7 @@
 package com.clarkson.sot.dungeon;
 
 // Local project imports
+import com.clarkson.sot.dungeon.segment.EntryPoint;
 import com.clarkson.sot.dungeon.segment.PlacedSegment;
 import com.clarkson.sot.dungeon.segment.Segment;
 import com.clarkson.sot.entities.Area;
@@ -75,6 +76,15 @@ public class DungeonManager {
     // --- Constants ---
     private static final double SAND_SPAWN_CHANCE = 0.4; // Example: 40% chance for sand to spawn at a location
 
+    /**
+     * Chance that an ITEM_SPAWN marker yields a rusty key instead of rolling the loot table.
+     *
+     * <p>Rusty keys are the only way through a segment door, and they are placed by chance rather
+     * than one-per-room, so a branch can in principle come up with no key in it and stay shut for
+     * the round. Raise this if that happens often -- the doorway count is logged at generation.
+     */
+    private static final double RUSTY_KEY_SPAWN_CHANCE = 0.20;
+
     // The consolidated data object with ABSOLUTE locations for this instance
     private Dungeon dungeonData;
     private Location timerBaseLocation; // Absolute base of the visual sand timer; null if no TIMER marker
@@ -125,11 +135,14 @@ public class DungeonManager {
         List<Location> absCoinSpawns = calculateAbsoluteLocations(blueprintData.getCoinSpawnRelativeLocations());
         List<Location> absItemSpawns = calculateAbsoluteLocations(blueprintData.getItemSpawnRelativeLocations());
         List<Location> absPlayerSpawns = calculateAbsoluteLocations(blueprintData.getPlayerSpawnRelativeLocations());
+        List<Location> absSandTimers = calculateAbsoluteLocations(blueprintData.getSandTimerRelativeLocations());
         Location absHubLocation = dungeonOrigin.clone().add(blueprintData.getHubRelativeLocation());
         Vector safeExitRelative = blueprintData.getSafeExitRelativeLocation();
         Location absSafeExitLocation = (safeExitRelative != null) ? dungeonOrigin.clone().add(safeExitRelative) : null;
         Vector timerBaseRelative = blueprintData.getTimerBaseRelativeLocation();
         this.timerBaseLocation = (timerBaseRelative != null) ? dungeonOrigin.clone().add(timerBaseRelative) : null;
+        List<EntryPoint> absDoorways = calculateAbsoluteDoorways(blueprintData.getDoorways());
+        List<EntryPoint> absUnusedOpenings = calculateAbsoluteDoorways(blueprintData.getUnusedOpenings());
 
 
         // --- 2. Paste Schematics (Populates placedSegmentsInWorld) ---
@@ -167,7 +180,8 @@ public class DungeonManager {
                 teamId, world, dungeonOrigin, blueprintData,
                 absHubLocation, absVaultMarkers, absKeySpawns,
                 absSandSpawns, absCoinSpawns, absItemSpawns,
-                deathCages, absSafeExitLocation, absPlayerSpawns
+                deathCages, absSafeExitLocation, absPlayerSpawns, absSandTimers,
+                absDoorways, absUnusedOpenings
             );
              plugin.getLogger().info("Created Dungeon data object for team " + teamId);
          } catch (Exception e) {
@@ -200,6 +214,14 @@ public class DungeonManager {
             absoluteMap.put(entry.getKey(), dungeonOrigin.clone().add(entry.getValue()));
         }
         return absoluteMap;
+    }
+
+    /** Helper to convert blueprint-relative doorways into absolute ones for this instance. */
+    private List<EntryPoint> calculateAbsoluteDoorways(List<Doorway> relativeDoorways) {
+        return relativeDoorways.stream()
+                               .map(d -> new EntryPoint(dungeonOrigin.clone().add(d.getRelativePosition()),
+                                                        d.getDirection()))
+                               .collect(Collectors.toList());
     }
 
     /** Helper to convert relative list to absolute list */
@@ -369,17 +391,25 @@ public class DungeonManager {
 
         // --- Populate Generic Items ---
         List<Location> itemLocs = dungeonData.getItemSpawnLocations();
+        int rustyKeyCount = 0;
         if (itemLocs != null && !itemLocs.isEmpty()) {
             plugin.getLogger().finer("Processing " + itemLocs.size() + " potential item spawn locations.");
             for (Location absLoc : itemLocs) {
                  if (absLoc == null) continue;
                  try {
                      int depth = dungeonData.getDepthAtLocation(absLoc, this.placedSegmentsInWorld);
-                     floorItemManager.spawnGenericItem(absLoc, teamId, instanceUUID, depth);
+                     if (spawnsRustyKey(random.nextDouble())) {
+                         floorItemManager.spawnRustyKey(absLoc, teamId, instanceUUID, depth);
+                         rustyKeyCount++;
+                     } else {
+                         floorItemManager.spawnGenericItem(absLoc, teamId, instanceUUID, depth);
+                     }
                  } catch (Exception e) {
                      plugin.getLogger().log(Level.WARNING, "Error processing item spawn at " + absLoc + " for team " + teamId, e);
                  }
             }
+            plugin.getLogger().fine("Spawned " + rustyKeyCount + " rusty keys out of " + itemLocs.size()
+                    + " item spawn locations for team " + teamId + ".");
         } else {
              plugin.getLogger().finer("No generic item spawn locations found for team " + teamId);
         }
@@ -415,6 +445,18 @@ public class DungeonManager {
         plugin.getLogger().fine("Finished populating floor items for team " + teamId);
     }
 
+
+    /**
+     * Whether an item spawn location becomes a rusty key rather than rolling the loot table.
+     *
+     * <p>Split out from {@link #populateFloorItems()} so the spawn rate is testable: everything
+     * else in that method needs a pasted dungeon, a live world and WorldEdit.
+     *
+     * @param roll A uniform random draw in [0, 1).
+     */
+    static boolean spawnsRustyKey(double roll) {
+        return roll < RUSTY_KEY_SPAWN_CHANCE;
+    }
 
     // --- Getters ---
     @NotNull public Location getDungeonOrigin() { return dungeonOrigin.clone(); } // Clone for safety

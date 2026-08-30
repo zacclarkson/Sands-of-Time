@@ -117,9 +117,13 @@ public class ScoreManager {
     // --- Penalty & Escape Methods ---
 
     /**
-     * Death penalty: all unbanked coins are dropped at the death location.
-     * The score is cleared here; the actual item drop is handled by the death event listener.
-     * Returns the amount lost so the caller can create the drop.
+     * Death penalty: the player's unbanked coins are cleared outright.
+     *
+     * <p>Unbanked coins are a number here, not items in an inventory, so unlike the sand and gear that
+     * drop at the death location there is nothing for the corpse run to recover — dying loses them.
+     * Banked coins are untouched.
+     *
+     * @return the amount lost, for the caller to report.
      */
     public int applyDeathPenalty(UUID playerUUID) {
         int lostCoins = getPlayerUnbankedScore(playerUUID);

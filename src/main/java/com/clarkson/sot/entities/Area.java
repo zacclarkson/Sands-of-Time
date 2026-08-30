@@ -21,9 +21,6 @@ public class Area {
 
         this.minPoint = getNwCorner(minPoint, maxPoint);
         this.maxPoint = new Location(this.minPoint.getWorld(), this.minPoint.getX() + width, this.minPoint.getY() + height, this.minPoint.getZ() + depth);
-        System.out.println("Creating Area:");
-        System.out.println(minPoint);
-        System.out.println(maxPoint);
     }
 
 

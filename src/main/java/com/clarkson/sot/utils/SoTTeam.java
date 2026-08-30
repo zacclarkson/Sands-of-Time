@@ -8,7 +8,6 @@ import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.entity.Player;
 import org.bukkit.plugin.Plugin;
-import org.jetbrains.annotations.Nullable;
 
 import java.util.*;
 import java.util.logging.Level;
@@ -110,12 +109,10 @@ public class SoTTeam {
     }
 
     /**
-     * Whether this team's visual sand column stands at the given block.
-     *
-     * <p>False when the team has no column this round: a hub segment with no {@code TIMER} marker
-     * never calls {@link #relocateVisualTimer}, so the display is never created.
+     * True if the given block location is part of this team's visual sand column. Used to stop players
+     * mining their own timer for sand. False when the team has no visual timer.
      */
-    public boolean isVisualTimerBlock(@Nullable Location location) {
+    public boolean isVisualTimerBlock(Location location) {
         return visualTimerDisplay != null && visualTimerDisplay.isColumnBlock(location);
     }
 

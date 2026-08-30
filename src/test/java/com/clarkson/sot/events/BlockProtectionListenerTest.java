@@ -30,6 +30,7 @@ import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
 /**
@@ -89,6 +90,22 @@ class BlockProtectionListenerTest {
         return event;
     }
 
+    /** Marks a single block location as one of the team's TIMER_DEPOSIT cells. */
+    private void depositPointAt(Block block) {
+        UUID teamId = UUID.randomUUID();
+        TeamManager teamManager = mock(TeamManager.class);
+        when(gameManager.getTeamManager()).thenReturn(teamManager);
+        when(teamManager.getPlayerTeamId(player)).thenReturn(teamId);
+        when(gameManager.isTeamSandTimerDepositAt(eq(teamId), any(Location.class)))
+                .thenAnswer(invocation -> {
+                    Location queried = invocation.getArgument(1);
+                    return queried != null
+                            && queried.getBlockX() == block.getX()
+                            && queried.getBlockY() == block.getY()
+                            && queried.getBlockZ() == block.getZ();
+                });
+    }
+
     /** Marks a single block location as belonging to a live timer column. */
     private void timerColumnAt(Block block) {
         when(gameManager.isVisualTimerBlock(any(Location.class))).thenAnswer(invocation -> {
@@ -124,10 +141,50 @@ class BlockProtectionListenerTest {
     }
 
     @Test
-    void playersCannotPlaceBlocksDuringARound() {
+    void playersCannotPlaceOrdinaryBlocksDuringARound() {
         Block against = blockAt(0, 64, 0, Material.STONE);
-        Block placed = blockAt(0, 65, 0, Material.AIR);
+        Block placed = blockAt(0, 65, 0, Material.DIRT);
         assertTrue(placeBlock(placed, against).isCancelled());
+    }
+
+    /**
+     * Sand is the one block players carry, so letting them place it anywhere would let them pillar
+     * over dungeon walls or block the timer column's refill path.
+     */
+    @Test
+    void sandCannotBePlacedJustAnywhere() {
+        Block against = blockAt(0, 64, 0, Material.STONE);
+        Block placed = blockAt(0, 65, 0, Material.SAND);
+        assertTrue(placeBlock(placed, against).isCancelled());
+    }
+
+    /**
+     * The one placement the game needs. {@code SandManager.onBlockPlace} converts it to time at
+     * {@code NORMAL}, so this listener must not cancel it first — that would silently kill the
+     * deposit mechanic.
+     */
+    @Test
+    void sandCanStillBeDepositedOnTheTimer() {
+        Block deposit = blockAt(21, 102, 18, Material.SAND);
+        depositPointAt(deposit);
+
+        Block against = blockAt(21, 101, 18, Material.STONE);
+        assertFalse(placeBlock(deposit, against).isCancelled(),
+                "depositing sand on a TIMER_DEPOSIT cell is how sand becomes time");
+    }
+
+    /**
+     * {@code SandManager.onBlockPlace} only runs while RUNNING. Letting a placement through during
+     * the countdown would leave a real sand block standing on the deposit cell.
+     */
+    @Test
+    void sandCannotBeDepositedBeforeTheRoundStarts() {
+        when(gameManager.getCurrentState()).thenReturn(GameState.COUNTDOWN);
+        Block deposit = blockAt(21, 102, 18, Material.SAND);
+        depositPointAt(deposit);
+
+        Block against = blockAt(21, 101, 18, Material.STONE);
+        assertTrue(placeBlock(deposit, against).isCancelled());
     }
 
     // --- The timer column ------------------------------------------------------------------
@@ -179,7 +236,7 @@ class BlockProtectionListenerTest {
 
         assertFalse(breakBlock(blockAt(0, 64, 0, Material.STONE)).isCancelled());
         Block against = blockAt(0, 64, 0, Material.STONE);
-        assertFalse(placeBlock(blockAt(0, 65, 0, Material.AIR), against).isCancelled());
+        assertFalse(placeBlock(blockAt(0, 65, 0, Material.DIRT), against).isCancelled());
     }
 
     @Test
@@ -191,7 +248,7 @@ class BlockProtectionListenerTest {
         assertFalse(breakBlock(column).isCancelled(), "creative is the admin escape hatch");
         assertFalse(breakBlock(blockAt(0, 64, 0, Material.STONE)).isCancelled());
         Block against = blockAt(0, 64, 0, Material.STONE);
-        assertFalse(placeBlock(blockAt(0, 65, 0, Material.AIR), against).isCancelled());
+        assertFalse(placeBlock(blockAt(0, 65, 0, Material.DIRT), against).isCancelled());
     }
 
     @Test
@@ -229,11 +286,11 @@ class BlockProtectionListenerTest {
      * The cross-listener pin. {@link BlockProtectionListener} sits at {@code LOW} specifically so
      * that cancelling makes Bukkit skip {@code SandManager} at {@code NORMAL,
      * ignoreCancelled = true}. If someone raises this listener's priority, or drops
-     * {@code ignoreCancelled} from {@code SandManager}, the payout happens anyway and the exploit is
-     * back — this test is what catches that.
+     * {@code ignoreCancelled} from {@code SandManager}, the break is paid out anyway — this test is
+     * what catches that.
      */
     @Test
-    void miningTheTimerColumnCreditsNoSand() {
+    void miningTheTimerColumnHandsOutNoSand() {
         SandManager sandManager = registerRealSandManager();
         TeamManager teamManager = mock(TeamManager.class);
         when(gameManager.getTeamManager()).thenReturn(teamManager);
@@ -244,14 +301,14 @@ class BlockProtectionListenerTest {
         BlockBreakEvent event = breakBlock(column);
 
         assertTrue(event.isCancelled());
-        assertEquals(0, sandManager.getPlayerSandCount(player.getUniqueId()),
-                "a denied break must not credit sand");
+        assertEquals(0, sandManager.getPlayerSandCount(player),
+                "a denied break must not hand the player any sand");
         verify(teamManager, never()).getPlayerTeamId(any());
     }
 
     /** The counterpart, so the fix cannot degenerate into "cancel every break". */
     @Test
-    void miningDungeonSandStillCreditsSandAndTime() {
+    void miningDungeonSandStillHandsOutSand() {
         SandManager sandManager = registerRealSandManager();
 
         UUID teamId = UUID.randomUUID();
@@ -260,15 +317,16 @@ class BlockProtectionListenerTest {
         when(gameManager.getTeamManager()).thenReturn(teamManager);
         when(teamManager.getPlayerTeamId(player)).thenReturn(teamId);
         when(gameManager.getActiveTeams()).thenReturn(Map.of(teamId, team));
+        when(team.isVisualTimerBlock(any(Location.class))).thenReturn(false);
 
         BlockBreakEvent event = breakBlock(blockAt(0, 64, 0, Material.SAND));
 
         assertFalse(event.isCancelled());
-        assertEquals(1, sandManager.getPlayerSandCount(player.getUniqueId()));
-        verify(team).addSeconds(SandManager.SECONDS_PER_SAND);
+        assertEquals(1, sandManager.getPlayerSandCount(player),
+                "breaking dungeon sand must still hand the player the sand item");
     }
 
-    /** {@code SandManager} needs the player alive in the dungeon before it pays anything out. */
+    /** {@code SandManager} needs the player alive in the dungeon before it hands anything out. */
     private SandManager registerRealSandManager() {
         PlayerStateManager stateManager = mock(PlayerStateManager.class);
         when(gameManager.getPlayerStateManager()).thenReturn(stateManager);

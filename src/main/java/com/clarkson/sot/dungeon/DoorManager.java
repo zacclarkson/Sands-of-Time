@@ -2,13 +2,11 @@ package com.clarkson.sot.dungeon;
 
 import com.clarkson.sot.dungeon.segment.Direction;
 import com.clarkson.sot.dungeon.segment.EntryPoint;
-import com.clarkson.sot.dungeon.segment.PlacedSegment;
 import com.clarkson.sot.entities.Area;
 import com.clarkson.sot.entities.Door;
 import com.clarkson.sot.entities.SegmentDoor;
 import com.clarkson.sot.main.GameManager;
 import com.clarkson.sot.main.GameState;
-import com.clarkson.sot.main.SoT;
 
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
@@ -24,6 +22,7 @@ import org.bukkit.event.Listener;
 import org.bukkit.event.block.Action;
 import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.inventory.ItemStack;
+import org.bukkit.plugin.Plugin;
 import org.bukkit.util.Vector;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -41,12 +40,27 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 public class DoorManager implements Listener {
 
-    private final SoT plugin;
+    /** Material the door blocks are built from when closed. */
+    private static final Material DOOR_MATERIAL = Material.DARK_OAK_PLANKS;
+
+    /**
+     * Material of the keyhole block at each door's lock location. Deliberately different from
+     * {@link #DOOR_MATERIAL}: without it the door is a featureless wall with no clue as to which
+     * of its twelve blocks accepts the key.
+     */
+    private static final Material KEYHOLE_MATERIAL = Material.OXIDIZED_CUT_COPPER;
+
+    /** Height of a doorway opening, in blocks, measured from the entry point marker upwards. */
+    private static final int OPENING_HEIGHT = 4;
+
+    // Plugin, not SoT: this manager only needs a logger and a scheduler handle to pass to its
+    // doors, and taking the interface lets the tests drive it with a real plugin.
+    private final Plugin plugin;
     private final GameManager gameManager;
     // Store active doors per team instance, mapped by their Lock Location for quick lookup
     private final Map<UUID, Map<Location, Door>> doorsByTeamAndLockLocation;
 
-    public DoorManager(SoT plugin, GameManager gameManager) {
+    public DoorManager(Plugin plugin, GameManager gameManager) {
         this.plugin = plugin;
         this.gameManager = gameManager;
         this.doorsByTeamAndLockLocation = new ConcurrentHashMap<>();
@@ -57,7 +71,8 @@ public class DoorManager implements Listener {
 
     /**
      * Initializes all doors for a specific dungeon instance.
-     * Creates a SegmentDoor at every connection between placed segments.
+     * Builds a rusty-key SegmentDoor at every connection between placed segments, and seals the
+     * entry points generation never attached a neighbour to.
      * Should be called by DungeonManager after segments are pasted.
      *
      * @param dungeonData The Dungeon object containing absolute locations for this instance.
@@ -68,46 +83,93 @@ public class DoorManager implements Listener {
         Map<Location, Door> teamDoors = new ConcurrentHashMap<>();
 
         // --- Create Segment Doors (Between segments) ---
-        // Iterate placed segments and create doors at entry points that connect to other segments.
-        // Entry points are 3 wide x 4 tall. The marker is at bottom center.
-        DungeonManager teamDungeonManager = gameManager.getTeamDungeonManager(teamId);
-        if (teamDungeonManager != null) {
-            List<PlacedSegment> placedSegments = teamDungeonManager.getPlacedSegmentsInWorld();
-            Set<String> processedConnections = new HashSet<>(); // Avoid duplicate doors
-
-            for (PlacedSegment segment : placedSegments) {
-                for (EntryPoint ep : segment.getAbsoluteEntryPoints()) {
-                    Location epLoc = ep.getLocation();
-                    Direction dir = ep.getDirection();
-                    if (epLoc == null || dir == null) continue;
-
-                    // Create a unique key for this connection to avoid duplicates
-                    // (two segments share the same connection point)
-                    String connectionKey = epLoc.getBlockX() + "," + epLoc.getBlockY() + "," + epLoc.getBlockZ();
-                    if (processedConnections.contains(connectionKey)) continue;
-                    processedConnections.add(connectionKey);
-
-                    // Build door bounds: 3 wide x 4 tall centered on the entry point marker (bottom center)
-                    // The marker is at bottom center of the 3x4 opening
-                    Vector perpendicular = getPerpendicular(dir);
-                    Location min = epLoc.clone().add(perpendicular.clone().multiply(-1)); // One block left
-                    Location max = epLoc.clone().add(perpendicular).add(0, 3, 0); // One block right, 3 blocks up
-
-                    Area doorBounds = new Area(min, max);
-                    Location lockLoc = epLoc.clone().add(0, 1, 0); // Lock at eye level (1 above marker)
-
-                    SegmentDoor segDoor = new SegmentDoor(plugin, teamId, doorBounds, lockLoc, Material.DARK_OAK_PLANKS);
-                    teamDoors.put(lockLoc, segDoor);
-                    plugin.getLogger().finer("Created SegmentDoor at " + lockLoc.toVector() + " for team " + teamId);
-                }
+        // The generator records exactly which entry points it connected; both sides of a
+        // connection share one cell, so each doorway yields one door.
+        for (EntryPoint doorway : dungeonData.getDoorways()) {
+            Location markerLoc = doorway.getLocation();
+            Direction dir = doorway.getDirection();
+            if (markerLoc == null || dir == null || !markerLoc.isWorldLoaded()) {
+                plugin.getLogger().warning("Skipping doorway with no location, direction or loaded world for team " + teamId);
+                continue;
             }
-            plugin.getLogger().info("Created " + processedConnections.size() + " segment doors for team " + teamId);
+
+            Area doorBounds = openingBounds(markerLoc, dir);
+            Location lockLoc = markerLoc.clone().add(0, 1, 0); // Lock at eye level (1 above marker)
+
+            SegmentDoor segDoor = new SegmentDoor(plugin, teamId, doorBounds, lockLoc, DOOR_MATERIAL, KEYHOLE_MATERIAL);
+            // Templates carve doorways as open holes, so the door has to be built before it exists
+            // to a player: without this the passage stays walkable and the lock location is air.
+            segDoor.buildClosed();
+            teamDoors.put(lockLoc, segDoor);
+            plugin.getLogger().finer("Created SegmentDoor at " + lockLoc.toVector() + " for team " + teamId);
         }
+        plugin.getLogger().info("Created " + teamDoors.size() + " segment doors for team " + teamId);
 
         // Vault marker blocks are intentionally left out: VaultManager handles those clicks.
 
         doorsByTeamAndLockLocation.put(teamId, teamDoors);
+
+        sealUnusedOpenings(dungeonData);
+
         plugin.getLogger().info("Finished initializing " + teamDoors.size() + " doors for team instance: " + teamId);
+    }
+
+    /**
+     * Fills the entry points generation attached no neighbour to with plain wall.
+     *
+     * <p>A segment template carves every entry point it declares as an open 3x4 hole -- the hub
+     * alone declares nine -- and the DFS only ever uses some of them. The leftovers open onto
+     * nothing, so they are walled off rather than dressed as doors, which would cost a rusty key
+     * to open onto empty space.
+     *
+     * @param dungeonData The Dungeon object containing absolute locations for this instance.
+     */
+    private void sealUnusedOpenings(@NotNull Dungeon dungeonData) {
+        int sealed = 0;
+        for (EntryPoint opening : dungeonData.getUnusedOpenings()) {
+            Location markerLoc = opening.getLocation();
+            Direction dir = opening.getDirection();
+            if (markerLoc == null || dir == null || !markerLoc.isWorldLoaded()) continue;
+
+            fillOpening(openingBounds(markerLoc, dir), DOOR_MATERIAL);
+            sealed++;
+        }
+        if (sealed > 0) {
+            plugin.getLogger().info("Sealed " + sealed + " unused openings for team " + dungeonData.getTeamId());
+        }
+    }
+
+    /**
+     * The blocks making up a doorway opening: 3 wide across the passage and
+     * {@link #OPENING_HEIGHT} tall, with the entry point marker at its bottom centre.
+     *
+     * @param marker The entry point marker block (bottom centre of the opening).
+     * @param dir The direction the opening faces.
+     */
+    @NotNull
+    private Area openingBounds(@NotNull Location marker, @NotNull Direction dir) {
+        Vector perpendicular = getPerpendicular(dir);
+        Location min = marker.clone().add(perpendicular.clone().multiply(-1)); // One block left
+        Location max = marker.clone().add(perpendicular).add(0, OPENING_HEIGHT - 1, 0); // One right, up
+        return new Area(min, max);
+    }
+
+    /** Sets every block in an area to one material, skipping unloaded chunks. */
+    private void fillOpening(@NotNull Area bounds, @NotNull Material material) {
+        Location min = bounds.getMinPoint();
+        Location max = bounds.getMaxPoint();
+        World world = min.getWorld();
+        if (world == null) return;
+
+        for (int y = min.getBlockY(); y <= max.getBlockY(); y++) {
+            for (int x = min.getBlockX(); x <= max.getBlockX(); x++) {
+                for (int z = min.getBlockZ(); z <= max.getBlockZ(); z++) {
+                    if (!world.isChunkLoaded(x >> 4, z >> 4)) continue;
+                    Block block = world.getBlockAt(x, y, z);
+                    if (block.getType() != material) block.setType(material, false);
+                }
+            }
+        }
     }
 
      /**

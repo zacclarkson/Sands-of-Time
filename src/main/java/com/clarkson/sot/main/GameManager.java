@@ -531,6 +531,10 @@ public class GameManager {
             // bounds, which covers it, but this also disarms the display and keeps its own block
             // count honest for the next round.
             team.clearVisualTimer();
+            // Carried sand is real inventory now, so it has to be taken off the players themselves:
+            // activeTeamsInGame is the only source of member lists, and anything left undeposited
+            // would otherwise cross into the next round and buy free time at the next hub.
+            sandManager.clearSandItems(team.getMemberUUIDs());
         }
 
         // Take the sidebar down before the teams are cleared below, so every player gets the
@@ -541,7 +545,6 @@ public class GameManager {
         activeTeamsInGame.clear();
         playerStateManager.clearAllStates();
         scoreManager.clearAllUnbankedScores();
-        sandManager.clearAllSandCounts();
         // cleanupInstance() clears these per team; repeat it globally so a team whose dungeon was
         // never successfully created is covered too.
         vaultManager.clearAllTeamStates();
@@ -766,6 +769,13 @@ public class GameManager {
         playerStateManager.updateStatus(playerUUID, PlayerStatus.ESCAPED_SAFE);
         scoreManager.playerEscaped(playerUUID);
 
+        // Everything they carried out leaves with them. Done synchronously rather than in the teleport
+        // task below: that task is a tick away and is skipped entirely if they log out, and the gap is
+        // a tick in which an escaped player could drop sand back into the dungeon for a teammate.
+        // Unbanked coins are numeric state in ScoreManager, not items, so this does not touch scoring.
+        player.getInventory().clear();
+        player.updateInventory();
+
         // Out of the dungeon and out of the round: escaping is irreversible, so send them back to
         // the lobby rather than leaving them standing at the exit block inside the dungeon.
         // ESCAPED_SAFE already bars them from escaping again (EscapeListener) and from spending
@@ -977,6 +987,16 @@ public class GameManager {
             }
         }
         return null;
+    }
+
+    /**
+     * True if the given block location is one of a team's sand deposit cells — the TIMER_DEPOSIT
+     * marker positions where carried sand is spent to add time to that team's timer.
+     */
+    public boolean isTeamSandTimerDepositAt(UUID teamId, Location location) {
+        DungeonManager teamDungeonManager = teamDungeonManagers.get(teamId);
+        if (teamDungeonManager == null || teamDungeonManager.getDungeonData() == null) return false;
+        return teamDungeonManager.getDungeonData().isSandTimerDepositAt(location);
     }
 
     /** Finds the team ID associated with a given world location. */

@@ -7,6 +7,7 @@ import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
 
 import org.bukkit.GameMode;
+import org.bukkit.Material;
 import org.bukkit.block.Block;
 import org.bukkit.entity.Player;
 import org.bukkit.event.Cancellable;
@@ -16,15 +17,17 @@ import org.bukkit.event.Listener;
 import org.bukkit.event.block.BlockBreakEvent;
 import org.bukkit.event.block.BlockPlaceEvent;
 
+import java.util.UUID;
+
 /**
  * Keeps players from dismantling the dungeon while a round is live.
  *
  * <p>Two rules, deliberately scoped differently:
  * <ul>
  *   <li><b>The whitelist.</b> A participant may break only the materials in
- *       {@link BreakableBlocks#BREAKABLE}, and may not place blocks at all. Non-participants — staff
- *       building elsewhere in the world while a round runs — are untouched, since every handler here
- *       is world-agnostic.</li>
+ *       {@link BreakableBlocks#BREAKABLE}, and may place a block only to deposit sand on their
+ *       team's timer. Non-participants — staff building elsewhere in the world while a round runs —
+ *       are untouched, since every handler here is world-agnostic.</li>
  *   <li><b>The timer column.</b> The sand column that visualises a team's clock is protected from
  *       <em>everyone</em>, participant or not. It is made of {@code SAND}, so the whitelist alone
  *       would wave it through.</li>
@@ -54,7 +57,7 @@ public class BlockProtectionListener implements Listener {
     private static final Component NOT_BREAKABLE =
             Component.text("You can only break sand and spawners.", NamedTextColor.RED);
     private static final Component NOT_PLACEABLE =
-            Component.text("You can't place blocks during a round.", NamedTextColor.RED);
+            Component.text("You can only place sand on the timer.", NamedTextColor.RED);
 
     private final GameManager gameManager;
 
@@ -92,10 +95,15 @@ public class BlockProtectionListener implements Listener {
     }
 
     /**
-     * Blocks all placement by participants during a round. There is no mechanic in the game that
-     * requires a player to place a block, and placing one is a way to break things: a block dropped
-     * into the timer column's path makes {@code VisualSandTimerDisplay.addSandToTop} log
-     * "Visual timer path obstructed" and give up on refilling the column.
+     * Blocks placement by participants during a round, with exactly one exception: depositing
+     * carried sand on one of the team's own {@code TIMER_DEPOSIT} cells, which is how sand becomes
+     * time ({@code SandManager.onBlockPlace}). That handler sits at {@code NORMAL}, so the deposit
+     * has to be let through here or the mechanic stops working.
+     *
+     * <p>Everything else is denied, sand included. Sand is the one block players actually carry, so
+     * without this they could pillar over dungeon walls with it, or drop a block into the timer
+     * column's path — which makes {@code VisualSandTimerDisplay.addSandToTop} log "Visual timer path
+     * obstructed" and give up on refilling the column.
      */
     @EventHandler(priority = EventPriority.LOW, ignoreCancelled = true)
     public void onBlockPlace(BlockPlaceEvent event) {
@@ -105,7 +113,23 @@ public class BlockProtectionListener implements Listener {
         if (bypasses(player)) return;
         if (!gameManager.isParticipant(player.getUniqueId())) return;
 
+        if (isSandDeposit(player, event.getBlockPlaced())) return;
+
         deny(event, player, NOT_PLACEABLE);
+    }
+
+    /**
+     * Whether this placement is a sand deposit that {@code SandManager} is about to convert to time.
+     *
+     * <p>The {@code RUNNING} check mirrors {@code SandManager.onBlockPlace} exactly: during the
+     * countdown that handler is inert, so letting a placement through then would leave a real sand
+     * block sitting on the deposit cell instead of being consumed.
+     */
+    private boolean isSandDeposit(Player player, Block placed) {
+        if (gameManager.getCurrentState() != GameState.RUNNING) return false;
+        if (placed.getType() != Material.SAND) return false;
+        UUID teamId = gameManager.getTeamManager().getPlayerTeamId(player);
+        return teamId != null && gameManager.isTeamSandTimerDepositAt(teamId, placed.getLocation());
     }
 
     /** Creative and Spectator are the admin escape hatch; participants are never in either. */

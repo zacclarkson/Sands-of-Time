@@ -46,6 +46,21 @@ public class DungeonGenerator {
     // Track placed vaults/keys during generation
     private Set<VaultColor> keysPlacedInDFS;
     private Set<VaultColor> vaultsPlacedInDFS;
+    /**
+     * Connections the DFS actually made, in blueprint-relative space. Each becomes a rusty-key
+     * door; entry points absent from this list opened onto nothing and get sealed instead.
+     */
+    private List<Doorway> doorwaysInDFS;
+    // --- Per-generateDungeonLayout warning state ---
+    // generateDungeonLayout retries attemptGeneration many times, and every attempt re-checks the
+    // same loaded templates. Warnings that describe the templates on disk rather than the individual
+    // attempt are byte-identical on every retry, so they are keyed here and logged once per
+    // generateDungeonLayout call (this set is cleared at the top of it).
+    private final Set<String> warnedOncePerGeneration = new HashSet<>();
+    // Unmet layout requirement -> how many attempts it was missing from. Unlike the above, these are
+    // genuinely per-attempt (a layout can fail validation on one attempt and pass on the next), so
+    // they are logged at fine level and summarised once if every attempt fails.
+    private final Map<String, Integer> validationFailureCounts = new LinkedHashMap<>();
 
     // --- Generation Configuration ---
     // Depth ranges (min/max inclusive) for vaults. Every max MUST be < MAX_DEPTH so the forced
@@ -88,6 +103,7 @@ public class DungeonGenerator {
         this.random = new Random();
         this.keysPlacedInDFS = new HashSet<>();
         this.vaultsPlacedInDFS = new HashSet<>();
+        this.doorwaysInDFS = new ArrayList<>();
         // throw new UnsupportedOperationException("Constructor implementation not provided."); // Remove throw if implementing
     }
 
@@ -168,17 +184,41 @@ public class DungeonGenerator {
     @Nullable
     public DungeonBlueprint generateDungeonLayout() {
         int maxRetries = 20; // Blueprint stage does no world I/O, so retries are cheap.
+        // Fresh warning state per call: template-level warnings fire once, and the validation
+        // tally starts from zero so the failure summary describes this call only.
+        warnedOncePerGeneration.clear();
+        validationFailureCounts.clear();
         for (int attempt = 1; attempt <= maxRetries; attempt++) {
-            plugin.getLogger().info("Starting dungeon layout generation attempt " + attempt + "/" + maxRetries + "...");
+            plugin.getLogger().fine("Starting dungeon layout generation attempt " + attempt + "/" + maxRetries + "...");
             DungeonBlueprint blueprint = attemptGeneration();
             if (blueprint != null) {
-                plugin.getLogger().info("Dungeon layout generated successfully on attempt " + attempt);
+                plugin.getLogger().info("Dungeon layout generated successfully on attempt " + attempt + "/" + maxRetries);
                 return blueprint; // Success
             }
-            plugin.getLogger().warning("Dungeon generation attempt " + attempt + " failed validation or generation. Retrying...");
+            plugin.getLogger().fine("Dungeon generation attempt " + attempt + " failed validation or generation. Retrying...");
         }
         plugin.getLogger().severe("Failed to generate a valid dungeon layout after " + maxRetries + " attempts.");
+        if (!validationFailureCounts.isEmpty()) {
+            String summary = validationFailureCounts.entrySet().stream()
+                    .map(entry -> entry.getKey() + " (missing on " + entry.getValue() + "/" + maxRetries + " attempts)")
+                    .collect(Collectors.joining(", "));
+            plugin.getLogger().severe("Unmet layout requirements across all attempts: " + summary);
+        }
         return null; // Failed after all retries
+    }
+
+    /**
+     * Logs a warning the first time the given key is seen within one generateDungeonLayout call.
+     * Used for conditions that are a property of the loaded segment templates rather than of an
+     * individual attempt, which would otherwise be repeated verbatim once per retry.
+     *
+     * @param key     Identity of the condition; repeats within a call are suppressed.
+     * @param message The warning text to log on the first occurrence.
+     */
+    private void warnOncePerGeneration(@NotNull String key, @NotNull String message) {
+        if (warnedOncePerGeneration.add(key)) {
+            plugin.getLogger().warning(message);
+        }
     }
 
     /**
@@ -200,6 +240,7 @@ public class DungeonGenerator {
         // Reset placed trackers for this attempt
         keysPlacedInDFS.clear(); // Tracks Red, Green, Gold keys placed by DFS
         vaultsPlacedInDFS.clear(); // Tracks Blue, Red, Green, Gold vaults placed by DFS
+        doorwaysInDFS.clear(); // Tracks the connections this attempt actually made
 
         // --- Pre-checks ---
         if (availableSegments.isEmpty()) { /* ... error log ... */ return null; }
@@ -237,7 +278,8 @@ public class DungeonGenerator {
 
         Vector safeExitRelativeLocation = selectSafeExitRelativeLocation(placedSegments);
         if (safeExitRelativeLocation == null) {
-            plugin.getLogger().warning("No SAFE_EXIT marker in any segment template; escaping will fall back to "
+            warnOncePerGeneration("no-safe-exit",
+                    "No SAFE_EXIT marker in any segment template; escaping will fall back to "
                     + "the hub location. Add a SAFE_EXIT marker to your HUB segment and re-save it.");
         }
 
@@ -250,45 +292,58 @@ public class DungeonGenerator {
 
         // --- Validate Required Vaults & Keys ---
         // Validation relies on consolidateFeatureLocations having correctly populated the maps
-        boolean valid = true;
         // BLUE is checked separately below: it lives on the hub, and a hub template saved before the
         // KEY_SPAWN marker existed should still generate a (partly incomplete) dungeon.
         VaultColor[] requiredKeys = {VaultColor.RED, VaultColor.GREEN, VaultColor.GOLD};
         VaultColor[] requiredVaults = {VaultColor.BLUE, VaultColor.RED, VaultColor.GREEN, VaultColor.GOLD}; // All 4 vaults must be placed by DFS
 
+        List<String> missingRequirements = new ArrayList<>();
         for (VaultColor requiredColor : requiredVaults) {
             if (!vaultMarkerRelativeLocations.containsKey(requiredColor)) {
-                plugin.getLogger().warning("Validation Failed: Missing vault marker location for color: " + requiredColor);
-                valid = false;
+                missingRequirements.add("vault marker for " + requiredColor);
             }
         }
         for (VaultColor requiredColor : requiredKeys) {
             if (!keySpawnRelativeLocations.containsKey(requiredColor)) {
-                plugin.getLogger().warning("Validation Failed: Missing key spawn location for color: " + requiredColor);
-                valid = false;
+                missingRequirements.add("key spawn for " + requiredColor);
             }
         }
         // The blue key belongs on the hub (see GAME_RULES.md), but a hub template saved without a
         // KEY_SPAWN marker carries none. Warn rather than fail: a dungeon missing one vault beats
         // no dungeon at all. Add a BLUE KEY_SPAWN marker to the hub and re-save it to fix.
         if (!keySpawnRelativeLocations.containsKey(VaultColor.BLUE)) {
-            plugin.getLogger().warning("No BLUE key spawn in any segment template; the blue vault will "
+            warnOncePerGeneration("no-blue-key",
+                    "No BLUE key spawn in any segment template; the blue vault will "
                     + "not be openable. Add a BLUE KEY_SPAWN marker to your HUB segment and re-save it.");
         }
 
-        if (!valid) {
+        if (!missingRequirements.isEmpty()) {
+            // Per-attempt, so kept off the console: a layout can fail validation on one attempt and
+            // pass on the next. generateDungeonLayout logs one summary if every attempt fails.
+            plugin.getLogger().fine("Validation failed for this attempt; missing " + String.join(", ", missingRequirements));
+            missingRequirements.forEach(requirement -> validationFailureCounts.merge(requirement, 1, Integer::sum));
             return null; // Validation failed for this attempt
         }
 
         Vector timerBaseRelativeLocation = selectTimerBaseRelativeLocation(placedSegments);
         List<Vector> playerSpawnRelativeLocations = selectPlayerSpawnRelativeLocations(placedSegments);
+        List<Vector> sandTimerRelativeLocations = selectSandTimerRelativeLocations(placedSegments);
+        if (sandTimerRelativeLocations.isEmpty()) {
+            plugin.getLogger().warning("No TIMER_DEPOSIT marker on any segment template: collected sand "
+                    + "cannot be spent on the timer. Add TIMER_DEPOSIT markers to the HUB segment and re-save it.");
+        }
+
+        List<Doorway> doorways = new ArrayList<>(doorwaysInDFS);
+        List<Doorway> unusedOpenings = findUnusedOpenings(placedSegments, doorways);
+        plugin.getLogger().info("Layout has " + doorways.size() + " doorways and "
+                + unusedOpenings.size() + " unattached openings to seal.");
 
         // --- Create and Return Blueprint ---
         return new DungeonBlueprint(
                 placedSegments, hubRelativeLocation, vaultMarkerRelativeLocations, keySpawnRelativeLocations,
                 sandSpawnRelativeLocations, coinSpawnRelativeLocations, itemSpawnRelativeLocations,
                 blueprintBounds, safeExitRelativeLocation, timerBaseRelativeLocation,
-                playerSpawnRelativeLocations
+                playerSpawnRelativeLocations, sandTimerRelativeLocations, doorways, unusedOpenings
         );
     }
 
@@ -354,6 +409,13 @@ public class DungeonGenerator {
         placedSegments.add(nextPlacedSegment);
         occupiedOrigins.add(nextSegmentOrigin);
 
+        // Record the connection we just made. Both segments meet on this one cell (see
+        // calculatePlacementOrigin), so one Doorway covers the shared opening from either side.
+        BlockVector3 doorwayCell = currentSegmentOrigin.add(connectionPoint.getRelativePosition());
+        doorwaysInDFS.add(new Doorway(
+                new Vector(doorwayCell.x(), doorwayCell.y(), doorwayCell.z()),
+                connectionPoint.getDirection()));
+
         // --- Update Global Placed Vaults/Keys Tracking (colour is rotation-independent) ---
         VaultColor placedVault = next.template.getContainedVault();
         if (placedVault != null && vaultsPlacedInDFS.add(placedVault)) {
@@ -373,6 +435,44 @@ public class DungeonGenerator {
                 generatePathRecursive(nextPlacedSegment, outgoingEntryPoint, placedSegments, occupiedOrigins, currentDepth + 1);
             }
         }
+    }
+
+    /**
+     * Every rotated entry point across {@code placedSegments} that no connection was made through.
+     *
+     * <p>Segment templates carve their doorways as open 3x4 holes, and the DFS attaches a
+     * neighbour to only some of them -- the hub template alone declares nine. The leftovers open
+     * onto nothing, so they are returned here for {@code DoorManager} to seal as plain wall rather
+     * than dress as a door that costs a rusty key and leads nowhere.
+     *
+     * @param placedSegments The segments of a finished layout, with blueprint-relative origins.
+     * @param doorways       The connections the DFS made.
+     * @return One Doorway per unattached opening, in blueprint-relative space.
+     */
+    @NotNull
+    static List<Doorway> findUnusedOpenings(@NotNull List<PlacedSegment> placedSegments,
+                                            @NotNull List<Doorway> doorways) {
+        // Keyed on BlockVector3, not Bukkit Vector: these are whole-block cells, and BlockVector3
+        // has exact integer equals/hashCode where Vector compares doubles with an epsilon.
+        Set<BlockVector3> connected = new HashSet<>();
+        for (Doorway doorway : doorways) {
+            Vector pos = doorway.getRelativePosition();
+            connected.add(BlockVector3.at(pos.getBlockX(), pos.getBlockY(), pos.getBlockZ()));
+        }
+
+        List<Doorway> unused = new ArrayList<>();
+        for (PlacedSegment placedSegment : placedSegments) {
+            Vector segmentOrigin = placedSegment.getWorldOrigin().toVector();
+            for (RelativeEntryPoint ep : placedSegment.getRotatedEntryPoints()) {
+                BlockVector3 pos = ep.getRelativePosition();
+                Vector cell = segmentOrigin.clone().add(new Vector(pos.x(), pos.y(), pos.z()));
+                BlockVector3 key = BlockVector3.at(cell.getBlockX(), cell.getBlockY(), cell.getBlockZ());
+                if (!connected.contains(key)) {
+                    unused.add(new Doorway(cell, ep.getDirection()));
+                }
+            }
+        }
+        return unused;
     }
 
     /** A chosen segment template plus the Y rotation (0..3) to apply when placing it. */
@@ -769,6 +869,31 @@ public class DungeonGenerator {
     }
 
     /**
+     * Collects the blueprint-relative sand deposit points from {@code TIMER_DEPOSIT} markers — the cells
+     * players place carried sand into to feed their team's timer. Like the player spawns, a HUB template's
+     * points win outright: if any HUB defines deposit points those are used exclusively, otherwise every
+     * segment's are gathered. Empty when no template defines any, in which case a team simply has nowhere
+     * to spend sand (generation still succeeds; {@link com.clarkson.sot.utils.SandManager} logs it).
+     */
+    @NotNull
+    static List<Vector> selectSandTimerRelativeLocations(@NotNull List<PlacedSegment> placedSegments) {
+        List<Vector> hubDeposits = new ArrayList<>();
+        List<Vector> otherDeposits = new ArrayList<>();
+        for (PlacedSegment placedSegment : placedSegments) {
+            Segment template = placedSegment.getSegmentTemplate();
+            if (template == null) continue;
+            boolean fromHub = template.getType() == SegmentType.HUB;
+            Vector origin = placedSegment.getWorldOrigin().toVector();
+            for (BlockVector3 offset : template.getSandTimerOffsets()) {
+                BlockVector3 rot = placedSegment.getRotatedOffset(offset);
+                Vector abs = origin.clone().add(new Vector(rot.x(), rot.y(), rot.z()));
+                (fromHub ? hubDeposits : otherDeposits).add(abs);
+            }
+        }
+        return !hubDeposits.isEmpty() ? hubDeposits : otherDeposits;
+    }
+
+    /**
      * Iterates through all placed segments in the completed blueprint layout and consolidates
      * the relative locations of all defined features (vaults, keys, spawns) into the final maps/lists
      * used to construct the DungeonBlueprint object. Converts relative BlockVector3 offsets to relative Bukkit Vectors.
@@ -815,7 +940,8 @@ public class DungeonGenerator {
                 if (vaultMarkerRelativeLocations.putIfAbsent(vaultColor, vaultRelativePos) == null) {
                      plugin.getLogger().finer("Consolidated " + vaultColor + " vault marker location: " + vaultRelativePos);
                 } else {
-                     plugin.getLogger().warning("Duplicate vault marker found for color " + vaultColor + " in segment " + template.getName() + ". Keeping first one found.");
+                     warnOncePerGeneration("dup-vault:" + vaultColor + ":" + template.getName(),
+                             "Duplicate vault marker found for color " + vaultColor + " in segment " + template.getName() + ". Keeping first one found.");
                 }
             }
 
@@ -833,7 +959,8 @@ public class DungeonGenerator {
                 if (keySpawnRelativeLocations.putIfAbsent(keyColor, keyRelativePos) == null) {
                     plugin.getLogger().finer("Consolidated " + keyColor + " key spawn location: " + keyRelativePos);
                 } else {
-                     plugin.getLogger().warning("Duplicate key spawn found for color " + keyColor + " in segment " + template.getName() + ". Keeping first one found.");
+                     warnOncePerGeneration("dup-key:" + keyColor + ":" + template.getName(),
+                             "Duplicate key spawn found for color " + keyColor + " in segment " + template.getName() + ". Keeping first one found.");
                 }
             }
 

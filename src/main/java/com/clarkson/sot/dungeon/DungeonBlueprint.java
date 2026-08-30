@@ -37,6 +37,15 @@ public class DungeonBlueprint {
     @Nullable private final Vector timerBaseRelativeLocation;
     private final List<Vector> playerSpawnRelativeLocations;
 
+    // Cells where players deposit carried sand onto the timer (TIMER_DEPOSIT markers). Empty when
+    // no segment carries one.
+    private final List<Vector> sandTimerRelativeLocations;
+
+    // Connections between segments. Each becomes a rusty-key door; the unused openings are the
+    // entry points the generator never attached a neighbour to, and get sealed as plain wall.
+    private final List<Doorway> doorways;
+    private final List<Doorway> unusedOpenings;
+
     // --- Changed: Use Area for Relative Bounding Box ---
     private final Area relativeBounds; // Represents bounds using relative Locations (null world)
 
@@ -54,7 +63,10 @@ public class DungeonBlueprint {
                             @NotNull Area relativeBounds, // Changed parameter
                             @Nullable Vector safeExitRelativeLocation,
                             @Nullable Vector timerBaseRelativeLocation,
-                            @NotNull List<Vector> playerSpawnRelativeLocations
+                            @NotNull List<Vector> playerSpawnRelativeLocations,
+                            @NotNull List<Vector> sandTimerRelativeLocations,
+                            @NotNull List<Doorway> doorways,
+                            @NotNull List<Doorway> unusedOpenings
                            ) {
 
         // Validate inputs
@@ -85,6 +97,9 @@ public class DungeonBlueprint {
         this.safeExitRelativeLocation = (safeExitRelativeLocation != null) ? safeExitRelativeLocation.clone() : null;
         this.timerBaseRelativeLocation = (timerBaseRelativeLocation != null) ? timerBaseRelativeLocation.clone() : null;
         this.playerSpawnRelativeLocations = Collections.unmodifiableList(new ArrayList<>(playerSpawnRelativeLocations));
+        this.sandTimerRelativeLocations = Collections.unmodifiableList(new ArrayList<>(sandTimerRelativeLocations));
+        this.doorways = Collections.unmodifiableList(new ArrayList<>(doorways));
+        this.unusedOpenings = Collections.unmodifiableList(new ArrayList<>(unusedOpenings));
     }
 
     // --- Getters ---
@@ -104,8 +119,17 @@ public class DungeonBlueprint {
         return safeExitRelativeLocation != null ? safeExitRelativeLocation.clone() : null;
     }
 
+    /** Relative doorways between connected segments; each gets a rusty-key door. */
+    @NotNull public List<Doorway> getDoorways() { return doorways; }
+
+    /** Relative entry points no neighbour was attached to; these get sealed as plain wall. */
+    @NotNull public List<Doorway> getUnusedOpenings() { return unusedOpenings; }
+
     /** Relative per-player spawn points (empty if no segment defines a PLAYER_SPAWN marker). */
     @NotNull public List<Vector> getPlayerSpawnRelativeLocations() { return playerSpawnRelativeLocations; }
+
+    /** Relative sand deposit cells (empty if no segment defines a TIMER_DEPOSIT marker). */
+    @NotNull public List<Vector> getSandTimerRelativeLocations() { return sandTimerRelativeLocations; }
 
     /** Relative base of the visual sand-timer column, or null if no segment defines a TIMER marker. */
     @Nullable public Vector getTimerBaseRelativeLocation() {
