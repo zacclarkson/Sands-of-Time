@@ -5,7 +5,6 @@ import com.clarkson.sot.main.GameState;
 import com.clarkson.sot.utils.PlayerStateManager;
 import com.clarkson.sot.utils.PlayerStatus;
 import com.clarkson.sot.utils.SandManager;
-import com.clarkson.sot.utils.SoTTeam;
 import com.clarkson.sot.utils.TeamManager;
 
 import org.bukkit.GameMode;
@@ -25,7 +24,6 @@ import org.mockbukkit.mockbukkit.MockBukkit;
 import org.mockbukkit.mockbukkit.ServerMock;
 import org.mockbukkit.mockbukkit.entity.PlayerMock;
 
-import java.util.Map;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -305,7 +303,10 @@ class BlockProtectionListenerTest {
         assertTrue(event.isCancelled());
         assertEquals(0, sandManager.getPlayerSandCount(player),
                 "a denied break must not hand the player any sand");
-        verify(teamManager, never()).getPlayerTeamId(any());
+        // SandManager's first act on a break it accepts is setDropItems(false), so an untouched
+        // drop flag is the proof that the cancel at LOW kept the event away from it entirely.
+        assertTrue(event.isDropItems(),
+                "a cancelled break must never reach SandManager's payout");
     }
 
     /** The counterpart, so the fix cannot degenerate into "cancel every break". */
@@ -313,15 +314,10 @@ class BlockProtectionListenerTest {
     void miningDungeonSandStillHandsOutSand() {
         SandManager sandManager = registerRealSandManager();
 
-        UUID teamId = UUID.randomUUID();
-        SoTTeam team = mock(SoTTeam.class);
-        when(teamManager.getPlayerTeamId(player)).thenReturn(teamId);
-        when(gameManager.getActiveTeams()).thenReturn(Map.of(teamId, team));
-        when(team.isVisualTimerBlock(any(Location.class))).thenReturn(false);
-
         BlockBreakEvent event = breakBlock(blockAt(0, 64, 0, Material.SAND));
 
         assertFalse(event.isCancelled());
+        assertFalse(event.isDropItems(), "SandManager suppresses the vanilla drop and hands the sand over");
         assertEquals(1, sandManager.getPlayerSandCount(player),
                 "breaking dungeon sand must still hand the player the sand item");
     }

@@ -171,9 +171,13 @@ line — so it is actionable without rediscovering it.
   drift out of sync. That is why escaping wipes the inventory (`GameManager.handlePlayerLeave`) and why
   `tearDownRound()` strips sand from every team member in its per-team pass, before
   `activeTeamsInGame.clear()` — that map is the only source of member lists: players who are trapped, dead, or still exploring never pass through the
-  escape path, and their sand would otherwise buy free time next round. Breaking a block of the team's own
-  visual timer column is refused for the same reason — the column is sand, and a mined block is restored
-  by the next `syncVisualState()`, which the resulting deposit itself triggers.
+  escape path, and their sand would otherwise buy free time next round. Breaking a block of a visual
+  timer column is refused for the same reason — the column is sand, and a mined block is restored by
+  the next `syncVisualState()`, which the resulting deposit itself triggers — but that refusal lives
+  in `BlockProtectionListener`, **not** here. `SandManager.onBlockBreak` used to re-check the
+  breaker's own column; the listener subsumes it (every team's column, the whole live round) and the
+  duplicate contradicted the Creative bypass, so it was removed along with the team lookup that only
+  existed to serve it.
 - **Dying drops carried sand on the floor.** Nearly all of that is vanilla: `DeathListener` never
   touches `event.getDrops()`, so a death that drops the inventory scatters the sand with everything
   else and it lands, merges and despawns by the server's own rules. `SandManager.dropCarriedSandOnDeath`
