@@ -24,6 +24,7 @@ import org.bukkit.event.block.BlockPlaceEvent;
 import org.bukkit.event.entity.PlayerDeathEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.event.block.Action;
+import org.bukkit.inventory.EquipmentSlot;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.PlayerInventory;
 import org.bukkit.plugin.Plugin;
@@ -330,6 +331,16 @@ public class SandManager implements Listener {
      * Detects when a player breaks a SAND block in a dungeon and hands them the sand as an item.
      * Deliberately adds no time: sand only becomes seconds at a deposit point (see
      * {@link #onBlockPlace(BlockPlaceEvent)}).
+     *
+     * <p>{@code BlockProtectionListener} runs at {@code LOW} and has already cancelled any break it
+     * disallows, so with {@code ignoreCancelled = true} at {@code NORMAL} a protected block never
+     * reaches this method and it can pay out unconditionally. <b>Do not raise this priority.</b>
+     *
+     * <p>This used to re-check the team's own timer column itself. That check is gone because the
+     * listener subsumes it and then some — it covers every team's column, not just the breaker's,
+     * and the whole live round rather than only {@code RUNNING}. The only case it did not subsume
+     * was a participant in Creative, where it contradicted the listener's deliberate
+     * Creative/Spectator bypass by refusing the break anyway.
      */
     @EventHandler(priority = EventPriority.NORMAL, ignoreCancelled = true)
     public void onBlockBreak(BlockBreakEvent event) {
@@ -342,19 +353,8 @@ public class SandManager implements Listener {
         PlayerStatus status = gameManager.getPlayerStateManager().getStatus(player);
         if (status != PlayerStatus.ALIVE_IN_DUNGEON) return;
 
-        UUID teamId = gameManager.getTeamManager().getPlayerTeamId(player);
-        if (teamId == null) return;
-        SoTTeam team = gameManager.getActiveTeams().get(teamId);
-        if (team == null) return;
-
-        // The visual timer column is made of sand and stands in the hub, so without this it is just a
-        // sand mine: a mined block is not restored until the next visual sync, which the deposit of
-        // that very sand triggers — putting the block back and netting the team free time forever.
-        if (team.isVisualTimerBlock(block.getLocation())) {
-            event.setCancelled(true);
-            player.sendActionBar(Component.text("You can't mine your own timer!", NamedTextColor.RED));
-            return;
-        }
+        // No team lookup: it existed only for the timer-column check above, and ALIVE_IN_DUNGEON is
+        // already only ever set on players who were assigned to a team at setup.
 
         // Cancel the normal drop; collectSandItem hands the sand over instead.
         event.setDropItems(false);
@@ -396,6 +396,10 @@ public class SandManager implements Listener {
      * <p>The click is cancelled before anything else, because a sacrifice point is a real chest and an
      * uncancelled right-click opens its inventory. That has to happen ahead of the team lookup too:
      * bailing out early for a player with no team would leave them able to open the chest.
+     *
+     * <p>{@link PlayerInteractEvent} fires once per hand, and cancelling the main-hand pass does not
+     * stop the off-hand one — so the off-hand pass is cancelled as well (or the chest opens on it) but
+     * returns before paying, otherwise a single right-click would sacrifice two sand.
      */
     @EventHandler(priority = EventPriority.NORMAL)
     public void onPlayerInteract(PlayerInteractEvent event) {
@@ -415,6 +419,8 @@ public class SandManager implements Listener {
         // player with no team (or on another team) still cannot open someone's sacrifice chest.
         if (!gameManager.isAnySacrificePointAt(clickedBlock.getLocation())) return;
         event.setCancelled(true);
+        // Cancelled above for both hands; only the main hand actually pays.
+        if (event.getHand() != EquipmentSlot.HAND) return;
         if (teamId == null) return;
 
         DeathCage cage = gameManager.getDeathCageAtSacrificePoint(teamId, clickedBlock.getLocation());

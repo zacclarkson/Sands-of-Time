@@ -35,6 +35,9 @@ public class DungeonBlueprint {
 
     // Base of the visual sand-timer column. Null when no segment carries a TIMER marker.
     @Nullable private final Vector timerBaseRelativeLocation;
+
+    // Cell the coin bank (ender chest) is built in. Null when no segment carries a BANK marker.
+    @Nullable private final Vector bankRelativeLocation;
     private final List<Vector> playerSpawnRelativeLocations;
 
     // Cells where players deposit carried sand onto the timer (TIMER_DEPOSIT markers). Empty when
@@ -70,6 +73,7 @@ public class DungeonBlueprint {
                             @NotNull Area relativeBounds, // Changed parameter
                             @Nullable Vector safeExitRelativeLocation,
                             @Nullable Vector timerBaseRelativeLocation,
+                            @Nullable Vector bankRelativeLocation,
                             @NotNull List<Vector> playerSpawnRelativeLocations,
                             @NotNull List<Vector> sandTimerRelativeLocations,
                             @NotNull List<Vector> deathCageRelativeLocations,
@@ -105,6 +109,7 @@ public class DungeonBlueprint {
         // Deliberately not null-checked: segment templates predating the SAFE_EXIT marker have none.
         this.safeExitRelativeLocation = (safeExitRelativeLocation != null) ? safeExitRelativeLocation.clone() : null;
         this.timerBaseRelativeLocation = (timerBaseRelativeLocation != null) ? timerBaseRelativeLocation.clone() : null;
+        this.bankRelativeLocation = (bankRelativeLocation != null) ? bankRelativeLocation.clone() : null;
         this.playerSpawnRelativeLocations = Collections.unmodifiableList(new ArrayList<>(playerSpawnRelativeLocations));
         this.sandTimerRelativeLocations = Collections.unmodifiableList(new ArrayList<>(sandTimerRelativeLocations));
         this.deathCageRelativeLocations = Collections.unmodifiableList(new ArrayList<>(deathCageRelativeLocations));
@@ -158,6 +163,11 @@ public class DungeonBlueprint {
     /** Relative base of the visual sand-timer column, or null if no segment defines a TIMER marker. */
     @Nullable public Vector getTimerBaseRelativeLocation() {
         return timerBaseRelativeLocation != null ? timerBaseRelativeLocation.clone() : null;
+    }
+
+    /** Relative cell the coin bank stands in, or null if no segment defines a BANK marker. */
+    @Nullable public Vector getBankRelativeLocation() {
+        return bankRelativeLocation != null ? bankRelativeLocation.clone() : null;
     }
 
     // --- Changed: Getter for Relative Bounds ---

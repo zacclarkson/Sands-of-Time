@@ -67,4 +67,33 @@ class GameManagerTest {
                     "unclassified game state: " + state);
         }
     }
+
+    /**
+     * {@link GameManager#isRoundLive} and {@link GameManager#canResetFrom} are written as two
+     * separate whitelists rather than one negating the other, so that a newly added
+     * {@link GameState} is claimed by neither and fails here — instead of silently defaulting to
+     * "resettable" on one side and "unprotected from block breaking" on the other.
+     */
+    @Test
+    void everyStateIsEitherLiveOrResettable() {
+        for (GameState state : GameState.values()) {
+            assertEquals(!GameManager.canResetFrom(state), GameManager.isRoundLive(state),
+                    "unclassified game state: " + state);
+        }
+    }
+
+    /**
+     * What {@code BlockProtectionListener} keys off. The countdown counts: the hub segment's baked
+     * sand shaft is real sand in the world from the moment the dungeon is pasted, which is before
+     * the round starts. SETUP and ENDED must stay unprotected so the segment builder tools keep
+     * working between rounds.
+     */
+    @Test
+    void blocksAreProtectedFromTheCountdownUntilTheRoundEnds() {
+        assertTrue(GameManager.isRoundLive(GameState.COUNTDOWN));
+        assertTrue(GameManager.isRoundLive(GameState.RUNNING));
+        assertTrue(GameManager.isRoundLive(GameState.PAUSED));
+        assertFalse(GameManager.isRoundLive(GameState.SETUP));
+        assertFalse(GameManager.isRoundLive(GameState.ENDED));
+    }
 }

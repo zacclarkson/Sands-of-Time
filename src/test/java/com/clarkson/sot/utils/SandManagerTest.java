@@ -1,6 +1,7 @@
 package com.clarkson.sot.utils;
 
 import com.clarkson.sot.dungeon.DeathCage;
+import com.clarkson.sot.events.BlockProtectionListener;
 import com.clarkson.sot.main.GameManager;
 import com.clarkson.sot.main.GameState;
 import com.clarkson.sot.timer.TeamTimer;
@@ -12,6 +13,7 @@ import org.bukkit.Material;
 import org.bukkit.World;
 import org.bukkit.block.Block;
 import org.bukkit.block.BlockState;
+import org.bukkit.GameMode;
 import org.bukkit.damage.DamageSource;
 import org.bukkit.entity.Item;
 import org.bukkit.block.BlockFace;
@@ -53,6 +55,7 @@ import static org.mockito.Mockito.*;
 class SandManagerTest {
 
     private ServerMock server;
+    private Plugin plugin;
     private World world;
     private GameManager gameManager;
     private PlayerStateManager stateManager;
@@ -65,7 +68,7 @@ class SandManagerTest {
     @BeforeEach
     void setUp() {
         server = MockBukkit.mock();
-        Plugin plugin = MockBukkit.createMockPlugin();
+        plugin = MockBukkit.createMockPlugin();
         world = server.addSimpleWorld("sand_world");
 
         gameManager = mock(GameManager.class);
@@ -211,16 +214,26 @@ class SandManagerTest {
 
     @Test
     void miningTheTeamsOwnTimerColumnIsBlocked() {
+        // The refusal used to live in SandManager itself. It moved to BlockProtectionListener, which
+        // covers strictly more (every team's column, the whole live round), so this registers that
+        // listener and keeps testing the property rather than the class that used to own it — which
+        // also makes it a real check of the priority wiring: the listener cancels at LOW and
+        // SandManager, at NORMAL with ignoreCancelled, must never see the event.
+        server.getPluginManager().registerEvents(new BlockProtectionListener(gameManager), plugin);
+        player.setGameMode(GameMode.SURVIVAL); // Creative deliberately bypasses the protection.
+
         Block columnBlock = dungeonSand(20, 70, 20);
-        when(team.isVisualTimerBlock(any(Location.class))).thenAnswer(invocation -> {
+        when(gameManager.isVisualTimerBlock(any(Location.class))).thenAnswer(invocation -> {
             Location queried = invocation.getArgument(0);
-            return queried.getBlockX() == 20 && queried.getBlockY() == 70 && queried.getBlockZ() == 20;
+            return queried != null
+                    && queried.getBlockX() == 20 && queried.getBlockY() == 70 && queried.getBlockZ() == 20;
         });
 
         BlockBreakEvent event = breakBlock(columnBlock);
 
         assertTrue(event.isCancelled(), "the timer column would otherwise be an unlimited sand mine");
         assertEquals(0, sandInInventory());
+        assertTrue(event.isDropItems(), "a cancelled break must never reach SandManager's payout");
     }
 
     // --- deposit path ---
@@ -603,5 +616,25 @@ class SandManagerTest {
 
         assertFalse(event.isCancelled());
         assertEquals(2, sandCount(player));
+    }
+
+    @Test
+    void theOffHandPassDoesNotChargeASecondSand() {
+        // PlayerInteractEvent fires once per hand and cancelling does not stop the second pass, so a
+        // single right-click must still cost exactly one sand.
+        PlayerMock caged = server.addPlayer();
+        DeathCage cage = cagedTeammate(caged, 3); // costs 3, so neither pass completes it
+        Block chest = sacrificeChest(cage);
+        player.getInventory().addItem(new ItemStack(Material.SAND, 5));
+
+        rightClick(player, chest);
+        PlayerInteractEvent offHand = new PlayerInteractEvent(
+                player, Action.RIGHT_CLICK_BLOCK, player.getInventory().getItemInOffHand(),
+                chest, BlockFace.UP, EquipmentSlot.OFF_HAND);
+        server.getPluginManager().callEvent(offHand);
+
+        assertEquals(4, sandCount(player), "one right-click, one sand");
+        assertEquals(2, cage.getRemainingSand());
+        assertTrue(offHand.isCancelled(), "the off-hand pass must still not open the chest");
     }
 }

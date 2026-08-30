@@ -12,7 +12,7 @@ Sands of Time is a team-based dungeon exploration minigame for Minecraft, inspir
 4. [The Timer & Sand](#the-timer--sand)
 5. [Dungeon Structure](#dungeon-structure)
 6. [Coins & Scoring](#coins--scoring)
-7. [Banking at the Sphinx](#banking-at-the-sphinx)
+7. [Banking](#banking)
 8. [Vault System](#vault-system)
 9. [Keys](#keys)
 10. [Doors & Gates](#doors--gates)
@@ -82,7 +82,7 @@ The hub has approximately **10 exits** leading into the dungeon. These exits fal
 ### Hub Facilities
 
 - **Sand timer** — a physical column of sand blocks that drains as time passes (each block = 10 seconds visually)
-- **Sphinx** — the banking NPC/location where players deposit coins
+- **Bank** — the ender chest in the hub where players deposit coins
 - **Death cage** — where dead players respawn, awaiting rescue
 - **Timer deposit points** — the cells beside the sand column where carried sand is spent on the timer
 - **Sand sacrifice points** — one per player on the team, used to free teammates from the death cage
@@ -146,6 +146,22 @@ The hub has approximately **10 exits** leading into the dungeon. These exits fal
 - Sand already paid toward a revive is **spent**: if the timer runs out before the price is met, it
   is not refunded
 
+### Block Breaking
+
+- While a round is live, players may break **only** two kinds of block:
+  - **Sand** — the timer currency (see [Sand Items](#sand-items))
+  - **Mob spawners** — broken to stop the mobs they produce
+- A third kind is planned but **not implemented yet**: blocks with money inside that you break for
+  the coins
+- Everything else in the dungeon is protected: walls and floors, vault marker blocks, vault and
+  segment doors, death cages, and the sand sacrifice points
+- The **visual sand timer column is protected too**, even though it is made of sand — mining your
+  own timer for sand is not a strategy
+- Players cannot **place** blocks during a round, with one exception: placing carried sand on a
+  timer deposit point, which is how sand is turned into time
+- The restriction lifts when the round ends, so builders can work between games. Staff who are not
+  playing are unaffected, and Creative/Spectator mode bypasses it entirely
+
 ---
 
 ## Dungeon Structure
@@ -191,7 +207,7 @@ Each segment template can contain any combination of:
 - **Safe exit** — a **2D area (like a door) built as a nether portal** that players walk through to escape. Placed in the builder as a two-click bound (`SAFE_EXIT`), normally in the HUB; one per dungeon, and a HUB marker takes priority over one on any other segment. Vanilla Nether travel is suppressed so the portal never teleports anyone out (`NetherPortalListener`).
 
 The HUB segment additionally defines these hub-only features (placed in the builder, wired to the live dungeon in a later pass):
-- **Bank** — a single interact point (`BANK` marker) marking where the banking Sphinx / bank spot lives
+- **Bank** — a single interact point (`BANK` marker) marking where the bank stands. An **ender chest** is built in that cell at runtime; right-clicking it banks everything the player is carrying
 - **Death cages** — 1–4 points (`DEATH_CAGE` markers), one per player, where dead players are held and respawn. Each cage is paired with the sacrifice point of the same index (the first `SAND_SACRIFICE` marker frees the first cage, and so on); a cage the template leaves unpaired gets a chest derived two blocks in front of it, so a hub saved before these markers existed still plays
 - **Timer deposits** — interact points (`TIMER_DEPOSIT` markers) where players place collected sand onto the timer to add time
 - **Timer column** — a single `TIMER` marker at the base of the visual sand-timer column; the draining sand timer stands in the hub at this marker (per team). A HUB with no TIMER marker simply gets no visual column that round (the timer still counts down normally) — the column is never placed anywhere but the hub.
@@ -224,8 +240,8 @@ Coins spawn throughout the dungeon as visual displays on the ground. They come i
 - Coins use gold nuggets as their base material with custom model data
 
 ### Unbanked vs. Banked
-- **Unbanked coins**: Coins you've collected but haven't deposited at the Sphinx. These are at risk.
-- **Banked coins**: Coins deposited at the Sphinx. These are safe (minus the tax).
+- **Unbanked coins**: Coins you've collected but haven't deposited at the bank. These are at risk.
+- **Banked coins**: Coins deposited at the bank. These are safe (minus the tax).
 - Only banked coins count toward the final team score.
 
 ### Penalties
@@ -249,13 +265,17 @@ scores are broadcast in chat.
 
 ---
 
-## Banking at the Sphinx
+## Banking
 
-- The Sphinx is located in the hub
-- Players must physically return to the hub and interact with the Sphinx to bank coins
+- The bank is an **ender chest** standing in the hub, at the cell the HUB template's `BANK` marker
+  names. Each team has its own, in their own dungeon instance
+- Players must physically return to the hub and **right-click the chest** to bank
+- One click banks **everything** the player is carrying — there is no partial deposit
 - Banking applies a **20% tax** — you keep 80% of what you deposit
 - Formula: `banked_amount = coins_to_bank × 0.80`
 - The taxed 20% is lost (destroyed, not redistributed)
+- The chest never opens as storage, and cannot be broken while the round is running
+- Dead and escaped players cannot bank — banking is something you do before you leave
 - This creates a constant risk/reward decision: bank frequently (lose more to tax but secure coins) vs. bank rarely (keep more but risk losing everything)
 
 ---
@@ -420,7 +440,7 @@ When a team's timer reaches zero:
 
 1. **All players still in the dungeon** (status: ALIVE_IN_DUNGEON or DEAD_AWAITING_REVIVE) are teleported to a public trapped location
 2. Their status changes to **TRAPPED_TIMER_OUT**
-3. **ALL unbanked coins are lost** — complete wipeout of anything not banked at the Sphinx
+3. **ALL unbanked coins are lost** — complete wipeout of anything not banked at the bank
 4. The team's run is over — only banked coins count toward their final score
 
 ### When the Timer is Low

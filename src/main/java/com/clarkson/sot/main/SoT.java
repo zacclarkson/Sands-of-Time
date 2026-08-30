@@ -24,6 +24,7 @@ import org.bukkit.plugin.java.JavaPlugin;
 // Import Commands
 import com.clarkson.sot.commands.*;
 // Import Listeners / Session management
+import com.clarkson.sot.events.BlockProtectionListener;
 import com.clarkson.sot.events.BuilderSessionManager;
 import com.clarkson.sot.events.CountdownFreezeListener;
 import com.clarkson.sot.events.DeathListener;
@@ -151,6 +152,9 @@ public class SoT extends JavaPlugin {
         getServer().getPluginManager().registerEvents(new DeathListener(gameManager), this);
         getServer().getPluginManager().registerEvents(new EscapeListener(gameManager), this);
         getServer().getPluginManager().registerEvents(new CountdownFreezeListener(gameManager), this);
+        // Stops players mining the dungeon apart mid-round -- notably their own sand timer column.
+        // Registered at LOW priority inside the listener so a denied break never reaches SandManager.
+        getServer().getPluginManager().registerEvents(new BlockProtectionListener(gameManager), this);
         // Nether portals are used as the safe-exit visual; suppress the vanilla teleport so nobody is
         // sent to the Nether when they walk into one.
         getServer().getPluginManager().registerEvents(new NetherPortalListener(), this);

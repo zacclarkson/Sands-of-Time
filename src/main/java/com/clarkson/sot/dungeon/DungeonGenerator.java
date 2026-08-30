@@ -335,6 +335,13 @@ public class DungeonGenerator {
         }
 
         Vector timerBaseRelativeLocation = selectTimerBaseRelativeLocation(placedSegments);
+        Vector bankRelativeLocation = selectBankRelativeLocation(placedSegments);
+        if (bankRelativeLocation == null) {
+            warnOncePerGeneration("no-bank",
+                    "No BANK marker in any segment template; players will have nowhere to bank "
+                    + "their coins and the round will score zero. Add a BANK marker to your HUB "
+                    + "segment and re-save it.");
+        }
         List<Vector> playerSpawnRelativeLocations = selectPlayerSpawnRelativeLocations(placedSegments);
         List<Vector> sandTimerRelativeLocations = selectSandTimerRelativeLocations(placedSegments);
         if (sandTimerRelativeLocations.isEmpty()) {
@@ -350,7 +357,7 @@ public class DungeonGenerator {
             warnOncePerGeneration("no-death-cages",
                     "No DEATH_CAGE marker on any segment template; falling back to four cages around "
                     + "the hub centre. Add DEATH_CAGE markers to your HUB segment and re-save it.");
-            deathCageRelativeLocations = fallbackCageLocations(hubCentre);
+            deathCageRelativeLocations = fallbackCageLocations(hubCentre, hubRelativeLocation.getY());
         }
         List<Vector> sacrificeMarkers = selectSandSacrificeRelativeLocations(placedSegments);
         if (sacrificeMarkers.isEmpty()) {
@@ -380,7 +387,7 @@ public class DungeonGenerator {
         return new DungeonBlueprint(
                 placedSegments, hubRelativeLocation, vaultMarkerRelativeLocations, keySpawnRelativeLocations,
                 sandSpawnRelativeLocations, coinSpawnRelativeLocations, itemSpawnRelativeLocations,
-                blueprintBounds, safeExitRelativeLocation, timerBaseRelativeLocation,
+                blueprintBounds, safeExitRelativeLocation, timerBaseRelativeLocation, bankRelativeLocation,
                 playerSpawnRelativeLocations, sandTimerRelativeLocations,
                 deathCageRelativeLocations, sandSacrificeRelativeLocations, doorways, unusedOpenings
         );
@@ -884,6 +891,32 @@ public class DungeonGenerator {
     }
 
     /**
+     * Picks the blueprint-relative cell the coin bank stands in (the {@code BANK} marker), with a HUB
+     * template winning over any other segment. Null if no template defines one, in which case the round
+     * simply plays with no bank.
+     */
+    @Nullable
+    static Vector selectBankRelativeLocation(@NotNull List<PlacedSegment> placedSegments) {
+        Vector best = null;
+        boolean bestFromHub = false;
+        for (PlacedSegment placedSegment : placedSegments) {
+            Segment template = placedSegment.getSegmentTemplate();
+            if (template == null) continue;
+            BlockVector3 offset = template.getBankOffset();
+            if (offset == null) continue;
+
+            boolean fromHub = template.getType() == SegmentType.HUB;
+            if (best != null && !(fromHub && !bestFromHub)) continue;
+
+            BlockVector3 rot = placedSegment.getRotatedOffset(offset);
+            best = placedSegment.getWorldOrigin().toVector().clone()
+                    .add(new Vector(rot.x(), rot.y(), rot.z()));
+            bestFromHub = fromHub;
+        }
+        return best;
+    }
+
+    /**
      * Collects the blueprint-relative per-player spawn points from {@code PLAYER_SPAWN} markers.
      * A HUB template's spawns win: if any HUB defines spawns those are used exclusively; otherwise
      * every segment's spawns are gathered. Empty when no template defines any (callers fall back to
@@ -1002,20 +1035,21 @@ public class DungeonGenerator {
     /**
      * Four evenly spread fallback cages for a hub that defines no {@code DEATH_CAGE} markers at all.
      *
-     * <p>Anchored on the hub's <em>centre</em>, not its origin. The hub is placed at
-     * {@link BlockVector3#ZERO} and {@code hubRelativeLocation} is therefore its origin corner, so the
-     * offsets this replaces put two of the four cages at negative coordinates — outside the dungeon
-     * entirely. Centring them at least keeps the fallback inside the building.
+     * <p>Spread around the hub's <em>centre</em> horizontally, but standing on the hub's <em>floor</em>.
+     * The hub is placed at {@link BlockVector3#ZERO} and {@code hubRelativeLocation} is therefore its
+     * origin corner, so the offsets this replaces put two of the four cages at negative coordinates —
+     * outside the dungeon entirely. Centring fixes that; taking the centre's <em>height</em> too would
+     * swap one bug for another and hang the cages in mid-air, half the hub up.
      */
     @NotNull
-    static List<Vector> fallbackCageLocations(@NotNull Vector hubCentre) {
+    static List<Vector> fallbackCageLocations(@NotNull Vector hubCentre, double floorY) {
         int[][] offsets = { {3, 0, 3}, {3, 0, -3}, {-3, 0, 3}, {-3, 0, -3} };
         // Floored to whole cells: an even-sized hub centres on a .5 boundary, and a cage on a block
         // corner would put its teleport and its chest half a block out.
-        Vector centre = new Vector(Math.floor(hubCentre.getX()), Math.floor(hubCentre.getY()), Math.floor(hubCentre.getZ()));
+        Vector base = new Vector(Math.floor(hubCentre.getX()), Math.floor(floorY), Math.floor(hubCentre.getZ()));
         List<Vector> cages = new ArrayList<>();
         for (int[] offset : offsets) {
-            cages.add(centre.clone().add(new Vector(offset[0], offset[1], offset[2])));
+            cages.add(base.clone().add(new Vector(offset[0], offset[1], offset[2])));
         }
         return cages;
     }

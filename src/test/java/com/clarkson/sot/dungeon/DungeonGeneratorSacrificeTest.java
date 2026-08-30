@@ -252,7 +252,7 @@ class DungeonGeneratorSacrificeTest {
 
     @Test
     void fallbackCagesSurroundTheHubCentreRatherThanItsOrigin() {
-        List<Vector> cages = DungeonGenerator.fallbackCageLocations(HUB_CENTRE);
+        List<Vector> cages = DungeonGenerator.fallbackCageLocations(HUB_CENTRE, 0);
 
         assertEquals(4, cages.size());
         for (Vector cage : cages) {
@@ -263,10 +263,21 @@ class DungeonGeneratorSacrificeTest {
     }
 
     @Test
+    void fallbackCagesStandOnTheHubFloorNotAtItsMidHeight() {
+        // Centring the cages horizontally is the point; taking the centre's *height* too would hang
+        // them half the hub up, in mid-air.
+        List<Vector> cages = DungeonGenerator.fallbackCageLocations(new Vector(21.0, 7.5, 18.5), 0);
+
+        for (Vector cage : cages) {
+            assertEquals(0.0, cage.getY(), "cages belong on the hub floor: " + cage);
+        }
+    }
+
+    @Test
     void fallbackCagesSitOnWholeCells() {
         // A 42x15x37 hub centres on x.0/y.5/z.5; a cage on a block boundary would put its teleport
         // and its chest half a block out.
-        List<Vector> cages = DungeonGenerator.fallbackCageLocations(new Vector(21.0, 7.5, 18.5));
+        List<Vector> cages = DungeonGenerator.fallbackCageLocations(new Vector(21.0, 7.5, 18.5), 64);
 
         for (Vector cage : cages) {
             assertEquals(Math.floor(cage.getX()), cage.getX(), "x should be whole: " + cage);

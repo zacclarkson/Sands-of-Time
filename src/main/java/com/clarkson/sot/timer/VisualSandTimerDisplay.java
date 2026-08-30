@@ -12,6 +12,7 @@ import org.bukkit.entity.FallingBlock;
 import org.bukkit.plugin.Plugin;
 import org.bukkit.scheduler.BukkitTask;
 import org.bukkit.util.BoundingBox;
+import org.jetbrains.annotations.Nullable;
 
 import java.util.Objects;
 import java.util.logging.Level;
@@ -171,10 +172,18 @@ public class VisualSandTimerDisplay {
      * periodic update only ever <em>removes</em> blocks, so a mined block stays gone until the next
      * {@link #syncVisualState()} — which the resulting deposit itself triggers, putting the block
      * back for free.
+     *
+     * <p>Two deliberate choices, both pinned by {@code VisualSandTimerDisplayColumnTest}:
+     * the pedestal at {@link #bottomLocation} is <em>excluded</em> (it is the segment's {@code TIMER}
+     * marker block, is not sand, and is covered by the break whitelist); and this is <em>not</em>
+     * gated on {@link #armed}, because the unarmed window — between {@code GameManager.startGame}
+     * anchoring the column and {@link #startVisualUpdates()} arming it — is exactly the countdown,
+     * when the hub segment's baked sand shaft is already standing in the world.
      */
-    public boolean isColumnBlock(Location location) {
+    public boolean isColumnBlock(@Nullable Location location) {
         if (location == null || totalHeight <= 0) return false;
-        if (!Objects.equals(location.getWorld(), bottomLocation.getWorld())) return false;
+        World columnWorld = bottomLocation.getWorld();
+        if (columnWorld == null || !Objects.equals(location.getWorld(), columnWorld)) return false;
         if (location.getBlockX() != bottomLocation.getBlockX()) return false;
         if (location.getBlockZ() != bottomLocation.getBlockZ()) return false;
         int y = location.getBlockY();
