@@ -44,6 +44,18 @@ A heavier, on-demand tier: a real Paper server (Docker, `itzg/minecraft-server`)
 plugin, driven by a headless Mineflayer bot. WorldEdit is installed via `MODRINTH_PROJECTS`. Run it
 manually (see `integration-test/README.md`); it is **not** part of CI.
 
+## Incidental findings
+
+Work here turns up unrelated defects fairly often; most of the architecture notes below are scar
+tissue from exactly that. When you find one while doing something else, **open a GitHub issue and
+carry on with the task in hand.** Do not widen the current change to fix it, and do not leave it only
+in a commit message or a PR comment — both are lost once the PR merges.
+
+File one for a real defect with a correctness or user-visible consequence: a wrong calculation, a
+stub returning null that callers trust, a silent failure an operator cannot diagnose. Style nits and
+speculative refactors are not worth an issue. Say what is wrong, what it breaks, and where — file and
+line — so it is actionable without rediscovering it.
+
 ## Commands
 
 - **Builder tools** (perm `sot.admin.builder` / `sot.admin.savesegment`): `/sotbuilder` (gives the
@@ -177,9 +189,13 @@ manually (see `integration-test/README.md`); it is **not** part of CI.
   drift out of sync. That is why escaping wipes the inventory (`GameManager.handlePlayerLeave`) and why
   `tearDownRound()` strips sand from every team member in its per-team pass, before
   `activeTeamsInGame.clear()` — that map is the only source of member lists: players who are trapped, dead, or still exploring never pass through the
-  escape path, and their sand would otherwise buy free time next round. Breaking a block of the team's own
-  visual timer column is refused for the same reason — the column is sand, and a mined block is restored
-  by the next `syncVisualState()`, which the resulting deposit itself triggers.
+  escape path, and their sand would otherwise buy free time next round. Breaking a block of a visual
+  timer column is refused for the same reason — the column is sand, and a mined block is restored by
+  the next `syncVisualState()`, which the resulting deposit itself triggers — but that refusal lives
+  in `BlockProtectionListener`, **not** here. `SandManager.onBlockBreak` used to re-check the
+  breaker's own column; the listener subsumes it (every team's column, the whole live round) and the
+  duplicate contradicted the Creative bypass, so it was removed along with the team lookup that only
+  existed to serve it.
 - **Dying drops carried sand on the floor.** Nearly all of that is vanilla: `DeathListener` never
   touches `event.getDrops()`, so a death that drops the inventory scatters the sand with everything
   else and it lands, merges and despawns by the server's own rules. `SandManager.dropCarriedSandOnDeath`
@@ -198,6 +214,21 @@ manually (see `integration-test/README.md`); it is **not** part of CI.
   lobby teleport off `TRAPPED_TIMER_OUT` players; without it a single-team round (the `/sot setup`
   default) never shows the trapped box at all. The status has to be read *outside* the scheduled
   task, since `clearAllStates()` runs later in the same tick.
+- **During a round, players may break only sand and spawners — and never the timer column.**
+  `BlockProtectionListener` (in `events`) cancels every other block break, and every block placement
+  except depositing sand on the team's own `TIMER_DEPOSIT` cell (which has to reach
+  `SandManager.onBlockPlace` at `NORMAL`, so it is let through — gated on `RUNNING` to mirror that
+  handler exactly), while `GameManager.isRoundLive` is true (COUNTDOWN/RUNNING/PAUSED, so the hub's baked sand shaft is
+  covered before the round even starts). `BreakableBlocks.BREAKABLE` is the whitelist and the
+  documented home for the not-yet-implemented money blocks. **The `LOW` priority is load-bearing:**
+  `SandManager.onBlockBreak` sits at `NORMAL, ignoreCancelled = true`, so cancelling at `LOW` makes
+  Bukkit skip it and a denied break pays out nothing — raise the priority and the sand-timer exploit
+  comes back (mining a column block credited +10s, and `TeamTimer.addSeconds` → `syncVisualState` →
+  `addSandToTop` put the block straight back, pinning the timer at its maximum forever). The column
+  guard runs *before* the `isParticipant` check so nobody, operators included, can mine a team's
+  clock, and `VisualSandTimerDisplay.isColumnBlock` is deliberately **not** gated on `armed` —
+  the unarmed window is exactly the countdown, when the baked shaft is minable. Creative/Spectator
+  bypasses everything; there is no bypass permission.
 - **The visual sand column lives in the hub, never at the lobby.** Its base comes from a `TIMER`
   marker on a segment template (HUB wins), via `DungeonGenerator.selectTimerBaseRelativeLocation` →
   `DungeonBlueprint.getTimerBaseRelativeLocation` → `DungeonManager.getTimerBaseLocation`.
@@ -208,6 +239,16 @@ manually (see `integration-test/README.md`); it is **not** part of CI.
   `startVisualUpdates()`, so no sand can be placed before the column is anchored (that gate is what
   stopped a 15-block pillar appearing at the lobby spawn at `/sot setup`). The bundled hub's marker
   sits at segment-relative `(21, 1, 18)`, the pedestal under the sand column baked into `hub.schem`.
+  **The hub must declare itself tall enough to hold the column it anchors.** The column occupies
+  relative Y `timerLocationOffset.y + 1` through `+ VisualTimerLayout.COLUMN_HEIGHT_BLOCKS`, but the
+  blueprint bounds come from the template's declared `size` (`DungeonGenerator.calculateRelativeMaxBounds`),
+  and those bounds are exactly what `DungeonManager.cleanupInstance()` air-fills between rounds.
+  `hub.json` therefore declares `size.y = 17` while `hub.schem` is only 15 tall — the two extra
+  layers are air, `ignoreAirBlocks` means they cost nothing to paste, and nothing cross-checks the
+  declared size against the schematic. Under-declare it and the top of every team's column is left
+  standing for the next round, which cannot clear it either. This is easy to lose: re-saving the hub
+  in game rewrites `size` from the WorldEdit selection, so **select at least 17 blocks of height** or
+  the gap reopens. `StructureLoaderHubFeaturesTest` pins it, deriving the bound from the constants.
 - **Game locations come from `config.yml`.** `locations.lobby` and `locations.trapped` are stored as
   plain `world/x/y/z/yaw/pitch` scalars and read by `SoTConfig` (deliberately *not* Bukkit's
   `config.getLocation()`, whose serialized form needs a `==: org.bukkit.Location` marker and is not

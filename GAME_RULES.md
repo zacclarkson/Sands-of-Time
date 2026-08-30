@@ -139,6 +139,22 @@ The hub has approximately **10 exits** leading into the dungeon. These exits fal
 - A teammate must sacrifice sand at these points to free a player from the death cage
 - Cost: **1 sand** per revive
 
+### Block Breaking
+
+- While a round is live, players may break **only** two kinds of block:
+  - **Sand** — the timer currency (see [Sand Items](#sand-items))
+  - **Mob spawners** — broken to stop the mobs they produce
+- A third kind is planned but **not implemented yet**: blocks with money inside that you break for
+  the coins
+- Everything else in the dungeon is protected: walls and floors, vault marker blocks, vault and
+  segment doors, death cages, and the sand sacrifice points
+- The **visual sand timer column is protected too**, even though it is made of sand — mining your
+  own timer for sand is not a strategy
+- Players cannot **place** blocks during a round, with one exception: placing carried sand on a
+  timer deposit point, which is how sand is turned into time
+- The restriction lifts when the round ends, so builders can work between games. Staff who are not
+  playing are unaffected, and Creative/Spectator mode bypasses it entirely
+
 ---
 
 ## Dungeon Structure

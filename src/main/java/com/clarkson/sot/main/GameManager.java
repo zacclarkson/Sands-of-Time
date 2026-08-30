@@ -580,6 +580,21 @@ public class GameManager {
     }
 
     /**
+     * Whether a round is on the clock — the states in which players are inside a dungeon and the
+     * world has to be protected from them ({@code BlockProtectionListener}).
+     *
+     * <p>The exact complement of {@link #canResetFrom}, but written as its own explicit whitelist
+     * rather than a negation, so that a new {@link GameState} constant is classified by neither and
+     * fails {@code GameManagerTest} instead of silently defaulting to "unprotected".
+     *
+     * <p>{@code COUNTDOWN} counts: the hub segment's baked sand shaft is real sand in the world from
+     * the moment the dungeon is pasted, well before the visual timer arms itself.
+     */
+    public static boolean isRoundLive(GameState state) {
+        return state == GameState.COUNTDOWN || state == GameState.RUNNING || state == GameState.PAUSED;
+    }
+
+    /**
      * Clears a finished round away and returns to {@link GameState#SETUP} so another game can be
      * set up and started, without restarting the server.
      *
@@ -899,6 +914,22 @@ public class GameManager {
         if (teamDungeonManager == null) return false;
         Dungeon teamDungeonData = teamDungeonManager.getDungeonData();
         return teamDungeonData != null && teamDungeonData.isSafeExitAt(location);
+    }
+
+    /**
+     * Whether the location is part of <em>any</em> active team's visual sand timer column.
+     *
+     * <p>Every team, not just the one the player belongs to: {@link #getTeamIdForLocation} is still
+     * a stub, team dungeons are thousands of blocks apart so a cross-team hit cannot happen by
+     * accident, and an operator who teleported into someone else's hub is exactly the case worth
+     * covering. Costs one coordinate comparison per active team.
+     */
+    public boolean isVisualTimerBlock(@Nullable Location location) {
+        if (location == null) return false;
+        for (SoTTeam team : activeTeamsInGame.values()) {
+            if (team.isVisualTimerBlock(location)) return true;
+        }
+        return false;
     }
 
     /**
