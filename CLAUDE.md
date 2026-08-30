@@ -21,7 +21,7 @@ generated dungeon, collect and bank coins, and race a sand timer. See `readme.md
 
 - `mvn -B verify` — compile, run the unit tests, and produce the shaded jar
   `target/SoT-1.0-SNAPSHOT.jar` (gson is relocated under `com.clarkson.sot.libs.gson`). CI runs this
-  on Temurin 21.
+  on Temurin 25 — it has to, since the build targets release 25 and MockBukkit ships Java 25 bytecode.
 - `mvn -B test` — just the unit tests.
 - `mvn install` — additionally copies the jar to the local server plugins dir set by the
   `server.plugins.dir` property in `pom.xml` (adjust it to your own path).
@@ -113,6 +113,37 @@ line — so it is actionable without rediscovering it.
   block above the entry marker; opening clears layers top-first so the wall sinks into the floor.
   Vault marker blocks stay out of `DoorManager` — `VaultManager` owns those clicks (bug #65's
   sibling), and a test pins it.
+- **Gates and vault doors are template geometry, not generated.** Unlike doorways — which ride the
+  blueprint only because the DFS *discards* which connections it made — every `GATE`/`LEVER`/`VAULT_DOOR`
+  marker on a placed template is used verbatim, so none of it goes through `DungeonBlueprint` or `Dungeon`
+  (whose constructor is already 16 arguments). `DungeonManager.resolveGateGroups`/`resolveVaultDoors` walk
+  `getPlacedSegmentsInWorld()` *after* the paste and hand `DoorManager.initializeGatesForInstance` absolute
+  `GateGroup`s (one lever plus **that segment's** gates — the pairing is the feature) and
+  `VaultDoorPlacement`s. Relative→absolute goes through `SegmentGeometry`, which rotates a bound with
+  `SegmentRotation.rotateBound` **before** adding the origin: one 90° step maps `(x,z) -> (z, sizeX-1-x)`,
+  so rotating can swap which corner is the minimum, and `PlacedSegment.getAbsoluteLocation` deliberately
+  does not rotate. Gates are `IRON_BARS` (see-through on purpose — the mechanic is deciding whether to open
+  one) and the lever is a **real `Material.LEVER` block written at instantiation**: the builder marker is an
+  air cell holding a `BlockDisplay`, and air never fires `RIGHT_CLICK_BLOCK` — the same trap
+  `Door.buildClosed()` exists for. The **first** pull is deliberately *not* cancelled, so vanilla flips the
+  lever on and the world itself records the state; every later click *is* cancelled so it cannot flip back
+  over an open gate. Vault doors have no keyhole and no key: `VaultManager` calls
+  `DoorManager.openVaultDoors(teamId, colour)` from its own marker handler — the marker click stays
+  VaultManager's (bug #65), the wall stays DoorManager's — and they live in `vaultDoorsByTeamAndColor`,
+  never in `doorsByTeamAndLockLocation`, so `getDoorAt` still resolves nothing at a vault or a gate.
+  `VaultDoor.isCorrectKey` survives only for `KeyItemTaggingTest`. The **vault marker sinks with the
+  wall**: `VaultManager.revealVault` hands the clicked block to `openVaultDoors`, and `VaultDoor`
+  merges it into `getBlocksSorted` so it clears with the layer it sits in (the marker is only attached
+  at open time, so `buildClosed()` never paints over it). Nothing spawns coins at the marker any more —
+  the reward is what the segment puts *behind* the door, which is the only place a wall can reveal
+  anything; scattering it around the marker put it in front of the wall and left the marker standing
+  as glass. Gates and levers need no protection code of their own: `BreakableBlocks.BREAKABLE` is a
+  whitelist of `SAND` and `SPAWNER`, so `IRON_BARS` and `LEVER` are already refused during a round. **A vault door must live in the same
+  segment as its vault marker**: `SaveSegmentCommand` sets `containedVault` from the `VAULT_DOOR` marker, so
+  a segment claiming a vault with no `VAULT_MARKER` makes the DFS count that colour as placed while
+  `consolidateFeatureLocations` emits no marker, and all 20 generation attempts then fail on the missing
+  marker. The save command now refuses that combination and the generator warns once for templates already
+  on disk.
 - **Rusty keys spawn at `ITEM_SPAWN` markers.** `DungeonManager.populateFloorItems` rolls
   `RUSTY_KEY_SPAWN_CHANCE` (20%) per item spawn and calls `FloorItemManager.spawnRustyKey`,
   otherwise falling through to the loot table. Nothing called `spawnRustyKey` at all before, so
