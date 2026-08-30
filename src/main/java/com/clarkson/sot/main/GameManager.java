@@ -999,6 +999,16 @@ public class GameManager {
         return teamDungeonManager.getDungeonData().isSandTimerDepositAt(location);
     }
 
+    /**
+     * True if the given block location is the team's coin bank (the ender chest built at the
+     * BANK marker). False when the team has no dungeon, or the dungeon defines no bank.
+     */
+    public boolean isTeamBankAt(UUID teamId, Location location) {
+        DungeonManager teamDungeonManager = teamDungeonManagers.get(teamId);
+        if (teamDungeonManager == null || teamDungeonManager.getDungeonData() == null) return false;
+        return teamDungeonManager.getDungeonData().isBankAt(location);
+    }
+
     /** Finds the team ID associated with a given world location. */
     @Nullable
     public UUID getTeamIdForLocation(Location location) { /* ... (Implementation remains the same) ... */ return null;}

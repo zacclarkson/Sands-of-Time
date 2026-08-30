@@ -154,6 +154,24 @@ line — so it is actionable without rediscovering it.
 - **Countdown tasks are epoch-guarded.** The ticker only re-checks the state once a second, so
   `roundEpoch` (bumped on every start and end) is what stops a round aborted mid-countdown from
   having its stale task finish the *next* round's countdown early.
+- **The coin bank is an ender chest built at the `BANK` marker.** Banking is what turns collected
+  coins into score, so without it a round ends 0-0. The chain mirrors `TIMER`:
+  `Segment.getBankOffset()` (JSON key `bankLocationOffset`) -> `DungeonGenerator.selectBankRelativeLocation`
+  (a HUB's marker wins outright) -> `DungeonBlueprint.getBankRelativeLocation` ->
+  `Dungeon.isBankAt` -> `GameManager.isTeamBankAt`. Three things matter here. **(a)** The block is
+  what makes the bank exist: `DungeonManager.placeBankBlock()` writes the `ENDER_CHEST` (facing the
+  hub) *after* `pasteSegmentSchematics()`, since a paste would paint over it — the same lesson as
+  `Door.buildClosed()`. Teardown needs nothing, because `cleanupInstance()` clears the whole
+  blueprint region. **(b)** Like the sand deposit and unlike the safe exit, the match is an *exact*
+  block match: the builder tool records the marker at the air cell the chest occupies, so there is
+  no +/-1 Y fudge. **(c)** `BankingManager.onPlayerInteract` must ignore the off-hand pass
+  (`event.getHand() != EquipmentSlot.HAND`) — `PlayerInteractEvent` fires once per hand, and the
+  second pass would overwrite the confirmation with "You have no coins to bank!" — and must cancel
+  the event, or the vanilla ender chest inventory opens over the bank. `BankingManager` holds no
+  per-team state (the cell is looked up through `GameManager` each click), so there is nothing to
+  clear between rounds; it also cancels `BlockBreakEvent` on the bank cell, since an ender chest
+  mined without silk touch drops 8 obsidian and takes the team's bank out of the hub. A hub with no
+  `BANK` marker simply plays with no bank, warned once per `/sot setup` via `warnOncePerGeneration`.
 - **Sand is an item; only a deposit point converts it to time.** Breaking a dungeon sand block hands the
   player a plain `Material.SAND` item and adds *no* time — `SandManager.onBlockPlace` does that, when the
   sand is placed on one of the team's `TIMER_DEPOSIT` marker cells. The chain mirrors `PLAYER_SPAWN`:

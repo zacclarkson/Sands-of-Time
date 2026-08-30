@@ -326,6 +326,13 @@ public class DungeonGenerator {
         }
 
         Vector timerBaseRelativeLocation = selectTimerBaseRelativeLocation(placedSegments);
+        Vector bankRelativeLocation = selectBankRelativeLocation(placedSegments);
+        if (bankRelativeLocation == null) {
+            warnOncePerGeneration("no-bank",
+                    "No BANK marker in any segment template; players will have nowhere to bank "
+                    + "their coins and the round will score zero. Add a BANK marker to your HUB "
+                    + "segment and re-save it.");
+        }
         List<Vector> playerSpawnRelativeLocations = selectPlayerSpawnRelativeLocations(placedSegments);
         List<Vector> sandTimerRelativeLocations = selectSandTimerRelativeLocations(placedSegments);
         if (sandTimerRelativeLocations.isEmpty()) {
@@ -342,7 +349,7 @@ public class DungeonGenerator {
         return new DungeonBlueprint(
                 placedSegments, hubRelativeLocation, vaultMarkerRelativeLocations, keySpawnRelativeLocations,
                 sandSpawnRelativeLocations, coinSpawnRelativeLocations, itemSpawnRelativeLocations,
-                blueprintBounds, safeExitRelativeLocation, timerBaseRelativeLocation,
+                blueprintBounds, safeExitRelativeLocation, timerBaseRelativeLocation, bankRelativeLocation,
                 playerSpawnRelativeLocations, sandTimerRelativeLocations, doorways, unusedOpenings
         );
     }
@@ -831,6 +838,32 @@ public class DungeonGenerator {
             Segment template = placedSegment.getSegmentTemplate();
             if (template == null) continue;
             BlockVector3 offset = template.getTimerOffset();
+            if (offset == null) continue;
+
+            boolean fromHub = template.getType() == SegmentType.HUB;
+            if (best != null && !(fromHub && !bestFromHub)) continue;
+
+            BlockVector3 rot = placedSegment.getRotatedOffset(offset);
+            best = placedSegment.getWorldOrigin().toVector().clone()
+                    .add(new Vector(rot.x(), rot.y(), rot.z()));
+            bestFromHub = fromHub;
+        }
+        return best;
+    }
+
+    /**
+     * Picks the blueprint-relative cell the coin bank stands in (the {@code BANK} marker), with a HUB
+     * template winning over any other segment. Null if no template defines one, in which case the round
+     * simply plays with no bank.
+     */
+    @Nullable
+    static Vector selectBankRelativeLocation(@NotNull List<PlacedSegment> placedSegments) {
+        Vector best = null;
+        boolean bestFromHub = false;
+        for (PlacedSegment placedSegment : placedSegments) {
+            Segment template = placedSegment.getSegmentTemplate();
+            if (template == null) continue;
+            BlockVector3 offset = template.getBankOffset();
             if (offset == null) continue;
 
             boolean fromHub = template.getType() == SegmentType.HUB;
