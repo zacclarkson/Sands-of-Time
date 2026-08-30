@@ -65,8 +65,9 @@ public class SoT extends JavaPlugin {
 
         // Install any segment templates bundled in the jar (e.g. the hub) into the data folder so a
         // fresh server has a working HUB. Must run BEFORE GameManager is constructed, since its
-        // constructor loads templates from the data folder. Skips files that already exist so
-        // in-game edits are never clobbered.
+        // constructor loads templates from the data folder. Templates already on disk are kept so
+        // in-game edits are never clobbered -- and the keep is logged, since it means a corrected
+        // bundled template is not in use.
         installBundledSegments();
 
 
@@ -234,49 +235,13 @@ public class SoT extends JavaPlugin {
      }
 
     /**
-     * Installs segment templates bundled in the jar (under {@code bundled_segments/}) into the plugin
-     * data folder, so a fresh server ships with a working HUB and {@code /sot start} works without a
-     * hand-built segment. The names come from {@code bundled_segments/manifest.txt}; for each name the
-     * {@code <name>.json} goes to the data folder root and {@code schematics/<name>.schem} to the
-     * schematics sub-dir — the layout {@code StructureLoader} reads. Existing files are left untouched
-     * so in-game edits are never overwritten.
+     * Installs the segment templates bundled in the jar into the data folder, so a fresh server ships
+     * with a working HUB. Delegates to {@link BundledSegmentInstaller}, which documents why an existing
+     * template is kept, why keeping it is reported rather than silent, and why a template's {@code .json}
+     * and {@code .schem} are installed as a unit.
      */
     private void installBundledSegments() {
-        java.io.InputStream manifest = getResource("bundled_segments/manifest.txt");
-        if (manifest == null) {
-            return; // No segments bundled in this build.
-        }
-        File dataFolder = getDataFolder();
-        File schematicsDir = new File(dataFolder, "schematics");
-        try (java.io.BufferedReader reader =
-                     new java.io.BufferedReader(new java.io.InputStreamReader(manifest, java.nio.charset.StandardCharsets.UTF_8))) {
-            String name;
-            while ((name = reader.readLine()) != null) {
-                name = name.trim();
-                if (name.isEmpty() || name.startsWith("#")) continue;
-                copyResourceIfAbsent("bundled_segments/" + name + ".json",
-                        new File(dataFolder, name + ".json"));
-                copyResourceIfAbsent("bundled_segments/schematics/" + name + ".schem",
-                        new File(schematicsDir, name + ".schem"));
-            }
-        } catch (Exception e) {
-            getLogger().log(Level.WARNING, "Failed to install bundled segments", e);
-        }
-    }
-
-    /** Copies a jar resource to {@code target} only if the target does not already exist. */
-    private void copyResourceIfAbsent(String resourcePath, File target) {
-        if (target.exists()) return;
-        try (java.io.InputStream in = getResource(resourcePath)) {
-            if (in == null) {
-                getLogger().warning("Bundled resource missing: " + resourcePath);
-                return;
-            }
-            java.nio.file.Files.copy(in, target.toPath());
-            getLogger().info("Installed bundled segment file: " + target.getName());
-        } catch (java.io.IOException e) {
-            getLogger().log(Level.WARNING, "Failed to install bundled resource " + resourcePath, e);
-        }
+        new BundledSegmentInstaller(this::getResource, getDataFolder(), getLogger()).install();
     }
 
      /**

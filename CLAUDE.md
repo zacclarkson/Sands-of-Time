@@ -92,8 +92,21 @@ line — so it is actionable without rediscovering it.
 - **A HUB segment is bundled and auto-installed.** Dungeon generation needs at least one `HUB` segment
   on disk (`plugins/SoT/<name>.json` + `schematics/<name>.schem`). Templates listed in
   `src/main/resources/bundled_segments/manifest.txt` are shipped in the jar and copied into the data
-  folder by `SoT.installBundledSegments()` on enable (**skip-if-present**, so in-game edits are never
-  clobbered) — so a fresh server has a working hub out of the box. To add/update the bundled set: build
+  folder by `BundledSegmentInstaller` on enable (**skip-if-present**, so in-game edits are never
+  clobbered) — so a fresh server has a working hub out of the box. Skip-if-present has a cost: a
+  corrected bundled template reaches *no* server that has run the plugin before. So the installer never
+  skips silently — it byte-compares each half against the jar's copy and, when they differ, logs which
+  files differ and that deleting both is what takes the bundled version (an identical copy is only a
+  `fine`). It also treats a template's `.json` and `.schem` as **one unit**: they come from a single
+  `/sotsavesegment` and nothing downstream cross-checks them, so installing one bundled half beside one
+  stale local half is how a template ends up with declared bounds its geometry disagrees with. A
+  half-present pair is therefore completed from the jar as a unit, with the surviving file moved aside
+  to `<name>.<ext>.bak` and a warning naming it. That is also the load-time check
+  `StructureLoader.warnIfDeclaredSizeIsTooSmall` exists for: it reads the schematic's dimension header
+  through `SchematicDimensions` (straight off the gzipped NBT, since a `ClipboardFormats` read needs a
+  live WorldEdit platform and this runs at load) and warns when the declared `size` is *smaller* than
+  the schematic on any axis. Only smaller — declaring more is deliberate and load-bearing (see the
+  visual-timer note on `hub.json`'s `size.y = 17`). To add/update the bundled set: build
   in-game + `/sotsavesegment <name> HUB`, then `scripts/pull-segments.sh` to pull the files off the dev
   server into `bundled_segments/` (regenerating the manifest) and commit. Binary `.schem` files are
   kept byte-clean by a `.gitattributes` (`*.schem binary`) and by excluding `bundled_segments/**` from
@@ -371,11 +384,12 @@ line — so it is actionable without rediscovering it.
   blueprint bounds come from the template's declared `size` (`DungeonGenerator.calculateRelativeMaxBounds`),
   and those bounds are exactly what `DungeonManager.cleanupInstance()` air-fills between rounds.
   `hub.json` therefore declares `size.y = 17` while `hub.schem` is only 15 tall — the two extra
-  layers are air, `ignoreAirBlocks` means they cost nothing to paste, and nothing cross-checks the
-  declared size against the schematic. Under-declare it and the top of every team's column is left
-  standing for the next round, which cannot clear it either. This is easy to lose: re-saving the hub
-  in game rewrites `size` from the WorldEdit selection, so **select at least 17 blocks of height** or
-  the gap reopens. `StructureLoaderHubFeaturesTest` pins it, deriving the bound from the constants.
+  layers are air and `ignoreAirBlocks` means they cost nothing to paste. Under-declare it and the top of
+  every team's column is left standing for the next round, which cannot clear it either. This is easy
+  to lose: re-saving the hub in game rewrites `size` from the WorldEdit selection, so **select at least
+  17 blocks of height** or the gap reopens. `StructureLoaderHubFeaturesTest` pins it, deriving the bound
+  from the constants, and `StructureLoader.warnIfDeclaredSizeIsTooSmall` catches the general case at
+  load — but only a size *below* the schematic's, since this over-declaration is the point.
 - **Game locations come from `config.yml`.** `locations.lobby` and `locations.trapped` are stored as
   plain `world/x/y/z/yaw/pitch` scalars and read by `SoTConfig` (deliberately *not* Bukkit's
   `config.getLocation()`, whose serialized form needs a `==: org.bukkit.Location` marker and is not
