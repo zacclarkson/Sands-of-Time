@@ -346,6 +346,25 @@ line — so it is actionable without rediscovering it.
   translation keeps the chests in front of the row and, because translating distinct cells by a single
   vector cannot collide them, *guarantees* no two cages share a chest. Ties and a cage sitting exactly
   on the centre resolve to +Z so the result is deterministic; tests pin all of it.
+- **A sand trade point is the same chest as a sacrifice point, and the marker is the only difference.**
+  `SAND_TRADE` markers ride the usual chain — `Segment.getSandTradeLocations()` →
+  `DungeonGenerator.selectSandTradeRelativeLocations` → `DungeonBlueprint` → `Dungeon` →
+  `DungeonManager.placeSandTradePoints` — and the chest, forced to `Chest.Type.SINGLE`, is again what
+  makes the point exist (the marker records an air cell). Two things set it apart from every other
+  selector here. **(a)** It is deliberately **not hub-wins**: a trade point pays more the deeper it
+  sits, so gathering only the HUB's markers whenever the hub carried one would throw away every trade
+  point in the dungeon and leave only depth-0 ones. **(b)** The payout is resolved at *click* time,
+  not at setup — `SandManager.attemptSandTrade` asks `GameManager.getTeamDepthAt` →
+  `DungeonManager.getDepthAt`, because `placedSegmentsInWorld` (the only thing that knows a location's
+  depth) lives on the manager and the `Dungeon` is built before the chests are placed.
+  `TRADE_COINS_PER_SAND` (25, five coin stacks at the hub) goes through
+  `ScoreManager.awardDepthScaledCoins`, the extracted coin-pickup path, so a trade and a pickup share
+  the 100%–120% multiplier *and* the batched `CoinPickupNotifier` message; the coins land **unbanked**,
+  which is what keeps the trade a gamble. `SandManager.onPlayerInteract` handles both chests because
+  they are the same block — it checks sacrifice first (a caged teammate is the meaning with a
+  deadline), and the `EquipmentSlot.HAND` guard still sits *after* `setCancelled` or the off-hand pass
+  opens the chest and a single click spends two sand. Nothing protects the chests specially:
+  `BreakableBlocks.BREAKABLE` whitelists `SAND` and `SPAWNER`, so a `CHEST` is already refused.
 - **Reviving costs the dead player's death count, paid a sand at a time.** The price and the
   part-payment live on `DeathCage`, which is already 1:1 with a player for the round, so they are torn
   down with the dungeon and reset per round with nothing having to clear them (`SoTPlayerData.timesDied`

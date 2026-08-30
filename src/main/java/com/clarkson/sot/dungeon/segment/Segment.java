@@ -31,6 +31,12 @@ public class Segment {
     private final List<BlockVector3> itemSpawnLocations;
     private final List<BlockVector3> coinSpawnLocations;
     private final List<BlockVector3> sandSacrificeLocations;
+    /**
+     * Sand trade points: chests out in the dungeon that buy depth-scaled coins for sand. Unlike
+     * {@link #sandSacrificeLocations} these are gathered from <em>every</em> segment rather than the
+     * HUB winning outright — being out in the branches is the whole point of them.
+     */
+    private final List<BlockVector3> sandTradeLocations;
     private final List<BlockVector3> mobSpawnerLocations;
 
     // --- Vault / Key Metadata ---
@@ -110,7 +116,8 @@ public class Segment {
             @NotNull  List<BlockVector3> sandTimerOffsets,
             @Nullable BlockVector3 timerOffset,
             @NotNull  List<BlockVector3> playerSpawnOffsets,
-            @NotNull  List<BlockVector3> branchSignifierOffsets
+            @NotNull  List<BlockVector3> branchSignifierOffsets,
+            @NotNull  List<BlockVector3> sandTradeLocations
     ) {
         Objects.requireNonNull(name, "name");
         Objects.requireNonNull(schematicFileName, "schematicFileName");
@@ -144,6 +151,7 @@ public class Segment {
         this.timerOffset            = timerOffset;
         this.playerSpawnOffsets     = new ArrayList<>(playerSpawnOffsets);
         this.branchSignifierOffsets = new ArrayList<>(branchSignifierOffsets);
+        this.sandTradeLocations     = new ArrayList<>(sandTradeLocations);
     }
 
     // --- Core getters ---
@@ -160,6 +168,7 @@ public class Segment {
     @NotNull public List<BlockVector3> getItemSpawnLocations()     { return Collections.unmodifiableList(itemSpawnLocations); }
     @NotNull public List<BlockVector3> getCoinSpawnLocations()     { return Collections.unmodifiableList(coinSpawnLocations); }
     @NotNull public List<BlockVector3> getSandSacrificeLocations() { return Collections.unmodifiableList(sandSacrificeLocations); }
+    @NotNull public List<BlockVector3> getSandTradeLocations()     { return Collections.unmodifiableList(sandTradeLocations); }
     @NotNull public List<BlockVector3> getMobSpawnerLocations()    { return Collections.unmodifiableList(mobSpawnerLocations); }
 
     // --- Vault / key getters ---

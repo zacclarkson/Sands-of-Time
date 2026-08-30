@@ -33,7 +33,7 @@ class DungeonGeneratorTimerTest {
                 null, List.of(), null,
                 List.of(), List.of(),
                 null,
-                null, List.of(), null, List.of(), timerOffset, List.of(), List.of());
+                null, List.of(), null, List.of(), timerOffset, List.of(), List.of(), List.of());
     }
 
     /** Places a template at a relative origin, the way the generator does during a blueprint run. */

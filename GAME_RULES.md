@@ -146,6 +146,20 @@ The hub has approximately **10 exits** leading into the dungeon. These exits fal
 - Sand already paid toward a revive is **spent**: if the timer runs out before the price is met, it
   is not refunded
 
+### Sand Trade
+
+- **Sand trade points** are chests out in the dungeon branches that buy coins for sand — the other
+  thing a sand can be spent on besides the timer and a revive
+- They are the **same chest block** as a sacrifice point and look identical in world. Which one a
+  chest is comes from the marker the builder placed: `SAND_SACRIFICE` in front of a cage frees a
+  teammate, `SAND_TRADE` out in a branch buys coins
+- Rate: **25 coins per sand** at the hub, scaled by the same **100%–120% depth multiplier** as coin
+  pickups — so trading deep is worth more than trading shallow, which is why these live in branches
+- Sand is spent **one at a time**, one per right-click. There is **no cap**: the sand your team can
+  find is the limit, and every sand traded is 10 seconds not bought
+- The coins land in your **unbanked** score, so they are lost on death and on a timer-out like any
+  other unbanked coins. A trade swaps one risk (a slow clock) for another (coins still to bank)
+
 ### Block Breaking
 
 - While a round is live, players may break **only** two kinds of block:
@@ -154,8 +168,8 @@ The hub has approximately **10 exits** leading into the dungeon. These exits fal
 - A third kind is planned but **not implemented yet**: blocks with money inside that you break for
   the coins
 - Everything else in the dungeon is protected: walls and floors, vault marker blocks, vault and
-  segment doors, gates and their levers, death cages, and the sand sacrifice points — a gate you
-  could mine through would make the lever pointless
+  segment doors, gates and their levers, death cages, and the sand sacrifice and trade points — a
+  gate you could mine through would make the lever pointless
 - The **visual sand timer column is protected too**, even though it is made of sand — mining your
   own timer for sand is not a strategy
 - Players cannot **place** blocks during a round, with one exception: placing carried sand on a
@@ -210,6 +224,7 @@ Each segment template can contain any combination of:
 - **Item spawns** — locations for generic loot items
 - **Mob spawners** — locations for hostile mob spawning
 - **Sand sacrifice points** — where sand can be sacrificed to free a caged teammate; rendered as a chest and paired positionally with the `DEATH_CAGE` markers
+- **Sand trade points** — where sand buys depth-scaled coins (`SAND_TRADE` markers); also rendered as a chest, deliberately indistinguishable from a sacrifice point in world. Unlike every other marker these are gathered from **every** segment rather than the HUB's winning outright, because a trade point is worth more the deeper it sits
 - **Vault markers** — activation block for a vault
 - **Key spawns** — where vault keys are placed
 - **Gates** — openings blocked until a lever is pulled
@@ -230,7 +245,7 @@ The HUB segment additionally defines these hub-only features (placed in the buil
 - Each connected segment increments depth by 1
 - Deeper segments contain slightly more valuable coins
 - Harder vaults (Red, Gold) are placed at greater depths
-- **Depth multiplier**: coins are worth between **100%** (at the hub) and **120%** (at maximum depth) of their base value — a gentle scaling that rewards exploration without making shallow coins worthless
+- **Depth multiplier**: coins are worth between **100%** (at the hub) and **120%** (at maximum depth) of their base value — a gentle scaling that rewards exploration without making shallow coins worthless. The same multiplier scales what a [sand trade point](#sand-trade) pays out
 
 ---
 
@@ -249,6 +264,8 @@ Coins spawn throughout the dungeon as visual displays on the ground. They come i
 - Players collect coins by walking within **1.5 blocks** of them
 - Collected coins are added to the player's **unbanked score**
 - Coin value is scaled by the segment's depth multiplier (100%–120% range)
+- Coins also come from [sand trade points](#sand-trade), on the same multiplier and into the same
+  unbanked score
 - Coins use gold nuggets as their base material with custom model data
 
 ### Unbanked vs. Banked

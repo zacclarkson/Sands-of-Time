@@ -26,14 +26,14 @@ class DungeonSafeExitTest {
         Area bounds = new Area(new Location(null, 0, 0, 0), new Location(null, 15, 7, 15));
         return new DungeonBlueprint(List.of(), new Vector(0, 0, 0), Map.of(), Map.of(),
                 List.of(), List.of(), List.of(), bounds, safeExitRelative, null, null, List.of(),
-                List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of());
+                List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of());
     }
 
     private Dungeon dungeon(Location safeExit) {
         Location origin = new Location(world, 100, 64, 100);
         return new Dungeon(UUID.randomUUID(), world, origin, blueprint(null),
                 origin.clone(), Map.of(), Map.of(), List.of(), List.of(), List.of(), List.of(),
-                safeExit, null, List.of(), List.of(), List.of(), List.of(), List.of());
+                safeExit, null, List.of(), List.of(), List.of(), List.of(), List.of(), List.of());
     }
 
     @Test

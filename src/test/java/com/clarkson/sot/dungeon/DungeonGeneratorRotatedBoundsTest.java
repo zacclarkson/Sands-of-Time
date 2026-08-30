@@ -62,7 +62,7 @@ class DungeonGeneratorRotatedBoundsTest {
                 null, List.of(), null,
                 List.of(), List.of(),
                 null,
-                null, List.of(), null, List.of(), null, List.of());
+                null, List.of(), null, List.of(), null, List.of(), List.of(), List.of());
     }
 
     /**
@@ -84,7 +84,7 @@ class DungeonGeneratorRotatedBoundsTest {
                 null, List.of(), null,
                 List.of(), List.of(),
                 null,
-                null, List.of(), null, List.of(), null, List.of());
+                null, List.of(), null, List.of(), null, List.of(), List.of(), List.of());
     }
 
     private List<Segment> nonSquareSet() {

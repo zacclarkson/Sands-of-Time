@@ -40,7 +40,7 @@ class DungeonGeneratorSacrificeTest {
                 null, List.of(), null,
                 sacrifices, List.of(),
                 null,
-                null, cages, null, List.of(), null, List.of(), List.of());
+                null, cages, null, List.of(), null, List.of(), List.of(), List.of());
     }
 
     private static PlacedSegment placed(Segment segment, int x, int y, int z) {

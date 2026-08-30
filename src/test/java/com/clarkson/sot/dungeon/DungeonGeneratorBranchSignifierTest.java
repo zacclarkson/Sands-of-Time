@@ -59,7 +59,7 @@ class DungeonGeneratorBranchSignifierTest {
                 null, List.of(), null,
                 List.of(), List.of(),
                 null,
-                null, List.of(), null, List.of(), null, List.of(), signifiers);
+                null, List.of(), null, List.of(), null, List.of(), signifiers, List.of());
     }
 
     private static PlacedSegment placed(Segment segment, int x, int y, int z) {
@@ -254,7 +254,7 @@ class DungeonGeneratorBranchSignifierTest {
                 null, List.of(), null,
                 List.of(), List.of(),
                 null,
-                null, List.of(), null, List.of(), null, List.of(), signifiers);
+                null, List.of(), null, List.of(), null, List.of(), signifiers, List.of());
 
         List<Segment> set = new ArrayList<>();
         set.add(hub);
@@ -279,6 +279,6 @@ class DungeonGeneratorBranchSignifierTest {
                 null, List.of(), null,
                 List.of(), List.of(),
                 null,
-                null, List.of(), null, List.of(), null, List.of(), List.of());
+                null, List.of(), null, List.of(), null, List.of(), List.of(), List.of());
     }
 }
