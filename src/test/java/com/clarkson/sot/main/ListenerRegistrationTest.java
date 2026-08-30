@@ -1,17 +1,22 @@
 package com.clarkson.sot.main;
 
 import com.clarkson.sot.dungeon.DoorManager;
+import com.clarkson.sot.dungeon.MobManager;
 import com.clarkson.sot.dungeon.VaultManager;
 import com.clarkson.sot.events.FloorItemManager;
 import com.clarkson.sot.scoring.ScoreManager;
 
 import org.bukkit.Server;
+import org.bukkit.event.HandlerList;
+import org.bukkit.plugin.Plugin;
 import org.bukkit.plugin.PluginManager;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockbukkit.mockbukkit.MockBukkit;
 
 import java.util.logging.Logger;
 
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.*;
 
 /**
@@ -59,6 +64,27 @@ class ListenerRegistrationTest {
     void floorItemManagerDoesNotRegisterItself() {
         new FloorItemManager(plugin, mock(GameManager.class), mock(ScoreManager.class));
         assertNothingWasRegistered();
+    }
+
+    /**
+     * {@link MobManager} builds its PDC {@code NamespacedKey}s in its constructor, and
+     * {@code JavaPlugin.getName()} is final — so a Mockito plugin mock hands NamespacedKey a null
+     * namespace and throws. This one case therefore needs a real MockBukkit plugin, and asserts the
+     * invariant directly against the handler lists instead of a mocked PluginManager.
+     */
+    @Test
+    void mobManagerDoesNotRegisterItself() {
+        MockBukkit.mock();
+        try {
+            Plugin mockPlugin = MockBukkit.createMockPlugin();
+
+            new MobManager(mockPlugin, mock(GameManager.class));
+
+            assertTrue(HandlerList.getRegisteredListeners(mockPlugin).isEmpty(),
+                    "SoT.onEnable() is the only place that may register this listener");
+        } finally {
+            MockBukkit.unmock();
+        }
     }
 
     private void assertNothingWasRegistered() {

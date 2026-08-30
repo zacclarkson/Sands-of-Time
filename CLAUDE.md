@@ -106,6 +106,25 @@ manually (see `integration-test/README.md`); it is **not** part of CI.
   every segment door was permanently locked. Placement is by chance rather than one-per-room, so a
   branch can come up with no key and stay shut — raise the constant if that bites; the doorway and
   key counts are both logged.
+- **Mobs are armed at `MOB_SPAWNER` markers, not spawned there.** The markers were placeable and
+  saved (`mobSpawnerLocations`) long before anything read them, so no mob ever appeared. They now
+  ride the same channel coins and items take — `Segment.getMobSpawnerLocations()` →
+  `DungeonGenerator.consolidateFeatureLocations` → `DungeonBlueprint` → `DungeonManager.armMobSpawners`
+  → `MobManager.armSpawner`. `DungeonManager` resolves the depth, because it is the only holder of
+  `placedSegmentsInWorld`. Nothing spawns at setup: `MobManager.onPlayerMove` fires a spawner when a
+  member of the **owning team** first comes within 10 blocks, and firing is **one-shot** — a cleared
+  room stays cleared, so a corpse run is a race against the timer rather than a rematch.
+  `mobsForDepth` is a pure static (like `spawnsRustyKey`) and widens both the pool and the group size
+  with depth: 1 mob below depth 3, 2 below 6, 3 beyond. Every spawned mob is PDC-tagged
+  (`sot_dungeon_mob` + team UUID), which is what separates a designed encounter from the mobs vanilla
+  spawns in any dark room — only tagged mobs are tracked, removed by `clearTeamState`, and counted
+  toward `SoTPlayerData.monstersKilled`. That counter is why `GameManager` now owns a
+  `SoTPlayerManager` (previously dead code, constructed nowhere); it is keyed by UUID rather than
+  `Player` identity, since a reconnect hands out a fresh instance. Mob hardening
+  (`setRemoveWhenFarAway`, `setShouldBurnInDay`) and the group-spread passability check are wrapped
+  in best-effort try/catch: an implementation that does not support them should downgrade the
+  encounter, not abort the spawn — and MockBukkit throws on all three. **The bundled hub declares no
+  `MOB_SPAWNER` markers**, so a stock server sees no mobs until a segment carrying them is saved.
 - **The safe exit is a segment marker.** The escape point comes from a `SAFE_EXIT` marker on a
   segment template; a marker on the HUB segment wins over one on any other segment. Templates saved
   before that marker existed carry none, so `GameManager.getTeamSafeExitLocation` falls back to the

@@ -148,6 +148,7 @@ public class SoT extends JavaPlugin {
         getServer().getPluginManager().registerEvents(gameManager.getSandManager(), this);
         getServer().getPluginManager().registerEvents(gameManager.getFloorItemManager(), this);
         getServer().getPluginManager().registerEvents(gameManager.getDoorManager(), this);
+        getServer().getPluginManager().registerEvents(gameManager.getMobManager(), this);
         getServer().getPluginManager().registerEvents(new DeathListener(gameManager), this);
         getServer().getPluginManager().registerEvents(new EscapeListener(gameManager), this);
         getServer().getPluginManager().registerEvents(new CountdownFreezeListener(gameManager), this);

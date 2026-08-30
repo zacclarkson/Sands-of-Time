@@ -236,6 +236,7 @@ public class DungeonGenerator {
         List<Vector> sandSpawnRelativeLocations = new ArrayList<>();
         List<Vector> coinSpawnRelativeLocations = new ArrayList<>();
         List<Vector> itemSpawnRelativeLocations = new ArrayList<>();
+        List<Vector> mobSpawnerRelativeLocations = new ArrayList<>();
         Vector hubRelativeLocation = null;
         // Reset placed trackers for this attempt
         keysPlacedInDFS.clear(); // Tracks Red, Green, Gold keys placed by DFS
@@ -274,7 +275,7 @@ public class DungeonGenerator {
         if (placedSegments.size() <= 1) { /* ... log warning ... */ return null; }
 
         // Consolidate features (this populates the maps based on placed segments)
-        consolidateFeatureLocations(placedSegments, vaultMarkerRelativeLocations, keySpawnRelativeLocations, sandSpawnRelativeLocations, coinSpawnRelativeLocations, itemSpawnRelativeLocations);
+        consolidateFeatureLocations(placedSegments, vaultMarkerRelativeLocations, keySpawnRelativeLocations, sandSpawnRelativeLocations, coinSpawnRelativeLocations, itemSpawnRelativeLocations, mobSpawnerRelativeLocations);
 
         Vector safeExitRelativeLocation = selectSafeExitRelativeLocation(placedSegments);
         if (safeExitRelativeLocation == null) {
@@ -343,7 +344,8 @@ public class DungeonGenerator {
                 placedSegments, hubRelativeLocation, vaultMarkerRelativeLocations, keySpawnRelativeLocations,
                 sandSpawnRelativeLocations, coinSpawnRelativeLocations, itemSpawnRelativeLocations,
                 blueprintBounds, safeExitRelativeLocation, timerBaseRelativeLocation,
-                playerSpawnRelativeLocations, sandTimerRelativeLocations, doorways, unusedOpenings
+                playerSpawnRelativeLocations, sandTimerRelativeLocations, doorways, unusedOpenings,
+                mobSpawnerRelativeLocations
         );
     }
 
@@ -905,6 +907,7 @@ public class DungeonGenerator {
      * @param sandSpawnRelativeLocations   (Out) List to populate with relative sand spawn locations (Vector).
      * @param coinSpawnRelativeLocations   (Out) List to populate with relative coin spawn locations (Vector).
      * @param itemSpawnRelativeLocations   (Out) List to populate with relative item spawn locations (Vector).
+     * @param mobSpawnerRelativeLocations  (Out) List to populate with relative mob spawner locations (Vector).
      */
     private void consolidateFeatureLocations(
             @NotNull List<PlacedSegment> placedSegments,
@@ -912,7 +915,8 @@ public class DungeonGenerator {
             @NotNull Map<VaultColor, Vector> keySpawnRelativeLocations,    // Map to populate
             @NotNull List<Vector> sandSpawnRelativeLocations,             // List to populate
             @NotNull List<Vector> coinSpawnRelativeLocations,             // List to populate
-            @NotNull List<Vector> itemSpawnRelativeLocations              // List to populate
+            @NotNull List<Vector> itemSpawnRelativeLocations,             // List to populate
+            @NotNull List<Vector> mobSpawnerRelativeLocations             // List to populate
             ) {
 
         // Clear output collections before populating
@@ -921,6 +925,7 @@ public class DungeonGenerator {
         sandSpawnRelativeLocations.clear();
         coinSpawnRelativeLocations.clear();
         itemSpawnRelativeLocations.clear();
+        mobSpawnerRelativeLocations.clear();
 
         plugin.getLogger().fine("Consolidating feature locations from " + placedSegments.size() + " placed segments...");
 
@@ -990,6 +995,16 @@ public class DungeonGenerator {
                 for (BlockVector3 offset : itemOffsets) {
                      if (offset != null) {
                          itemSpawnRelativeLocations.add(addRotated(segmentRelativeOrigin, placedSegment, offset));
+                     }
+                 }
+             }
+
+            // --- Consolidate Mob Spawners ---
+            List<BlockVector3> mobOffsets = template.getMobSpawnerLocations();
+             if (mobOffsets != null) {
+                for (BlockVector3 offset : mobOffsets) {
+                     if (offset != null) {
+                         mobSpawnerRelativeLocations.add(addRotated(segmentRelativeOrigin, placedSegment, offset));
                      }
                  }
              }

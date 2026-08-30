@@ -41,6 +41,10 @@ public class DungeonBlueprint {
     // no segment carries one.
     private final List<Vector> sandTimerRelativeLocations;
 
+    // Cells where hostile mobs are armed to spawn (MOB_SPAWNER markers). Empty when no segment
+    // carries one -- the bundled hub does not, so a stock server generates no mob encounters.
+    private final List<Vector> mobSpawnerRelativeLocations;
+
     // Connections between segments. Each becomes a rusty-key door; the unused openings are the
     // entry points the generator never attached a neighbour to, and get sealed as plain wall.
     private final List<Doorway> doorways;
@@ -66,7 +70,8 @@ public class DungeonBlueprint {
                             @NotNull List<Vector> playerSpawnRelativeLocations,
                             @NotNull List<Vector> sandTimerRelativeLocations,
                             @NotNull List<Doorway> doorways,
-                            @NotNull List<Doorway> unusedOpenings
+                            @NotNull List<Doorway> unusedOpenings,
+                            @NotNull List<Vector> mobSpawnerRelativeLocations
                            ) {
 
         // Validate inputs
@@ -100,6 +105,7 @@ public class DungeonBlueprint {
         this.sandTimerRelativeLocations = Collections.unmodifiableList(new ArrayList<>(sandTimerRelativeLocations));
         this.doorways = Collections.unmodifiableList(new ArrayList<>(doorways));
         this.unusedOpenings = Collections.unmodifiableList(new ArrayList<>(unusedOpenings));
+        this.mobSpawnerRelativeLocations = Collections.unmodifiableList(new ArrayList<>(mobSpawnerRelativeLocations));
     }
 
     // --- Getters ---
@@ -127,6 +133,9 @@ public class DungeonBlueprint {
 
     /** Relative per-player spawn points (empty if no segment defines a PLAYER_SPAWN marker). */
     @NotNull public List<Vector> getPlayerSpawnRelativeLocations() { return playerSpawnRelativeLocations; }
+
+    /** Relative mob spawner cells (empty if no segment defines a MOB_SPAWNER marker). */
+    @NotNull public List<Vector> getMobSpawnerRelativeLocations() { return mobSpawnerRelativeLocations; }
 
     /** Relative sand deposit cells (empty if no segment defines a TIMER_DEPOSIT marker). */
     @NotNull public List<Vector> getSandTimerRelativeLocations() { return sandTimerRelativeLocations; }

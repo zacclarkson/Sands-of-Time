@@ -65,6 +65,7 @@ public class DungeonManager {
     private final VaultManager vaultManager;
     private final FloorItemManager floorItemManager;
     private final DoorManager doorManager;
+    private final MobManager mobManager;
     private final Random random; // Added for probabilities
 
     // --- Instance State ---
@@ -107,6 +108,7 @@ public class DungeonManager {
         this.vaultManager = Objects.requireNonNull(gameManager.getVaultManager(), "VaultManager cannot be null via GameManager");
         this.floorItemManager = Objects.requireNonNull(gameManager.getFloorItemManager(), "FloorItemManager cannot be null via GameManager");
         this.doorManager = Objects.requireNonNull(gameManager.getDoorManager(), "DoorManager cannot be null via GameManager");
+        this.mobManager = Objects.requireNonNull(gameManager.getMobManager(), "MobManager cannot be null via GameManager");
         this.teamId = Objects.requireNonNull(teamId, "Team ID cannot be null");
         this.dungeonOrigin = Objects.requireNonNull(dungeonOrigin, "Dungeon origin cannot be null");
         this.world = Objects.requireNonNull(dungeonOrigin.getWorld(), "Dungeon origin must have a valid world");
@@ -136,6 +138,7 @@ public class DungeonManager {
         List<Location> absItemSpawns = calculateAbsoluteLocations(blueprintData.getItemSpawnRelativeLocations());
         List<Location> absPlayerSpawns = calculateAbsoluteLocations(blueprintData.getPlayerSpawnRelativeLocations());
         List<Location> absSandTimers = calculateAbsoluteLocations(blueprintData.getSandTimerRelativeLocations());
+        List<Location> absMobSpawners = calculateAbsoluteLocations(blueprintData.getMobSpawnerRelativeLocations());
         Location absHubLocation = dungeonOrigin.clone().add(blueprintData.getHubRelativeLocation());
         Vector safeExitRelative = blueprintData.getSafeExitRelativeLocation();
         Location absSafeExitLocation = (safeExitRelative != null) ? dungeonOrigin.clone().add(safeExitRelative) : null;
@@ -180,7 +183,7 @@ public class DungeonManager {
                 teamId, world, dungeonOrigin, blueprintData,
                 absHubLocation, absVaultMarkers, absKeySpawns,
                 absSandSpawns, absCoinSpawns, absItemSpawns,
-                deathCages, absSafeExitLocation, absPlayerSpawns, absSandTimers,
+                deathCages, absSafeExitLocation, absPlayerSpawns, absSandTimers, absMobSpawners,
                 absDoorways, absUnusedOpenings
             );
              plugin.getLogger().info("Created Dungeon data object for team " + teamId);
@@ -196,6 +199,7 @@ public class DungeonManager {
             vaultManager.initializeForInstance(this.dungeonData);
             doorManager.initializeDoorsForInstance(this.dungeonData); // Initialize doors
             populateFloorItems(); // Spawn floor items
+            armMobSpawners(); // Arm mob spawners (mobs appear when a player gets close)
         } catch (Exception e) {
              plugin.getLogger().log(Level.SEVERE, "Error during feature manager initialization for team " + teamId, e);
              return false;
@@ -458,6 +462,41 @@ public class DungeonManager {
         return roll < RUSTY_KEY_SPAWN_CHANCE;
     }
 
+    /**
+     * Hands every {@code MOB_SPAWNER} marker in this instance to the {@link MobManager}.
+     *
+     * <p>Nothing is spawned here — the manager fires a spawner when a member of the team first
+     * comes near it. Depth is resolved the same way {@link #populateFloorItems()} resolves it,
+     * because this class is the only place holding {@link #placedSegmentsInWorld}.
+     */
+    private void armMobSpawners() {
+        if (dungeonData == null) {
+            plugin.getLogger().severe("Cannot arm mob spawners: Dungeon data object is null for team " + teamId);
+            return;
+        }
+
+        List<Location> spawnerLocs = dungeonData.getMobSpawnerLocations();
+        if (spawnerLocs.isEmpty()) {
+            plugin.getLogger().fine("No mob spawner locations found for team " + teamId);
+            return;
+        }
+
+        int armed = 0;
+        for (Location absLoc : spawnerLocs) {
+            if (absLoc == null) continue;
+            try {
+                int depth = dungeonData.getDepthAtLocation(absLoc, this.placedSegmentsInWorld);
+                mobManager.armSpawner(absLoc, teamId, depth);
+                armed++;
+            } catch (Exception e) {
+                plugin.getLogger().log(Level.WARNING, "Error arming mob spawner at " + absLoc
+                        + " for team " + teamId, e);
+            }
+        }
+        plugin.getLogger().fine("Armed " + armed + " of " + spawnerLocs.size()
+                + " mob spawners for team " + teamId + ".");
+    }
+
     // --- Getters ---
     @NotNull public Location getDungeonOrigin() { return dungeonOrigin.clone(); } // Clone for safety
     @NotNull public World getWorld() { return world; }
@@ -609,6 +648,7 @@ public class DungeonManager {
           if (vaultManager != null) vaultManager.clearTeamState(teamId);
           if (doorManager != null) doorManager.clearTeamState(teamId);
           if (floorItemManager != null) floorItemManager.clearTeamState(teamId);
+          if (mobManager != null) mobManager.clearTeamState(teamId);
           dungeonData = null; // Clear local reference
           plugin.getLogger().fine("Cleared internal manager states for team " + teamId);
      }
