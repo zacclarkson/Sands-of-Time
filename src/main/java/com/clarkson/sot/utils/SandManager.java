@@ -3,6 +3,7 @@ package com.clarkson.sot.utils;
 import com.clarkson.sot.dungeon.DeathCage;
 import com.clarkson.sot.main.GameManager;
 import com.clarkson.sot.main.GameState;
+import com.clarkson.sot.timer.TeamTimer;
 
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
@@ -13,25 +14,38 @@ import org.bukkit.Material;
 import org.bukkit.NamespacedKey;
 import org.bukkit.Sound;
 import org.bukkit.SoundCategory;
+import org.bukkit.World;
 import org.bukkit.block.Block;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.block.BlockBreakEvent;
+import org.bukkit.event.block.BlockPlaceEvent;
+import org.bukkit.event.entity.PlayerDeathEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.event.block.Action;
+import org.bukkit.inventory.ItemStack;
+import org.bukkit.inventory.PlayerInventory;
 import org.bukkit.plugin.Plugin;
 
 import java.util.*;
 
 /**
- * Handles sand collection (breaking sand blocks), adding time to the team timer,
- * and sand sacrifice to revive dead teammates.
+ * Handles sand collection, spending sand at a timer deposit point, and sand sacrifice to revive
+ * dead teammates.
  *
- * Sand is placed as normal SAND blocks in the dungeon. Players break them with a shovel
- * to collect sand. Each sand collected adds 10 seconds to the team timer.
- * Sacrificing 1 sand at a sacrifice point revives a dead teammate.
+ * <p>Sand is placed as normal SAND blocks in the dungeon. Players break them with a shovel to pick
+ * the sand up as a real {@link Material#SAND} item, then carry it back to a deposit point in the
+ * hub and place it there: the placement is consumed and the team timer gains
+ * {@link #SECONDS_PER_SAND} seconds. Breaking sand deliberately gives <em>no</em> time on its own —
+ * the trip back to the timer is the risk the game is built around.
+ *
+ * <p>Carried sand lives in the player's inventory and nowhere else; there is no parallel counter to
+ * drift out of sync with it. Sacrificing 1 sand at a sacrifice point revives a dead teammate.
+ *
+ * <p>Dying drops undeposited sand on the floor where you fell, like any other item, so the corpse run
+ * can win it back — see {@link #dropCarriedSandOnDeath(PlayerDeathEvent)}.
  */
 public class SandManager implements Listener {
 
@@ -44,9 +58,6 @@ public class SandManager implements Listener {
     // PDC key to identify sand sacrifice point blocks
     private static NamespacedKey SACRIFICE_POINT_KEY;
 
-    // Track how much sand each player is carrying
-    private final Map<UUID, Integer> playerSandCounts = new HashMap<>();
-
     public SandManager(GameManager gameManager, Plugin plugin) {
         this.gameManager = Objects.requireNonNull(gameManager);
         this.plugin = Objects.requireNonNull(plugin);
@@ -54,27 +65,18 @@ public class SandManager implements Listener {
     }
 
     /**
-     * Called when a player breaks a sand block in the dungeon.
-     * Adds the sand to their personal sand count and time to the team timer.
+     * Gives a player sand they just collected. Anything that does not fit in the inventory is dropped
+     * at their feet rather than silently destroyed, matching how keys and floor loot are handed out.
      */
     public void collectSandItem(Player player, int amount) {
-        UUID playerUUID = player.getUniqueId();
-        UUID teamId = gameManager.getTeamManager().getPlayerTeamId(player);
-        if (teamId == null) return;
+        if (amount <= 0) return;
 
-        SoTTeam team = gameManager.getActiveTeams().get(teamId);
-        if (team == null) return;
+        Map<Integer, ItemStack> leftover = player.getInventory().addItem(new ItemStack(Material.SAND, amount));
+        leftover.values().forEach(item -> player.getWorld().dropItemNaturally(player.getLocation(), item));
 
-        // Add sand to player's count
-        playerSandCounts.merge(playerUUID, amount, Integer::sum);
-
-        // Add time to team timer
-        int secondsToAdd = amount * SECONDS_PER_SAND;
-        team.addSeconds(secondsToAdd);
-
-        player.sendActionBar(Component.text("+" + secondsToAdd + "s to timer!", NamedTextColor.YELLOW));
+        player.sendActionBar(Component.text("+" + amount + " sand — take it to the timer", NamedTextColor.YELLOW));
         player.playSound(player.getLocation(), Sound.BLOCK_SAND_BREAK, SoundCategory.BLOCKS, 1.0f, 1.2f);
-        plugin.getLogger().fine(player.getName() + " collected " + amount + " sand (+" + secondsToAdd + "s) for team " + team.getTeamName());
+        plugin.getLogger().fine(player.getName() + " collected " + amount + " sand");
     }
 
     /**
@@ -108,15 +110,14 @@ public class SandManager implements Listener {
             return false;
         }
 
-        // Check if reviver has enough sand
-        int sand = getPlayerSandCount(reviver.getUniqueId());
-        if (sand < REVIVE_COST) {
+        // Check if reviver is carrying enough sand
+        if (getPlayerSandCount(reviver) < REVIVE_COST) {
             reviver.sendMessage(Component.text("You need at least " + REVIVE_COST + " sand to revive a teammate!", NamedTextColor.RED));
             return false;
         }
 
         // Consume sand
-        removeSand(reviver.getUniqueId(), REVIVE_COST);
+        removeSand(reviver, REVIVE_COST);
 
         // Revive the dead player
         gameManager.getPlayerStateManager().updateStatus(deadPlayer, PlayerStatus.ALIVE_IN_DUNGEON);
@@ -141,50 +142,176 @@ public class SandManager implements Listener {
     }
 
     /**
-     * Directly use sand to add time to the timer (if needed outside block-break flow).
+     * Spends carried sand to add time to the player's team timer. This is the single path from sand to
+     * seconds — the deposit-point handler below routes through it.
+     *
+     * <p>Refused, with the sand left untouched, when the timer is already at
+     * {@link TeamTimer#DEFAULT_MAX_TIMER_SECONDS}: {@code addSeconds} clamps, so accepting the deposit
+     * there would destroy the sand and give nothing back.
+     *
+     * @return true if the sand was spent and time was added.
      */
-    public void useSandForTimer(Player player, int amount) {
-        UUID playerUUID = player.getUniqueId();
-        int currentSand = getPlayerSandCount(playerUUID);
-        if (currentSand < amount) {
+    public boolean useSandForTimer(Player player, int amount) {
+        if (amount <= 0) return false;
+
+        if (getPlayerSandCount(player) < amount) {
             player.sendMessage(Component.text("Not enough sand!", NamedTextColor.RED));
-            return;
+            return false;
         }
-        removeSand(playerUUID, amount);
 
         UUID teamId = gameManager.getTeamManager().getPlayerTeamId(player);
-        if (teamId == null) return;
+        if (teamId == null) return false;
         SoTTeam team = gameManager.getActiveTeams().get(teamId);
-        if (team == null) return;
+        if (team == null) return false;
+
+        if (team.getRemainingSeconds() >= TeamTimer.DEFAULT_MAX_TIMER_SECONDS) {
+            player.sendActionBar(Component.text("The timer is already full!", NamedTextColor.RED));
+            return false;
+        }
+
+        removeSand(player, amount);
 
         int secondsToAdd = amount * SECONDS_PER_SAND;
         team.addSeconds(secondsToAdd);
         player.sendActionBar(Component.text("+" + secondsToAdd + "s to timer!", NamedTextColor.YELLOW));
+        player.playSound(player.getLocation(), Sound.BLOCK_SAND_PLACE, SoundCategory.BLOCKS, 1.0f, 1.4f);
+        plugin.getLogger().fine(player.getName() + " deposited " + amount + " sand (+" + secondsToAdd
+                + "s) for team " + team.getTeamName());
+        return true;
     }
 
     // --- Sand tracking helpers ---
 
-    public int getPlayerSandCount(UUID playerUUID) {
-        return playerSandCounts.getOrDefault(playerUUID, 0);
+    /**
+     * How much sand the player is carrying. The inventory is the only store of carried sand.
+     *
+     * <p>Walks the storage slots and the off hand explicitly rather than going through
+     * {@code Inventory.all}/{@code removeItem}: which slots those cover differs between CraftBukkit
+     * and MockBukkit, and sand held only in the off hand must still count.
+     */
+    public int getPlayerSandCount(Player player) {
+        PlayerInventory inventory = player.getInventory();
+        int total = 0;
+        for (ItemStack item : inventory.getStorageContents()) {
+            if (isSand(item)) total += item.getAmount();
+        }
+        if (isSand(inventory.getItemInOffHand())) total += inventory.getItemInOffHand().getAmount();
+        return total;
     }
 
-    private void removeSand(UUID playerUUID, int amount) {
-        int current = getPlayerSandCount(playerUUID);
-        playerSandCounts.put(playerUUID, Math.max(0, current - amount));
+    /**
+     * Removes up to {@code amount} sand from the player, off hand last so the stack they are holding
+     * is spent first.
+     *
+     * @return how many were actually removed.
+     */
+    private int removeSand(Player player, int amount) {
+        if (amount <= 0) return 0;
+        PlayerInventory inventory = player.getInventory();
+        int remaining = amount;
+
+        ItemStack[] storage = inventory.getStorageContents();
+        for (int i = 0; i < storage.length && remaining > 0; i++) {
+            ItemStack item = storage[i];
+            if (!isSand(item)) continue;
+            int taken = Math.min(remaining, item.getAmount());
+            remaining -= taken;
+            if (item.getAmount() == taken) {
+                storage[i] = null;
+            } else {
+                item.setAmount(item.getAmount() - taken);
+            }
+        }
+        inventory.setStorageContents(storage);
+
+        ItemStack offHand = inventory.getItemInOffHand();
+        if (remaining > 0 && isSand(offHand)) {
+            int taken = Math.min(remaining, offHand.getAmount());
+            remaining -= taken;
+            if (offHand.getAmount() == taken) {
+                inventory.setItemInOffHand(null);
+            } else {
+                offHand.setAmount(offHand.getAmount() - taken);
+                inventory.setItemInOffHand(offHand);
+            }
+        }
+
+        player.updateInventory();
+        return amount - remaining;
     }
 
-    public void clearPlayerSand(UUID playerUUID) {
-        playerSandCounts.remove(playerUUID);
+    private static boolean isSand(ItemStack item) {
+        return item != null && item.getType() == Material.SAND && item.getAmount() > 0;
     }
 
-    public void clearAllSandCounts() {
-        playerSandCounts.clear();
+    /**
+     * Puts the sand a player was carrying on the floor at the spot where they died, so a teammate on
+     * the corpse run can recover it.
+     *
+     * <p>Nearly always there is nothing to do: a death that drops the inventory already scatters the
+     * sand with everything else, and that path is deliberately left alone so the pile lands, merges
+     * and despawns by the same vanilla rules as the rest of the corpse. This only steps in when the
+     * death is <em>keeping</em> the inventory — the {@code keepInventory} gamerule, or another plugin
+     * — because sand is the round's currency for both timer seconds and revives, so losing it on
+     * death is a rule of the game rather than a server setting.
+     *
+     * @return how much sand this dropped; 0 when the sand is already going to drop on its own.
+     */
+    public int dropCarriedSandOnDeath(PlayerDeathEvent event) {
+        if (!event.getKeepInventory()) return 0;
+
+        Player player = event.getEntity();
+        int carried = getPlayerSandCount(player);
+        if (carried <= 0) return 0;
+
+        int dropped = removeSand(player, carried);
+        dropSandAt(player.getLocation(), dropped);
+        plugin.getLogger().fine("Dropped " + dropped + " sand carried by " + player.getName()
+                + " at their death location (the death kept their inventory)");
+        return dropped;
+    }
+
+    /**
+     * Drops {@code amount} sand as ground items, split across as many stacks as the material's own
+     * limit needs — a single over-sized ItemStack is not something the world will accept.
+     */
+    private void dropSandAt(Location location, int amount) {
+        World world = location.getWorld();
+        if (world == null || amount <= 0) return;
+
+        int maxStack = Math.max(1, Material.SAND.getMaxStackSize());
+        for (int remaining = amount; remaining > 0; ) {
+            int stack = Math.min(remaining, maxStack);
+            world.dropItemNaturally(location, new ItemStack(Material.SAND, stack));
+            remaining -= stack;
+        }
+    }
+
+    /**
+     * Strips every sand item from the given players, skipping any who are offline.
+     *
+     * <p>Called at the end of a round. {@link GameManager#handlePlayerLeave} only fires for players who
+     * escape, so trapped, dead and still-exploring players would otherwise carry sand into the next
+     * round and deposit it for free time — which is exactly what the old in-memory counter reset
+     * prevented. Only sand is removed, not the whole inventory: {@code /sot end} can be run mid-round
+     * on players who never consented to losing their gear.
+     */
+    public void clearSandItems(Collection<UUID> playerUUIDs) {
+        if (playerUUIDs == null) return;
+        for (UUID playerUUID : playerUUIDs) {
+            Player player = Bukkit.getPlayer(playerUUID);
+            if (player == null || !player.isOnline()) continue;
+            int carried = getPlayerSandCount(player);
+            if (carried > 0) removeSand(player, carried);
+        }
     }
 
     // --- Event Listeners ---
 
     /**
-     * Detects when a player breaks a SAND block in a dungeon and collects it.
+     * Detects when a player breaks a SAND block in a dungeon and hands them the sand as an item.
+     * Deliberately adds no time: sand only becomes seconds at a deposit point (see
+     * {@link #onBlockPlace(BlockPlaceEvent)}).
      */
     @EventHandler(priority = EventPriority.NORMAL, ignoreCancelled = true)
     public void onBlockBreak(BlockBreakEvent event) {
@@ -197,9 +324,51 @@ public class SandManager implements Listener {
         PlayerStatus status = gameManager.getPlayerStateManager().getStatus(player);
         if (status != PlayerStatus.ALIVE_IN_DUNGEON) return;
 
-        // Cancel the normal drop and collect the sand
+        UUID teamId = gameManager.getTeamManager().getPlayerTeamId(player);
+        if (teamId == null) return;
+        SoTTeam team = gameManager.getActiveTeams().get(teamId);
+        if (team == null) return;
+
+        // The visual timer column is made of sand and stands in the hub, so without this it is just a
+        // sand mine: a mined block is not restored until the next visual sync, which the deposit of
+        // that very sand triggers — putting the block back and netting the team free time forever.
+        if (team.isVisualTimerBlock(block.getLocation())) {
+            event.setCancelled(true);
+            player.sendActionBar(Component.text("You can't mine your own timer!", NamedTextColor.RED));
+            return;
+        }
+
+        // Cancel the normal drop; collectSandItem hands the sand over instead.
         event.setDropItems(false);
         collectSandItem(player, 1);
+    }
+
+    /**
+     * Detects a player placing sand on one of their team's timer deposit points and converts it into
+     * time. The deposit cell always ends up empty, so the event is cancelled rather than placed and
+     * cleared a tick later — sand has gravity, and a block that turns into a falling entity before the
+     * cleanup runs would land somewhere as a duplicate.
+     */
+    @EventHandler(priority = EventPriority.NORMAL, ignoreCancelled = true)
+    public void onBlockPlace(BlockPlaceEvent event) {
+        if (gameManager.getCurrentState() != GameState.RUNNING) return;
+
+        Block placed = event.getBlockPlaced();
+        if (placed.getType() != Material.SAND) return;
+
+        Player player = event.getPlayer();
+        PlayerStatus status = gameManager.getPlayerStateManager().getStatus(player);
+        if (status != PlayerStatus.ALIVE_IN_DUNGEON) return;
+
+        UUID teamId = gameManager.getTeamManager().getPlayerTeamId(player);
+        if (teamId == null) return;
+
+        if (!gameManager.isTeamSandTimerDepositAt(teamId, placed.getLocation())) return;
+
+        // Cancelling puts the sand back in the inventory, which is where useSandForTimer spends it
+        // from — so a refused deposit (timer already full) costs the player nothing.
+        event.setCancelled(true);
+        useSandForTimer(player, 1);
     }
 
     /**

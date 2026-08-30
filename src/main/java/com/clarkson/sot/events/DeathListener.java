@@ -33,10 +33,17 @@ public class DeathListener implements Listener {
         // Suppress default death message — we'll send our own
         event.deathMessage(null);
 
-        // Keep inventory is OFF — items drop naturally at death location.
-        // The unbanked coin penalty is handled by GameManager.
-        // Keep XP dropping disabled to avoid clutter
+        // Items drop at the death location for the corpse run to recover; the unbanked coin penalty
+        // is handled by GameManager. XP dropping stays off to avoid clutter.
         event.setDroppedExp(0);
+
+        // Carried sand drops whether or not this death keeps the inventory: it is the round's
+        // currency for timer seconds and revives, so losing it is a rule of the game, not a server
+        // setting. Runs before handlePlayerDeath, which queues the teleport to the death cage.
+        // Priority is HIGH rather than MONITOR because this mutates state, so a plugin that turns
+        // keep-inventory on at HIGHEST would still slip past — acceptable, and the vanilla default
+        // needs nothing from us anyway.
+        gameManager.getSandManager().dropCarriedSandOnDeath(event);
 
         gameManager.handlePlayerDeath(player);
     }

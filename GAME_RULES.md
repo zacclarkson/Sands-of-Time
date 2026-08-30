@@ -84,6 +84,7 @@ The hub has approximately **10 exits** leading into the dungeon. These exits fal
 - **Sand timer** — a physical column of sand blocks that drains as time passes (each block = 10 seconds visually)
 - **Sphinx** — the banking NPC/location where players deposit coins
 - **Death cage** — where dead players respawn, awaiting rescue
+- **Timer deposit points** — the cells beside the sand column where carried sand is spent on the timer
 - **Sand sacrifice points** — one per player on the team, used to free teammates from the death cage
 - **Safe exit** — the block players interact with to leave the dungeon permanently
 - **Blue key spawn** — the blue vault key is always available in the hub (every hub must have a blue key spawn location)
@@ -112,10 +113,25 @@ The hub has approximately **10 exits** leading into the dungeon. These exits fal
 
 - Sand spawns throughout the dungeon as **normal sand blocks** placed in the world
 - Players must **break the sand with a shovel** to pick it up (like mining normal sand)
-- Each sand block collected adds **10 seconds** to the team's timer
+- Breaking sand puts a **sand item in your inventory**. It adds **no time on its own** — carrying it
+  back is the whole point
 - Sand is also used to **free teammates** from the death cage (see [Death & Corpse Run](#death--corpse-run))
 - Sand spawn locations have a **40% chance** of actually spawning sand per location
 - Finding and returning sand to the timer is essential for survival
+
+### Depositing Sand
+
+- The hub has **timer deposit points** beside the sand column — the cells marked by the builder's
+  `TIMER_DEPOSIT` tool
+- **Place a sand block on a deposit point** to spend it: the block never stands, and the team timer
+  gains **10 seconds**
+- A deposit is **refused** while the timer is at its 150-second cap, and the sand stays in your
+  inventory rather than being spent for nothing
+- You **cannot mine your own team's timer column** for sand
+- Escaping the dungeon **wipes your inventory**, so undeposited sand is lost; any sand still carried
+  when the round ends is cleared too
+- **Dying drops your sand** on the floor where you fell, like any other item — a teammate, or you
+  after being revived, can pick it back up (see [Death & Corpse Run](#death--corpse-run))
 
 ### Sand Sacrifice
 
@@ -207,7 +223,7 @@ Coins spawn throughout the dungeon as visual displays on the ground. They come i
 
 ### Penalties
 
-- **Death**: Drop **all** items and unbanked coins at death location (no percentage penalty — everything can be recovered if you get back in time)
+- **Death**: Drop **all** items, undeposited sand included, at the death location (no percentage penalty — everything dropped can be recovered if you get back in time). Unbanked coins are cleared rather than dropped
 - **Trapped (timer expires)**: Lose **ALL** unbanked coins — total wipeout
 
 ### Live Scoreboard
@@ -365,19 +381,26 @@ and it will naturally prefer a puzzle room once those exist.
 
 When a player dies while the timer is still active:
 
-1. **All items and unbanked coins drop** at the death location as a corpse/loot pile
-2. There is **no percentage penalty** — everything is dropped, nothing is destroyed
+1. **All items drop** at the death location as a corpse/loot pile — **undeposited sand included**.
+   Sand is the round's currency for both timer seconds and revives, so carrying it through the
+   dungeon is a real risk; this holds even on a server running `keepInventory`, because it is a rule
+   of the game rather than a server setting
+2. **Unbanked coins are cleared outright** — they are a score, not an item, so there is nothing on
+   the floor to run back for. Banked coins are safe. (The rest of the pile has no percentage
+   penalty: it is all recoverable if you get back in time)
 3. Player **respawns in the death cage** at the hub
 4. Player is now in the **DEAD_AWAITING_REVIVE** state — they cannot leave the cage on their own
 5. A **teammate must sacrifice 1 sand** at a sacrifice point to free the dead player from the cage
-6. Once freed, the player is back at the hub and can **run back to their death location** to recover all dropped items and coins
-7. If no teammate comes to revive, the player stays trapped in the cage until the timer expires (at which point all unbanked coins are lost)
+6. Once freed, the player is back at the hub and can **run back to their death location** to recover all dropped items — sand recovered this way deposits for time exactly as if it had never been dropped
+7. If no teammate comes to revive, the player stays trapped in the cage until the timer expires, and whatever they dropped is never recovered
 
 ### Death Risk Factors
 
 - Dying deep in the dungeon is extremely punishing — the corpse run back eats valuable timer seconds
 - The sand cost to revive means the team loses 10 seconds of timer per death
-- Unrecovered coins at the death location are lost if the timer expires
+- Unbanked coins are gone the moment you die — only the items and sand on the floor can be won back
+- Sand left lying at the death location is time the team never gets — and it despawns like any other
+  dropped item, so a corpse run that takes too long loses it outright
 - While your items sit at the death location, other hazards (mobs, time pressure) make recovery dangerous
 
 ---
@@ -477,7 +500,7 @@ Puzzle rooms are accessible from the hub exits (not on the vault branches). They
 | Constant | Value |
 |----------|-------|
 | Banking tax | 20% |
-| Death penalty | None (drop all items/coins, no percentage destroyed) |
+| Death penalty | Drop all items (sand included); unbanked coins cleared |
 | Timer expiry penalty | 100% (all unbanked) |
 | Live scoreboard refresh interval | 20 ticks (1 second) |
 | Depth multiplier range | 100% (hub) to 120% (max depth) |

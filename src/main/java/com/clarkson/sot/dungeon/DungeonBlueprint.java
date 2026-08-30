@@ -37,6 +37,10 @@ public class DungeonBlueprint {
     @Nullable private final Vector timerBaseRelativeLocation;
     private final List<Vector> playerSpawnRelativeLocations;
 
+    // Cells where players deposit carried sand onto the timer (TIMER_DEPOSIT markers). Empty when
+    // no segment carries one.
+    private final List<Vector> sandTimerRelativeLocations;
+
     // Connections between segments. Each becomes a rusty-key door; the unused openings are the
     // entry points the generator never attached a neighbour to, and get sealed as plain wall.
     private final List<Doorway> doorways;
@@ -60,6 +64,7 @@ public class DungeonBlueprint {
                             @Nullable Vector safeExitRelativeLocation,
                             @Nullable Vector timerBaseRelativeLocation,
                             @NotNull List<Vector> playerSpawnRelativeLocations,
+                            @NotNull List<Vector> sandTimerRelativeLocations,
                             @NotNull List<Doorway> doorways,
                             @NotNull List<Doorway> unusedOpenings
                            ) {
@@ -92,6 +97,7 @@ public class DungeonBlueprint {
         this.safeExitRelativeLocation = (safeExitRelativeLocation != null) ? safeExitRelativeLocation.clone() : null;
         this.timerBaseRelativeLocation = (timerBaseRelativeLocation != null) ? timerBaseRelativeLocation.clone() : null;
         this.playerSpawnRelativeLocations = Collections.unmodifiableList(new ArrayList<>(playerSpawnRelativeLocations));
+        this.sandTimerRelativeLocations = Collections.unmodifiableList(new ArrayList<>(sandTimerRelativeLocations));
         this.doorways = Collections.unmodifiableList(new ArrayList<>(doorways));
         this.unusedOpenings = Collections.unmodifiableList(new ArrayList<>(unusedOpenings));
     }
@@ -121,6 +127,9 @@ public class DungeonBlueprint {
 
     /** Relative per-player spawn points (empty if no segment defines a PLAYER_SPAWN marker). */
     @NotNull public List<Vector> getPlayerSpawnRelativeLocations() { return playerSpawnRelativeLocations; }
+
+    /** Relative sand deposit cells (empty if no segment defines a TIMER_DEPOSIT marker). */
+    @NotNull public List<Vector> getSandTimerRelativeLocations() { return sandTimerRelativeLocations; }
 
     /** Relative base of the visual sand-timer column, or null if no segment defines a TIMER marker. */
     @Nullable public Vector getTimerBaseRelativeLocation() {

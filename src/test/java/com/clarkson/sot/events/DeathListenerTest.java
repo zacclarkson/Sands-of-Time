@@ -4,6 +4,7 @@ import com.clarkson.sot.main.GameManager;
 import com.clarkson.sot.main.GameState;
 import com.clarkson.sot.utils.PlayerStateManager;
 import com.clarkson.sot.utils.PlayerStatus;
+import com.clarkson.sot.utils.SandManager;
 
 import net.kyori.adventure.text.Component;
 import org.bukkit.damage.DamageSource;
@@ -16,6 +17,7 @@ import org.junit.jupiter.api.Test;
 import org.mockbukkit.mockbukkit.MockBukkit;
 import org.mockbukkit.mockbukkit.ServerMock;
 import org.mockbukkit.mockbukkit.entity.PlayerMock;
+import org.mockito.InOrder;
 
 import java.util.ArrayList;
 
@@ -27,8 +29,10 @@ import static org.mockito.Mockito.*;
  * MockBukkit server, {@link DeathListener} is registered, and a real {@link PlayerDeathEvent} is
  * dispatched through the plugin manager so the listener runs exactly as it would in game.
  *
- * <p>The listener's collaborators ({@link GameManager}/{@link PlayerStateManager}) are Mockito mocks
- * since the listener only reads game state and delegates to {@code handlePlayerDeath}.
+ * <p>The listener's collaborators ({@link GameManager}/{@link PlayerStateManager}/{@link SandManager})
+ * are Mockito mocks since the listener only reads game state and delegates. What
+ * {@code dropCarriedSandOnDeath} actually does with the sand is covered by
+ * {@link com.clarkson.sot.utils.SandManagerTest}; here it is only the wiring under test.
  */
 class DeathListenerTest {
 
@@ -36,6 +40,7 @@ class DeathListenerTest {
     private Plugin plugin;
     private GameManager gameManager;
     private PlayerStateManager stateManager;
+    private SandManager sandManager;
 
     @BeforeEach
     void setUp() {
@@ -43,7 +48,9 @@ class DeathListenerTest {
         plugin = MockBukkit.createMockPlugin();
         gameManager = mock(GameManager.class);
         stateManager = mock(PlayerStateManager.class);
+        sandManager = mock(SandManager.class);
         when(gameManager.getPlayerStateManager()).thenReturn(stateManager);
+        when(gameManager.getSandManager()).thenReturn(sandManager);
         server.getPluginManager().registerEvents(new DeathListener(gameManager), plugin);
     }
 
@@ -72,7 +79,11 @@ class DeathListenerTest {
         PlayerDeathEvent event = deathEventFor(player);
         server.getPluginManager().callEvent(event);
 
-        verify(gameManager).handlePlayerDeath(player);
+        // Ordered: handlePlayerDeath queues the teleport to the death cage, so the sand has to be
+        // taken while the player is still standing where they fell.
+        InOrder order = inOrder(sandManager, gameManager);
+        order.verify(sandManager).dropCarriedSandOnDeath(event);
+        order.verify(gameManager).handlePlayerDeath(player);
         assertNull(event.deathMessage(), "default death message should be suppressed");
         assertEquals(0, event.getDroppedExp(), "dropped XP should be zeroed");
     }
@@ -86,6 +97,7 @@ class DeathListenerTest {
         server.getPluginManager().callEvent(event);
 
         verify(gameManager, never()).handlePlayerDeath(any());
+        verify(sandManager, never()).dropCarriedSandOnDeath(any());
         assertEquals(10, event.getDroppedExp(), "event should be left untouched when not running");
     }
 
@@ -99,5 +111,6 @@ class DeathListenerTest {
         server.getPluginManager().callEvent(event);
 
         verify(gameManager, never()).handlePlayerDeath(any());
+        verify(sandManager, never()).dropCarriedSandOnDeath(any());
     }
 }

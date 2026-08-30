@@ -34,6 +34,7 @@ public class Dungeon {
     private final List<DeathCage> deathCages;
     private final Location safeExitLocation; // Null when no segment template defined one
     private final List<Location> playerSpawnLocations; // Absolute per-player start points (may be empty)
+    private final List<Location> sandTimerLocations; // Absolute sand deposit cells (may be empty)
 
     // Absolute openings between segments. Doorways get a rusty-key door; unused openings are the
     // entry points generation never attached a neighbour to and are sealed as plain wall.
@@ -56,7 +57,8 @@ public class Dungeon {
      * @param itemSpawnLocations List of absolute general item spawn locations.
      * @param deathCages List of death cage + sacrifice point pairs (max 4).
      * @param safeExitLocation The absolute location players interact with to escape, or null if undefined.
-     * @param playerSpawnLocations Absolute per-player start points.
+     * @param playerSpawnLocations List of absolute per-player spawn points (may be empty).
+     * @param sandTimerLocations List of absolute cells where carried sand is deposited onto the timer.
      * @param doorways Absolute doorways between connected segments (one rusty-key door each).
      * @param unusedOpenings Absolute entry points with no neighbour attached, to be sealed.
      */
@@ -70,6 +72,7 @@ public class Dungeon {
                    @NotNull List<DeathCage> deathCages,
                    @Nullable Location safeExitLocation,
                    @NotNull List<Location> playerSpawnLocations,
+                   @NotNull List<Location> sandTimerLocations,
                    @NotNull List<EntryPoint> doorways,
                    @NotNull List<EntryPoint> unusedOpenings) {
 
@@ -89,6 +92,7 @@ public class Dungeon {
         this.itemSpawnLocations = Collections.unmodifiableList(new ArrayList<>(itemSpawnLocations));
         this.deathCages = Collections.unmodifiableList(new ArrayList<>(deathCages));
         this.playerSpawnLocations = Collections.unmodifiableList(new ArrayList<>(playerSpawnLocations));
+        this.sandTimerLocations = Collections.unmodifiableList(new ArrayList<>(sandTimerLocations));
         this.doorways = Collections.unmodifiableList(new ArrayList<>(doorways));
         this.unusedOpenings = Collections.unmodifiableList(new ArrayList<>(unusedOpenings));
     }
@@ -119,6 +123,30 @@ public class Dungeon {
 
     /** Absolute per-player spawn points (empty if no PLAYER_SPAWN markers were defined). */
     @NotNull public List<Location> getPlayerSpawnLocations() { return playerSpawnLocations; } // Already unmodifiable
+
+    /** Absolute sand deposit cells (empty if no TIMER_DEPOSIT markers were defined). */
+    @NotNull public List<Location> getSandTimerLocations() { return sandTimerLocations; } // Already unmodifiable
+
+    /**
+     * True if the given block location is one of this instance's sand deposit cells.
+     *
+     * <p>Matched on exact block coordinates, with no tolerance. The builder tool records a
+     * TIMER_DEPOSIT marker at the <em>air cell</em> next to the face the builder clicked, which is
+     * precisely the cell a placed sand block occupies — so unlike the safe exit (which compares a
+     * clicked solid block against an air-cell marker and therefore needs a +/-1 Y allowance) a deposit
+     * is an exact match.
+     */
+    public boolean isSandTimerDepositAt(@NotNull Location location) {
+        for (Location deposit : sandTimerLocations) {
+            if (deposit.getBlockX() == location.getBlockX()
+                    && deposit.getBlockY() == location.getBlockY()
+                    && deposit.getBlockZ() == location.getBlockZ()
+                    && Objects.equals(deposit.getWorld(), location.getWorld())) {
+                return true;
+            }
+        }
+        return false;
+    }
 
     /**
      * Gets the absolute safe exit location, or null if no segment template defined one.
