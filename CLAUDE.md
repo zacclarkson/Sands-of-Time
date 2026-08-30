@@ -87,6 +87,25 @@ manually (see `integration-test/README.md`); it is **not** part of CI.
   Maven resource filtering (`pom.xml`). After saving a new segment on a running server, `/sotreloadsegments`
   (refused while a game is RUNNING) loads it without a restart; templates are otherwise read only at
   startup. Until a HUB exists, the plugin enables fine but `/sot start` aborts.
+- **Segment doors are generated, not derived at paste time.** `DungeonGenerator` records each
+  connection its DFS actually makes as a `Doorway` (blueprint-relative cell + direction), plus the
+  entry points it attached no neighbour to. Both lists ride the blueprint into `Dungeon` as absolute
+  `EntryPoint`s, and `DoorManager.initializeDoorsForInstance` builds a `SegmentDoor` at every
+  doorway and seals the leftovers as plain wall. Deriving doors by walking every placed segment's
+  entry points instead (what it used to do) put a locked door on openings that led nowhere — the
+  bundled hub alone declares nine. **`Door.buildClosed()` is what makes a door exist**: templates
+  carve their doorways as open 3x4 holes, so registering the `SegmentDoor` object without writing
+  blocks left the passage walkable and the lock location as air, which never fires
+  `RIGHT_CLICK_BLOCK`. The door body is `DARK_OAK_PLANKS` with an `OXIDIZED_CUT_COPPER` keyhole one
+  block above the entry marker; opening clears layers top-first so the wall sinks into the floor.
+  Vault marker blocks stay out of `DoorManager` — `VaultManager` owns those clicks (bug #65's
+  sibling), and a test pins it.
+- **Rusty keys spawn at `ITEM_SPAWN` markers.** `DungeonManager.populateFloorItems` rolls
+  `RUSTY_KEY_SPAWN_CHANCE` (20%) per item spawn and calls `FloorItemManager.spawnRustyKey`,
+  otherwise falling through to the loot table. Nothing called `spawnRustyKey` at all before, so
+  every segment door was permanently locked. Placement is by chance rather than one-per-room, so a
+  branch can come up with no key and stay shut — raise the constant if that bites; the doorway and
+  key counts are both logged.
 - **The safe exit is a segment marker.** The escape point comes from a `SAFE_EXIT` marker on a
   segment template; a marker on the HUB segment wins over one on any other segment. Templates saved
   before that marker existed carry none, so `GameManager.getTeamSafeExitLocation` falls back to the
