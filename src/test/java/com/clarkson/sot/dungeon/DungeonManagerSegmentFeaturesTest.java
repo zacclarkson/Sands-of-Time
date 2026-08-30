@@ -46,7 +46,7 @@ class DungeonManagerSegmentFeaturesTest {
                 vaultDoorBound, gates, leverOffset,
                 List.of(), List.of(),
                 null,
-                null, List.of(), null, List.of(), null, List.of(), List.of());
+                null, List.of(), null, List.of(), null, List.of(), List.of(), List.of());
     }
 
     private PlacedSegment placed(Segment segment, int x, int y, int z) {

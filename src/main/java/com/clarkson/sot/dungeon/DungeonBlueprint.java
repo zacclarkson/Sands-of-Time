@@ -66,6 +66,12 @@ public class DungeonBlueprint {
     private final List<Doorway> doorways;
     private final List<Doorway> unusedOpenings;
 
+    // Coloured wall markings telling players which vault colour lies down each branch. One per
+    // BRANCH_SIGNIFIER placeholder the generator could resolve a colour for -- a placeholder beside
+    // an exit that leads to no vault produces nothing, so this is usually shorter than the number
+    // of placeholders the templates declare.
+    private final List<BranchSignifier> branchSignifiers;
+
     // --- Changed: Use Area for Relative Bounding Box ---
     private final Area relativeBounds; // Represents bounds using relative Locations (null world)
 
@@ -91,6 +97,7 @@ public class DungeonBlueprint {
                             @NotNull List<Doorway> doorways,
                             @NotNull List<Doorway> unusedOpenings,
                             @NotNull List<Vector> mobSpawnerRelativeLocations,
+                            @NotNull List<BranchSignifier> branchSignifiers,
                             @NotNull List<Vector> sandTradeRelativeLocations
                            ) {
 
@@ -129,6 +136,7 @@ public class DungeonBlueprint {
         this.doorways = Collections.unmodifiableList(new ArrayList<>(doorways));
         this.unusedOpenings = Collections.unmodifiableList(new ArrayList<>(unusedOpenings));
         this.mobSpawnerRelativeLocations = Collections.unmodifiableList(new ArrayList<>(mobSpawnerRelativeLocations));
+        this.branchSignifiers = Collections.unmodifiableList(new ArrayList<>(branchSignifiers));
         this.sandTradeRelativeLocations = Collections.unmodifiableList(new ArrayList<>(sandTradeRelativeLocations));
     }
 
@@ -154,6 +162,12 @@ public class DungeonBlueprint {
 
     /** Relative entry points no neighbour was attached to; these get sealed as plain wall. */
     @NotNull public List<Doorway> getUnusedOpenings() { return unusedOpenings; }
+
+    /**
+     * Relative coloured wall markings, each already resolved to the vault colour down its branch.
+     * Empty when no segment declares a BRANCH_SIGNIFIER placeholder.
+     */
+    @NotNull public List<BranchSignifier> getBranchSignifiers() { return branchSignifiers; }
 
     /** Relative per-player spawn points (empty if no segment defines a PLAYER_SPAWN marker). */
     @NotNull public List<Vector> getPlayerSpawnRelativeLocations() { return playerSpawnRelativeLocations; }

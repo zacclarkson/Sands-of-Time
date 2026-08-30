@@ -62,7 +62,7 @@ class DungeonGeneratorMobSpawnerTest {
                 null, List.of(), null,
                 List.of(), mobSpawners,
                 null,
-                null, List.of(), null, List.of(), null, List.of(), List.of());
+                null, List.of(), null, List.of(), null, List.of(), List.of(), List.of());
     }
 
     /** Hub with {@code exits} straight SOUTH exits spaced 6 apart in x, plus optional mob spawners. */
@@ -79,7 +79,7 @@ class DungeonGeneratorMobSpawnerTest {
                 null, List.of(), null,
                 List.of(), mobSpawners,
                 null,
-                null, List.of(), null, List.of(), null, List.of(), List.of());
+                null, List.of(), null, List.of(), null, List.of(), List.of(), List.of());
     }
 
     private static Segment corridorNS(List<BlockVector3> mobSpawners) {

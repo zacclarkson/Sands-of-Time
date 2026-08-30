@@ -92,8 +92,21 @@ line — so it is actionable without rediscovering it.
 - **A HUB segment is bundled and auto-installed.** Dungeon generation needs at least one `HUB` segment
   on disk (`plugins/SoT/<name>.json` + `schematics/<name>.schem`). Templates listed in
   `src/main/resources/bundled_segments/manifest.txt` are shipped in the jar and copied into the data
-  folder by `SoT.installBundledSegments()` on enable (**skip-if-present**, so in-game edits are never
-  clobbered) — so a fresh server has a working hub out of the box. To add/update the bundled set: build
+  folder by `BundledSegmentInstaller` on enable (**skip-if-present**, so in-game edits are never
+  clobbered) — so a fresh server has a working hub out of the box. Skip-if-present has a cost: a
+  corrected bundled template reaches *no* server that has run the plugin before. So the installer never
+  skips silently — it byte-compares each half against the jar's copy and, when they differ, logs which
+  files differ and that deleting both is what takes the bundled version (an identical copy is only a
+  `fine`). It also treats a template's `.json` and `.schem` as **one unit**: they come from a single
+  `/sotsavesegment` and nothing downstream cross-checks them, so installing one bundled half beside one
+  stale local half is how a template ends up with declared bounds its geometry disagrees with. A
+  half-present pair is therefore completed from the jar as a unit, with the surviving file moved aside
+  to `<name>.<ext>.bak` and a warning naming it. That is also the load-time check
+  `StructureLoader.warnIfDeclaredSizeIsTooSmall` exists for: it reads the schematic's dimension header
+  through `SchematicDimensions` (straight off the gzipped NBT, since a `ClipboardFormats` read needs a
+  live WorldEdit platform and this runs at load) and warns when the declared `size` is *smaller* than
+  the schematic on any axis. Only smaller — declaring more is deliberate and load-bearing (see the
+  visual-timer note on `hub.json`'s `size.y = 17`). To add/update the bundled set: build
   in-game + `/sotsavesegment <name> HUB`, then `scripts/pull-segments.sh` to pull the files off the dev
   server into `bundled_segments/` (regenerating the manifest) and commit. Binary `.schem` files are
   kept byte-clean by a `.gitattributes` (`*.schem binary`) and by excluding `bundled_segments/**` from
@@ -144,6 +157,29 @@ line — so it is actionable without rediscovering it.
   `consolidateFeatureLocations` emits no marker, and all 20 generation attempts then fail on the missing
   marker. The save command now refuses that combination and the generator warns once for templates already
   on disk.
+- **A branch's vault colour is resolved at generation, not saved on the template.** A
+  `BRANCH_SIGNIFIER` marker records only *where* a coloured wall marking goes; the colour cannot be
+  template data, because the same corridor sits on the red branch in one layout and the gold branch
+  in the next. `DungeonGenerator.generatePathRecursive` therefore **returns** the vault colours in
+  the subtree it just built and records them in `branchColoursByDoorway`, keyed on the doorway cell
+  — the same cell `findUnusedOpenings` keys on, and the cell *both* segments of a connection share
+  (`calculatePlacementOrigin`), which is what lets a marking inside the child resolve against the
+  branch it stands on. `resolveBranchSignifiers` then pairs each placeholder with the **nearest entry
+  point of its own template** and takes that branch's colour; the pairing is computed in template
+  space, so it survives rotation (index i of `getEntryPoints()` is index i of
+  `getRotatedEntryPoints()`). Two cases deliberately emit *nothing* rather than a wrong colour: a
+  placeholder beside an opening the DFS never attached a neighbour to (the hub's ~6 non-vault exits)
+  and one whose branch holds no vault. Only the **first** segment of a colour contributes, matching
+  the first-wins rule `consolidateFeatureLocations` applies to the markers — a later duplicate is not
+  the vault that reaches the blueprint, so its branch must not advertise the colour. Where a branch
+  holds several vaults the shallowest wins, since that is the one the player meets first. The
+  resolved `BranchSignifier`s ride `DungeonBlueprint` (not `Dungeon`, whose constructor is already
+  16 arguments — nothing at runtime queries "is there a marking here", and
+  `BreakableBlocks.BREAKABLE` already refuses the block during a round), and
+  `DungeonManager.placeBranchSignifiers` writes `VaultColor.getConcreteMaterial()` at each cell
+  **after** the paste, for the same reason `placeBankBlock` does. The bundled hub declares no
+  `BRANCH_SIGNIFIER` markers, so a stock server sees no colour markings; generation warns once per
+  `/sot setup` when no template declares any.
 - **Rusty keys spawn at `ITEM_SPAWN` markers.** `DungeonManager.populateFloorItems` rolls
   `RUSTY_KEY_SPAWN_CHANCE` (20%) per item spawn and calls `FloorItemManager.spawnRustyKey`,
   otherwise falling through to the loot table. Nothing called `spawnRustyKey` at all before, so
@@ -252,9 +288,14 @@ line — so it is actionable without rediscovering it.
   second pass would overwrite the confirmation with "You have no coins to bank!" — and must cancel
   the event, or the vanilla ender chest inventory opens over the bank. `BankingManager` holds no
   per-team state (the cell is looked up through `GameManager` each click), so there is nothing to
-  clear between rounds; it also cancels `BlockBreakEvent` on the bank cell, since an ender chest
-  mined without silk touch drops 8 obsidian and takes the team's bank out of the hub. A hub with no
-  `BANK` marker simply plays with no bank, warned once per `/sot setup` via `warnOncePerGeneration`.
+  clear between rounds, and no `BlockBreakEvent` handler either — an ender chest mined without silk
+  touch drops 8 obsidian and takes the team's bank out of the hub, but `ENDER_CHEST` is absent from
+  the `BreakableBlocks` whitelist, so `BlockProtectionListener` already refuses the break at `LOW`.
+  A bank-specific guard on top of that double-messaged the player (chat line over the listener's
+  action bar) and cancelled for an admin in Creative, whom the listener deliberately waves through —
+  the same contradiction that removed `SandManager`'s timer-column guard. `BankingManagerTest`
+  registers the listener so the property stays pinned. A hub with no `BANK` marker simply plays with
+  no bank, warned once per `/sot setup` via `warnOncePerGeneration`.
 - **Sand is an item; only a deposit point converts it to time.** Breaking a dungeon sand block hands the
   player a plain `Material.SAND` item and adds *no* time — `SandManager.onBlockPlace` does that, when the
   sand is placed on one of the team's `TIMER_DEPOSIT` marker cells. The chain mirrors `PLAYER_SPAWN`:
@@ -387,14 +428,34 @@ line — so it is actionable without rediscovering it.
   sits at segment-relative `(21, 1, 18)`, the pedestal under the sand column baked into `hub.schem`.
   **The hub must declare itself tall enough to hold the column it anchors.** The column occupies
   relative Y `timerLocationOffset.y + 1` through `+ VisualTimerLayout.COLUMN_HEIGHT_BLOCKS`, but the
-  blueprint bounds come from the template's declared `size` (`DungeonGenerator.calculateRelativeMaxBounds`),
+  blueprint bounds come from the template's declared `size` — rotated, via `PlacedSegment.getRotatedSize()`
+  (`DungeonGenerator.calculateRelativeMaxBounds`; the unrotated size under-covered any non-square segment
+  placed at 90/270 and left its overhang standing between rounds) —
   and those bounds are exactly what `DungeonManager.cleanupInstance()` air-fills between rounds.
   `hub.json` therefore declares `size.y = 17` while `hub.schem` is only 15 tall — the two extra
-  layers are air, `ignoreAirBlocks` means they cost nothing to paste, and nothing cross-checks the
-  declared size against the schematic. Under-declare it and the top of every team's column is left
-  standing for the next round, which cannot clear it either. This is easy to lose: re-saving the hub
-  in game rewrites `size` from the WorldEdit selection, so **select at least 17 blocks of height** or
-  the gap reopens. `StructureLoaderHubFeaturesTest` pins it, deriving the bound from the constants.
+  layers are air and `ignoreAirBlocks` means they cost nothing to paste. Under-declare it and the top of
+  every team's column is left standing for the next round, which cannot clear it either. This is easy
+  to lose: re-saving the hub in game rewrites `size` from the WorldEdit selection, so **select at least
+  17 blocks of height** or the gap reopens. `StructureLoaderHubFeaturesTest` pins it, deriving the bound
+  from the constants, and `StructureLoader.warnIfDeclaredSizeIsTooSmall` catches the general case at
+  load — but only a size *below* the schematic's, since this over-declaration is the point.
+- **A location belongs to a team by *region*, not by segment.** `GameManager.getTeamIdForLocation` was a
+  stub returning null for every location — public, `@Nullable`, with a javadoc describing an
+  implementation that did not exist, so any caller trusting it silently got "no team" with no
+  exception, no log and no test failure (bug #98). It now walks `teamDungeonManagers` and returns the
+  team whose `DungeonManager.containsLocation` matches. That test is the instance's `absoluteBounds`
+  — the blueprint's relative bounds translated by the team's origin, computed once at construction and
+  now the single source `cleanupInstance()` reads too, so the region a lookup claims and the region
+  teardown clears cannot drift. Two consequences are worth knowing. **(a)** It is region-level: a
+  location in the air *between* two of a team's rooms still resolves to that team, because the whole
+  cuboid is theirs and is cleared as theirs. Use `DungeonManager.getSegmentAtLocation` when a segment
+  actually has to be there. **(b)** `TEAM_DUNGEON_SPACING` (5000 on X) is what makes it unambiguous —
+  the regions cannot overlap, so no tie-break is needed and the scan is six coordinate comparisons per
+  team, cheap enough for an event handler; a per-segment scan and the origin-distance pre-filter it
+  would need are both unnecessary. The world check lives in `regionContains`, not in `Area.contains`,
+  which compares coordinates only — every world shares a coordinate space. `isVisualTimerBlock` still
+  scans every team rather than resolving one, and deliberately: the operator who teleported into
+  someone else's hub is the case worth covering, and the answer would not change.
 - **Game locations come from `config.yml`.** `locations.lobby` and `locations.trapped` are stored as
   plain `world/x/y/z/yaw/pitch` scalars and read by `SoTConfig` (deliberately *not* Bukkit's
   `config.getLocation()`, whose serialized form needs a `==: org.bukkit.Location` marker and is not

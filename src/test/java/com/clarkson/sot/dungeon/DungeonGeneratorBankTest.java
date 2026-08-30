@@ -34,7 +34,7 @@ class DungeonGeneratorBankTest {
                 null, List.of(), null,
                 List.of(), List.of(),
                 null,
-                bankOffset, List.of(), null, List.of(), null, List.of(), List.of());
+                bankOffset, List.of(), null, List.of(), null, List.of(), List.of(), List.of());
     }
 
     /** Places a template at a relative origin, the way the generator does during a blueprint run. */

@@ -1,5 +1,6 @@
 package com.clarkson.sot.scoring;
 
+import com.clarkson.sot.events.BlockProtectionListener;
 import com.clarkson.sot.main.GameManager;
 import com.clarkson.sot.main.GameState;
 import com.clarkson.sot.utils.PlayerStateManager;
@@ -7,7 +8,9 @@ import com.clarkson.sot.utils.PlayerStatus;
 import com.clarkson.sot.utils.SoTTeam;
 import com.clarkson.sot.utils.TeamManager;
 
+import org.bukkit.GameMode;
 import org.bukkit.Location;
+import org.bukkit.Material;
 import org.bukkit.World;
 import org.bukkit.block.Block;
 import org.bukkit.block.BlockFace;
@@ -40,6 +43,11 @@ import static org.mockito.Mockito.*;
  * ender chest inventory opens over the bank; and the handler must ignore the off-hand pass of
  * {@link PlayerInteractEvent}, or every click banks twice and the second pass overwrites the
  * confirmation with "You have no coins to bank!".
+ *
+ * <p>A real {@link BlockProtectionListener} is registered alongside, because keeping the bank in the
+ * hub is <em>its</em> rule now — {@code ENDER_CHEST} is simply absent from the
+ * {@code BreakableBlocks} whitelist. {@link BankingManager} carries no break handler of its own, and
+ * the tests at the bottom are what stop one growing back.
  */
 class BankingManagerTest {
 
@@ -70,10 +78,14 @@ class BankingManagerTest {
         when(gameManager.getActiveTeams()).thenReturn(Map.of(teamId, team));
 
         player = server.addPlayer();
+        player.setGameMode(GameMode.SURVIVAL);
         when(stateManager.getStatus(player)).thenReturn(PlayerStatus.ALIVE_IN_DUNGEON);
         when(teamManager.getPlayerTeamId(player)).thenReturn(teamId);
+        when(gameManager.isParticipant(player.getUniqueId())).thenReturn(true);
 
+        // The block, not just the registered cell: the whitelist decides by material.
         bankBlock = world.getBlockAt(21, 65, 4);
+        bankBlock.setType(Material.ENDER_CHEST);
         when(gameManager.isTeamBankAt(eq(teamId), any(Location.class))).thenAnswer(invocation -> {
             Location queried = invocation.getArgument(1);
             return queried != null
@@ -83,6 +95,7 @@ class BankingManagerTest {
         });
 
         server.getPluginManager().registerEvents(new BankingManager(scoreManager, gameManager, plugin), plugin);
+        server.getPluginManager().registerEvents(new BlockProtectionListener(gameManager), plugin);
     }
 
     @AfterEach
@@ -92,6 +105,12 @@ class BankingManagerTest {
 
     private void carrying(int coins) {
         when(scoreManager.getPlayerUnbankedScore(player.getUniqueId())).thenReturn(coins);
+    }
+
+    private BlockBreakEvent breakBlock(Block block) {
+        BlockBreakEvent event = new BlockBreakEvent(block, player);
+        server.getPluginManager().callEvent(event);
+        return event;
     }
 
     private PlayerInteractEvent rightClick(Block block, EquipmentSlot hand) {
@@ -197,22 +216,48 @@ class BankingManagerTest {
 
     // --- Keeping the bank in the hub ---
 
+    /**
+     * The property, pinned where it is now enforced: the whitelist refuses the break, because an
+     * ender chest mined without silk touch drops 8 obsidian and takes the team's only banking point
+     * out of the round with it. {@link BankingManager} does nothing here — it used to cancel this
+     * event itself, which added a chat line on top of the listener's action bar.
+     */
     @Test
-    void cancelsBreakingTheBank() {
-        BlockBreakEvent event = new BlockBreakEvent(bankBlock, player);
-
-        server.getPluginManager().callEvent(event);
+    void breakingTheBankIsRefusedByTheWhitelist() {
+        BlockBreakEvent event = breakBlock(bankBlock);
 
         assertTrue(event.isCancelled(),
                 "an ender chest mined without silk touch drops obsidian and takes the bank with it");
     }
 
+    /**
+     * The counterpart to the rule above, and the reason the duplicate guard had to go: Creative is
+     * the admin escape hatch out of every block rule, so a bank-specific cancel in
+     * {@link BankingManager} contradicted it. The same inconsistency is what removed
+     * {@code SandManager}'s timer-column guard.
+     */
     @Test
-    void leavesEveryOtherBlockBreakable() {
-        BlockBreakEvent event = new BlockBreakEvent(world.getBlockAt(22, 65, 4), player);
+    void anAdminInCreativeCanStillMineTheBank() {
+        player.setGameMode(GameMode.CREATIVE);
 
-        server.getPluginManager().callEvent(event);
+        assertFalse(breakBlock(bankBlock).isCancelled(),
+                "no bank-specific guard may survive the Creative bypass");
+    }
 
-        assertFalse(event.isCancelled());
+    /** Outside a live round the world belongs to the builders, bank block included. */
+    @Test
+    void theBankIsBreakableBetweenRounds() {
+        when(gameManager.getCurrentState()).thenReturn(GameState.SETUP);
+
+        assertFalse(breakBlock(bankBlock).isCancelled());
+    }
+
+    /** So the protection cannot degenerate into "cancel every break near the bank". */
+    @Test
+    void leavesDungeonSandNextToTheBankBreakable() {
+        Block sand = world.getBlockAt(22, 65, 4);
+        sand.setType(Material.SAND);
+
+        assertFalse(breakBlock(sand).isCancelled());
     }
 }

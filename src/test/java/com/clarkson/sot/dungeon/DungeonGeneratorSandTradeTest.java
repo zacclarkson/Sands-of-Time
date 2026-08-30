@@ -35,7 +35,7 @@ class DungeonGeneratorSandTradeTest {
                 null, List.of(), null,
                 List.of(), List.of(),
                 null,
-                null, List.of(), null, List.of(), null, List.of(), trades);
+                null, List.of(), null, List.of(), null, List.of(), List.of(), trades);
     }
 
     private static PlacedSegment placed(Segment segment, int x, int y, int z) {

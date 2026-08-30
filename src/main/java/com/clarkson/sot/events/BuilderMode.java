@@ -60,6 +60,9 @@ public enum BuilderMode {
             false),
     PLAYER_SPAWN("Player Spawn",
             "Right-click to mark where a player spawns at game start. Place one per player (up to your team size) in the HUB; players are spread across them.",
+            false),
+    BRANCH_SIGNIFIER("Branch Signifier",
+            "Right-click a wall face beside an exit to mark where that branch's vault-colour marking goes. The colour is chosen at generation time from the nearest entry point's branch, so place it next to the exit it advertises.",
             false);
 
     private final String displayName;

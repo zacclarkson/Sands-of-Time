@@ -69,6 +69,14 @@ public class DungeonGenerator {
      * door; entry points absent from this list opened onto nothing and get sealed instead.
      */
     private List<Doorway> doorwaysInDFS;
+    /**
+     * Blueprint-relative doorway cell -> the vault colours reachable through it. Populated as the
+     * DFS unwinds, so an entry holds every colour in the subtree hanging off that connection.
+     * {@link #resolveBranchSignifiers} reads it to colour each segment's wall markings.
+     */
+    private final Map<BlockVector3, Set<VaultColor>> branchColoursByDoorway = new HashMap<>();
+    /** Depth of the vault segment that actually won each colour, for picking the nearest one. */
+    private final Map<VaultColor, Integer> vaultDepthsInDFS = new EnumMap<>(VaultColor.class);
     // --- Per-generateDungeonLayout warning state ---
     // generateDungeonLayout retries attemptGeneration many times, and every attempt re-checks the
     // same loaded templates. Warnings that describe the templates on disk rather than the individual
@@ -299,6 +307,8 @@ public class DungeonGenerator {
         keysPlacedInDFS.clear(); // Tracks Red, Green, Gold keys placed by DFS
         vaultsPlacedInDFS.clear(); // Tracks Blue, Red, Green, Gold vaults placed by DFS
         doorwaysInDFS.clear(); // Tracks the connections this attempt actually made
+        branchColoursByDoorway.clear(); // Tracks which vault colours lie down each connection
+        vaultDepthsInDFS.clear();
 
         // --- Pre-checks ---
         if (availableSegments.isEmpty()) { /* ... error log ... */ return null; }
@@ -438,6 +448,18 @@ public class DungeonGenerator {
         plugin.getLogger().info("Layout has " + doorways.size() + " doorways and "
                 + unusedOpenings.size() + " unattached openings to seal.");
 
+        boolean anyPlaceholder = placedSegments.stream()
+                .anyMatch(placed -> !placed.getSegmentTemplate().getBranchSignifierOffsets().isEmpty());
+        if (!anyPlaceholder) {
+            warnOncePerGeneration("no-branch-signifier",
+                    "No BRANCH_SIGNIFIER marker on any segment template; nothing will show which "
+                    + "vault colour a branch leads to. Add BRANCH_SIGNIFIER markers beside your HUB's "
+                    + "vault exits and re-save it.");
+        }
+        List<BranchSignifier> branchSignifiers =
+                resolveBranchSignifiers(placedSegments, branchColoursByDoorway, vaultDepthsInDFS);
+        plugin.getLogger().info("Layout has " + branchSignifiers.size() + " branch colour marking(s).");
+
         // --- Create and Return Blueprint ---
         return new DungeonBlueprint(
                 placedSegments, hubRelativeLocation, vaultMarkerRelativeLocations, keySpawnRelativeLocations,
@@ -445,7 +467,8 @@ public class DungeonGenerator {
                 blueprintBounds, safeExitRelativeLocation, timerBaseRelativeLocation, bankRelativeLocation,
                 playerSpawnRelativeLocations, sandTimerRelativeLocations,
                 deathCageRelativeLocations, sandSacrificeRelativeLocations, doorways, unusedOpenings,
-                mobSpawnerRelativeLocations, sandTradeRelativeLocations
+                mobSpawnerRelativeLocations, branchSignifiers,
+                sandTradeRelativeLocations
         );
     }
 
@@ -460,8 +483,13 @@ public class DungeonGenerator {
      * @param placedSegments    (In/Out) List of all segments placed so far in the blueprint.
      * @param occupiedOrigins   (In/Out) Set of BlockVector3 relative origins already occupied.
      * @param currentDepth      The current depth (number of segments) from the hub segment.
+     * @return The vault colours reachable through this connection, empty if the branch ends here
+     *         or reaches no vault. Collected as the recursion unwinds so a caller learns what lies
+     *         down the branch it just started; {@link #resolveBranchSignifiers} colours the wall
+     *         markings from it.
      */
-    private void generatePathRecursive(
+    @NotNull
+    private Set<VaultColor> generatePathRecursive(
             @NotNull PlacedSegment currentSegment,
             @NotNull RelativeEntryPoint connectionPoint,
             @NotNull List<PlacedSegment> placedSegments,
@@ -470,11 +498,11 @@ public class DungeonGenerator {
 
         // --- Base Cases / Termination Conditions ---
         if (currentDepth >= MAX_DEPTH) {
-            return; // Reached max depth for this branch
+            return Set.of(); // Reached max depth for this branch
         }
         if (placedSegments.size() >= MAX_TOTAL_SEGMENTS) {
             // Optional: Log warning if hitting total segment limit frequently
-            return; // Reached overall dungeon size limit
+            return Set.of(); // Reached overall dungeon size limit
         }
 
         // --- Select Next Segment (template + rotation) ---
@@ -483,14 +511,14 @@ public class DungeonGenerator {
 
         // If no suitable segment found, this path ends (backtrack)
         if (next == null) {
-            return;
+            return Set.of();
         }
 
         // --- Calculate Placement (using the ROTATED entry that faces requiredDirection) ---
         RelativeEntryPoint nextEntryPoint = rotatedEntryByDirection(next.template, next.steps, requiredDirection);
         if (nextEntryPoint == null) {
              plugin.getLogger().warning("Segment " + next.template.getName() + " selected but missing required entry point " + requiredDirection + " after rotation. Stopping branch.");
-             return; // Should not happen if selectNextSegment filters correctly
+             return Set.of(); // Should not happen if selectNextSegment filters correctly
         }
         BlockVector3 currentSegmentOrigin = BlockVector3.at(
             currentSegment.getWorldOrigin().toVector().getX(),
@@ -501,7 +529,7 @@ public class DungeonGenerator {
 
         // --- Check Collision (rotated footprint) ---
         if (checkCollision(nextSegmentOrigin, next.template, next.steps, occupiedOrigins, placedSegments)) {
-            return; // Collision detected, stop this branch
+            return Set.of(); // Collision detected, stop this branch
         }
 
         // --- Place Segment ---
@@ -519,8 +547,14 @@ public class DungeonGenerator {
                 connectionPoint.getDirection()));
 
         // --- Update Global Placed Vaults/Keys Tracking (colour is rotation-independent) ---
+        // Only the FIRST segment of a colour counts, matching the first-wins rule
+        // consolidateFeatureLocations applies to the markers -- a later duplicate is not the vault
+        // that ends up in the blueprint, so its branch must not advertise that colour.
+        Set<VaultColor> branchColours = EnumSet.noneOf(VaultColor.class);
         VaultColor placedVault = next.template.getContainedVault();
         if (placedVault != null && vaultsPlacedInDFS.add(placedVault)) {
+            vaultDepthsInDFS.put(placedVault, currentDepth);
+            branchColours.add(placedVault);
             plugin.getLogger().info("Placed " + placedVault + " vault segment (" + next.template.getName() + ") at depth " + currentDepth);
         }
         VaultColor placedKey = next.template.getContainedVaultKey();
@@ -534,9 +568,16 @@ public class DungeonGenerator {
         for (RelativeEntryPoint outgoingEntryPoint : outgoingExits) {
             // Don't go back through the entry point we just came from
             if (outgoingEntryPoint.getDirection() != requiredDirection) {
-                generatePathRecursive(nextPlacedSegment, outgoingEntryPoint, placedSegments, occupiedOrigins, currentDepth + 1);
+                branchColours.addAll(generatePathRecursive(
+                        nextPlacedSegment, outgoingEntryPoint, placedSegments, occupiedOrigins, currentDepth + 1));
             }
         }
+
+        // Recorded on the way back out, so it covers the whole subtree behind this doorway. The
+        // cell is shared by both segments (see calculatePlacementOrigin), which is what lets a
+        // marking in the child resolve against the branch it stands on.
+        branchColoursByDoorway.put(doorwayCell, branchColours);
+        return branchColours;
     }
 
     /**
@@ -575,6 +616,104 @@ public class DungeonGenerator {
             }
         }
         return unused;
+    }
+
+    /**
+     * Colours every branch-signifier placeholder in a finished layout.
+     *
+     * <p>A template declares only <em>where</em> a colour marking goes, never which colour: the
+     * same corridor can sit on the red branch in one layout and the gold branch in the next. Each
+     * placeholder is therefore paired with the <b>nearest entry point of its own template</b> --
+     * the exit it stands beside -- and takes the colour of whatever lies down that connection.
+     * Pairing is done in template space, so it is unaffected by the placement's rotation and index
+     * i of {@code getEntryPoints()} is index i of {@code getRotatedEntryPoints()}.
+     *
+     * <p>Two cases deliberately produce nothing rather than a wrong marking: a placeholder whose
+     * nearest exit the DFS never attached a neighbour to (the hub's ~6 non-vault exits), and one
+     * whose branch reaches no vault at all. Where a branch holds several vaults the nearest one
+     * wins, since that is the one a player following the marking meets first.
+     *
+     * @param placedSegments        The segments of a finished layout, with blueprint-relative origins.
+     * @param branchColoursByDoorway Doorway cell -> vault colours reachable through it.
+     * @param vaultDepths           Depth of the segment that won each colour, for the nearest-wins tie-break.
+     * @return One signifier per resolvable placeholder, in blueprint-relative space.
+     */
+    @NotNull
+    static List<BranchSignifier> resolveBranchSignifiers(
+            @NotNull List<PlacedSegment> placedSegments,
+            @NotNull Map<BlockVector3, Set<VaultColor>> branchColoursByDoorway,
+            @NotNull Map<VaultColor, Integer> vaultDepths) {
+
+        List<BranchSignifier> signifiers = new ArrayList<>();
+        for (PlacedSegment placedSegment : placedSegments) {
+            Segment template = placedSegment.getSegmentTemplate();
+            List<BlockVector3> placeholders = template.getBranchSignifierOffsets();
+            List<RelativeEntryPoint> templateEntries = template.getEntryPoints();
+            if (placeholders.isEmpty() || templateEntries.isEmpty()) continue;
+
+            List<RelativeEntryPoint> rotatedEntries = placedSegment.getRotatedEntryPoints();
+            Vector segmentOrigin = placedSegment.getWorldOrigin().toVector();
+
+            for (BlockVector3 placeholder : placeholders) {
+                if (placeholder == null) continue;
+                int entryIndex = nearestEntryIndex(placeholder, templateEntries);
+                BlockVector3 entryPos = rotatedEntries.get(entryIndex).getRelativePosition();
+                BlockVector3 doorwayCell = BlockVector3.at(
+                        segmentOrigin.getBlockX() + entryPos.x(),
+                        segmentOrigin.getBlockY() + entryPos.y(),
+                        segmentOrigin.getBlockZ() + entryPos.z());
+
+                VaultColor colour = nearestVaultColour(branchColoursByDoorway.get(doorwayCell), vaultDepths);
+                if (colour == null) continue; // that exit leads to no vault (or to nothing at all)
+
+                BlockVector3 rotated = placedSegment.getRotatedOffset(placeholder);
+                signifiers.add(new BranchSignifier(
+                        segmentOrigin.clone().add(new Vector(rotated.x(), rotated.y(), rotated.z())),
+                        colour));
+            }
+        }
+        return signifiers;
+    }
+
+    /**
+     * Index of the entry point closest to a placeholder, by squared distance in template space.
+     * Ties go to the lowest index so the result is deterministic. {@code entries} must be non-empty.
+     */
+    static int nearestEntryIndex(@NotNull BlockVector3 placeholder,
+                                 @NotNull List<RelativeEntryPoint> entries) {
+        int best = 0;
+        long bestDistance = Long.MAX_VALUE;
+        for (int i = 0; i < entries.size(); i++) {
+            BlockVector3 pos = entries.get(i).getRelativePosition();
+            long dx = pos.x() - placeholder.x(), dy = pos.y() - placeholder.y(), dz = pos.z() - placeholder.z();
+            long distance = dx * dx + dy * dy + dz * dz;
+            if (distance < bestDistance) {
+                bestDistance = distance;
+                best = i;
+            }
+        }
+        return best;
+    }
+
+    /**
+     * The colour whose vault sits shallowest among {@code colours} -- the first one a player
+     * following the marking would reach. Ties (and colours with no recorded depth) fall back to the
+     * enum's declaration order so the choice is deterministic. Null when there is nothing to show.
+     */
+    @Nullable
+    static VaultColor nearestVaultColour(@Nullable Set<VaultColor> colours,
+                                         @NotNull Map<VaultColor, Integer> vaultDepths) {
+        if (colours == null || colours.isEmpty()) return null;
+        VaultColor best = null;
+        int bestDepth = Integer.MAX_VALUE;
+        for (VaultColor colour : colours) {
+            int depth = vaultDepths.getOrDefault(colour, Integer.MAX_VALUE);
+            if (best == null || depth < bestDepth || (depth == bestDepth && colour.ordinal() < best.ordinal())) {
+                best = colour;
+                bestDepth = depth;
+            }
+        }
+        return best;
     }
 
     /** A chosen segment template plus the Y rotation (0..3) to apply when placing it. */
@@ -869,8 +1008,12 @@ public class DungeonGenerator {
         for (PlacedSegment segment : placedSegments) {
             // Get the relative origin vector of this segment (world is null)
             Vector origin = segment.getWorldOrigin().toVector();
-            // Get the size of the segment template
-            BlockVector3 size = segment.getSegmentTemplate().getSize();
+            // Get the ROTATED footprint of this placement: 90/270 steps swap X and Z, so the
+            // unrotated template size would under-cover a non-square segment on one axis. These
+            // bounds become the blueprint Area that DungeonManager.cleanupInstance() air-fills
+            // between rounds, and blocks left outside it survive the next round's paste
+            // (ignoreAirBlocks). Matches calculatePotentialBounds and PlacedSegment's own bounds.
+            BlockVector3 size = segment.getRotatedSize();
 
             // Calculate the maximum corner coordinates for this segment
             // Remember size includes the origin block, so add size-1 to origin coord

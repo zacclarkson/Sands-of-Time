@@ -70,7 +70,7 @@ The hub is the central starting area for each team's dungeon. It serves as a saf
 
 The hub has approximately **10 exits** leading into the dungeon. These exits fall into two categories:
 
-**4 Vault Exits** — each marked with a colored indicator on the wall showing which vault color lies down that branch:
+**4 Vault Exits** — each marked with a colored indicator on the wall showing which vault color lies down that branch (a block of that colour, written beside the exit at generation time from the hub's `BRANCH_SIGNIFIER` placeholders — see [Segment Features](#segment-features)):
 
 - Blue vault branch
 - Green vault branch
@@ -230,7 +230,7 @@ Each segment template can contain any combination of:
 - **Gates** — openings blocked until a lever is pulled
 - **Vault doors** — openings blocked until the matching vault is opened
 - **Levers** — interact to open all gates in the segment
-- **Color marking placeholder** — every segment needs a placeholder location for a color marking on the wall, used to indicate which vault branch the segment belongs to
+- **Branch signifiers** — `BRANCH_SIGNIFIER` markers: placeholder cells for the coloured wall markings that tell players which vault branch they are on. The template says only *where* a marking goes, never which colour: each placeholder is paired with the **nearest entry point of its own segment** — the exit it stands beside — and generation paints it with the vault colour that lies down that branch (the nearest vault, where a branch holds more than one). A placeholder beside an exit the generator attached nothing to, or beside a branch with no vault in it, is simply left unpainted, which is how the hub's ~6 non-vault exits stay unmarked. The same corridor template can therefore read red in one dungeon and gold in the next
 - **Safe exit** — a **2D area (like a door) built as a nether portal** that players walk through to escape. Placed in the builder as a two-click bound (`SAFE_EXIT`), normally in the HUB; one per dungeon, and a HUB marker takes priority over one on any other segment. Vanilla Nether travel is suppressed so the portal never teleports anyone out (`NetherPortalListener`).
 
 The HUB segment additionally defines these hub-only features (placed in the builder, wired to the live dungeon in a later pass):

@@ -99,6 +99,7 @@ public class ToolListener implements Listener {
     private static final String MT_TIMER_DEPOSIT    = "TIMER_DEPOSIT";
     private static final String MT_TIMER            = "TIMER";
     private static final String MT_PLAYER_SPAWN     = "PLAYER_SPAWN";
+    private static final String MT_BRANCH_SIGNIFIER = "BRANCH_SIGNIFIER";
     private static final String MT_ICON             = "ICON";   // cosmetic floating icon
     private static final String MT_LABEL            = "LABEL";  // cosmetic floating text label
 
@@ -279,6 +280,14 @@ public class ToolListener implements Listener {
             case PLAYER_SPAWN:
                 placeBlockMarker(event, player, MT_PLAYER_SPAWN, Material.LIGHT_BLUE_CONCRETE, 0.6f, null, -1,
                         new ItemStack(Material.PLAYER_HEAD), Component.text("Player Spawn", NamedTextColor.AQUA));
+                break;
+            case BRANCH_SIGNIFIER:
+                // No colour is chosen here: the generator resolves one per placeholder from the
+                // branch the nearest entry point leads to, so the same template can sit on a red
+                // branch in one layout and a gold one in the next.
+                placeBlockMarker(event, player, MT_BRANCH_SIGNIFIER, Material.WHITE_CONCRETE, 0.6f, null, -1,
+                        new ItemStack(Material.PAINTING),
+                        Component.text("Branch Signifier", NamedTextColor.WHITE));
                 break;
         }
     }
