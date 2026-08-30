@@ -21,7 +21,7 @@ generated dungeon, collect and bank coins, and race a sand timer. See `readme.md
 
 - `mvn -B verify` — compile, run the unit tests, and produce the shaded jar
   `target/SoT-1.0-SNAPSHOT.jar` (gson is relocated under `com.clarkson.sot.libs.gson`). CI runs this
-  on Temurin 21.
+  on Temurin 25 — it has to, since the build targets release 25 and MockBukkit ships Java 25 bytecode.
 - `mvn -B test` — just the unit tests.
 - `mvn install` — additionally copies the jar to the local server plugins dir set by the
   `server.plugins.dir` property in `pom.xml` (adjust it to your own path).
@@ -113,6 +113,37 @@ line — so it is actionable without rediscovering it.
   block above the entry marker; opening clears layers top-first so the wall sinks into the floor.
   Vault marker blocks stay out of `DoorManager` — `VaultManager` owns those clicks (bug #65's
   sibling), and a test pins it.
+- **Gates and vault doors are template geometry, not generated.** Unlike doorways — which ride the
+  blueprint only because the DFS *discards* which connections it made — every `GATE`/`LEVER`/`VAULT_DOOR`
+  marker on a placed template is used verbatim, so none of it goes through `DungeonBlueprint` or `Dungeon`
+  (whose constructor is already 16 arguments). `DungeonManager.resolveGateGroups`/`resolveVaultDoors` walk
+  `getPlacedSegmentsInWorld()` *after* the paste and hand `DoorManager.initializeGatesForInstance` absolute
+  `GateGroup`s (one lever plus **that segment's** gates — the pairing is the feature) and
+  `VaultDoorPlacement`s. Relative→absolute goes through `SegmentGeometry`, which rotates a bound with
+  `SegmentRotation.rotateBound` **before** adding the origin: one 90° step maps `(x,z) -> (z, sizeX-1-x)`,
+  so rotating can swap which corner is the minimum, and `PlacedSegment.getAbsoluteLocation` deliberately
+  does not rotate. Gates are `IRON_BARS` (see-through on purpose — the mechanic is deciding whether to open
+  one) and the lever is a **real `Material.LEVER` block written at instantiation**: the builder marker is an
+  air cell holding a `BlockDisplay`, and air never fires `RIGHT_CLICK_BLOCK` — the same trap
+  `Door.buildClosed()` exists for. The **first** pull is deliberately *not* cancelled, so vanilla flips the
+  lever on and the world itself records the state; every later click *is* cancelled so it cannot flip back
+  over an open gate. Vault doors have no keyhole and no key: `VaultManager` calls
+  `DoorManager.openVaultDoors(teamId, colour)` from its own marker handler — the marker click stays
+  VaultManager's (bug #65), the wall stays DoorManager's — and they live in `vaultDoorsByTeamAndColor`,
+  never in `doorsByTeamAndLockLocation`, so `getDoorAt` still resolves nothing at a vault or a gate.
+  `VaultDoor.isCorrectKey` survives only for `KeyItemTaggingTest`. The **vault marker sinks with the
+  wall**: `VaultManager.revealVault` hands the clicked block to `openVaultDoors`, and `VaultDoor`
+  merges it into `getBlocksSorted` so it clears with the layer it sits in (the marker is only attached
+  at open time, so `buildClosed()` never paints over it). Nothing spawns coins at the marker any more —
+  the reward is what the segment puts *behind* the door, which is the only place a wall can reveal
+  anything; scattering it around the marker put it in front of the wall and left the marker standing
+  as glass. Gates and levers need no protection code of their own: `BreakableBlocks.BREAKABLE` is a
+  whitelist of `SAND` and `SPAWNER`, so `IRON_BARS` and `LEVER` are already refused during a round. **A vault door must live in the same
+  segment as its vault marker**: `SaveSegmentCommand` sets `containedVault` from the `VAULT_DOOR` marker, so
+  a segment claiming a vault with no `VAULT_MARKER` makes the DFS count that colour as placed while
+  `consolidateFeatureLocations` emits no marker, and all 20 generation attempts then fail on the missing
+  marker. The save command now refuses that combination and the generator warns once for templates already
+  on disk.
 - **Rusty keys spawn at `ITEM_SPAWN` markers.** `DungeonManager.populateFloorItems` rolls
   `RUSTY_KEY_SPAWN_CHANCE` (20%) per item spawn and calls `FloorItemManager.spawnRustyKey`,
   otherwise falling through to the loot table. Nothing called `spawnRustyKey` at all before, so
@@ -248,6 +279,50 @@ line — so it is actionable without rediscovering it.
   breaker's own column; the listener subsumes it (every team's column, the whole live round) and the
   duplicate contradicted the Creative bypass, so it was removed along with the team lookup that only
   existed to serve it.
+- **Sacrifice points are segment markers, and the chest is what makes one exist.** `SAND_SACRIFICE`
+  and `DEATH_CAGE` markers were captured, serialized and loaded but never read — `DungeonManager`
+  invented four cages at `absHubLocation ± {3,0,3}` instead. That anchor is the hub's *origin corner*
+  (the hub is placed at `BlockVector3.ZERO`), so on the 42x15x37 bundled hub two of the four landed at
+  negative coordinates, outside the dungeon. Both markers now flow through the usual chain:
+  `Segment.getDeathCageOffsets()` / `getSandSacrificeLocations()` →
+  `DungeonGenerator.selectDeathCageRelativeLocations` / `selectSandSacrificeRelativeLocations` →
+  `reconcileSacrificePoints` → `DungeonBlueprint` → `DungeonManager` zips them into `DeathCage`s.
+  The generator guarantees the two blueprint lists are **the same length and index-aligned**, which is
+  what lets the zip run without null handling (`DeathCage`'s only constructor takes a `@NotNull` point).
+  Pairing is positional — the Nth marker frees the Nth cage — and any cage the template leaves
+  unpaired gets a point derived beside it. **`placeSacrificePoints()` is what makes a point exist**:
+  the marker records an *air* cell, so registering the `DeathCage` without writing a block leaves
+  nothing to right-click, exactly the trap `Door.buildClosed()` documents. The chest is forced to
+  `Chest.Type.SINGLE`, since two adjacent points would otherwise pair into a double chest and move the
+  block a click lands on. The derivation exists because `installBundledSegments()` is skip-if-present:
+  a re-saved `hub.json` never reaches a server that already has one, so without it every existing
+  server would stay unrevivable until someone re-saved the hub by hand.
+- **The sacrifice derivation moves every cage by one shared step.** `reconcileSacrificePoints` offsets
+  unpaired cages 2 blocks along a single cardinal direction — the dominant component of (hub centre −
+  cage centroid) — rather than resolving a direction per cage. Per-cage "toward the centre" breaks on
+  exactly the layout hubs use: the bundled hub's four cages sit in a row along X at z=4, and resolving
+  each independently flips two of them onto the X axis and leaves the row incoherent. One shared
+  translation keeps the chests in front of the row and, because translating distinct cells by a single
+  vector cannot collide them, *guarantees* no two cages share a chest. Ties and a cage sitting exactly
+  on the centre resolve to +Z so the result is deterministic; tests pin all of it.
+- **Reviving costs the dead player's death count, paid a sand at a time.** The price and the
+  part-payment live on `DeathCage`, which is already 1:1 with a player for the round, so they are torn
+  down with the dungeon and reset per round with nothing having to clear them (`SoTPlayerData.timesDied`
+  is *not* usable for this — `SoTPlayerManager` is never instantiated anywhere in `src/main`).
+  `recordDeath()` raises the price and discards leftover part-payment, so a player revived at cost 2 who
+  dies again does not inherit what was already paid. `SandManager.attemptRevive` consumes exactly one
+  sand per click and only revives on the click that completes the total, which is what lets several
+  teammates chip in. Sand paid into a revive that never completes is spent, not refunded. The interact
+  handler gates on `CHEST` and **cancels before the team lookup** — a sacrifice point is a real chest, so
+  returning early for a player with no team would let them open it.
+- **The floating sand above a chest is the activity signal, and is event-driven.** `SacrificeIndicatorManager`
+  spawns a `BlockDisplay` of sand plus a `TextDisplay` arrow and count above a chest only while its cage
+  holds someone awaiting revive; a chest with nothing above it has nobody to free. Like
+  `GameScoreboardManager` it is owned by `GameManager` and is **not** a listener, so there is nothing for
+  `SoT.onEnable()` to register — but unlike the scoreboard it runs no task, because the numbers only
+  change on death, payment, revive and timer-out. Its displays are `setPersistent(false)` and sit inside
+  the dungeon bounds, so `cleanupInstance()` removes them with every other non-player entity; `clearAll()`
+  in `tearDownRound()` is there to empty the manager's own map rather than to do the removing.
 - **Dying drops carried sand on the floor.** Nearly all of that is vanilla: `DeathListener` never
   touches `event.getDrops()`, so a death that drops the inventory scatters the sand with everything
   else and it lands, merges and despawns by the server's own rules. `SandManager.dropCarriedSandOnDeath`

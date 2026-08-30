@@ -52,6 +52,15 @@ public class DungeonGenerator {
     @Nullable private Long lastUsedSeed;
     private static final int MAX_DEPTH = 12; // Deepest vault (gold) maxes at 10, leaving headroom.
     private static final int MAX_TOTAL_SEGMENTS = 120; // Safety cap; a full dungeon fans out well under this.
+
+    /** One death cage per player, and teams are at most four players. */
+    private static final int MAX_DEATH_CAGES = 4;
+
+    /**
+     * How far a derived sacrifice point sits from its cage. Matches the builder tool's cosmetic
+     * "Revive" preview distance, so what a builder saw when placing the cage is what they get.
+     */
+    private static final int SACRIFICE_DERIVE_DISTANCE = 2;
     // Track placed vaults/keys during generation
     private Set<VaultColor> keysPlacedInDFS;
     private Set<VaultColor> vaultsPlacedInDFS;
@@ -389,6 +398,35 @@ public class DungeonGenerator {
                     + "cannot be spent on the timer. Add TIMER_DEPOSIT markers to the HUB segment and re-save it.");
         }
 
+        // Death cages and the sacrifice points that free them. Both lists leave here index-aligned
+        // and the same length, which is what lets DungeonManager zip them into DeathCage objects.
+        Vector hubCentre = hubCentreOf(placedSegments, hubRelativeLocation);
+        List<Vector> deathCageRelativeLocations = selectDeathCageRelativeLocations(placedSegments);
+        if (deathCageRelativeLocations.isEmpty()) {
+            warnOncePerGeneration("no-death-cages",
+                    "No DEATH_CAGE marker on any segment template; falling back to four cages around "
+                    + "the hub centre. Add DEATH_CAGE markers to your HUB segment and re-save it.");
+            deathCageRelativeLocations = fallbackCageLocations(hubCentre, hubRelativeLocation.getY());
+        }
+        List<Vector> sacrificeMarkers = selectSandSacrificeRelativeLocations(placedSegments);
+        if (sacrificeMarkers.isEmpty()) {
+            warnOncePerGeneration("no-sand-sacrifice",
+                    "No SAND_SACRIFICE marker on any segment template; a sacrifice chest will be "
+                    + "derived beside each death cage. Add SAND_SACRIFICE markers to your HUB segment "
+                    + "and re-save it to place them yourself.");
+        } else if (sacrificeMarkers.size() < deathCageRelativeLocations.size()) {
+            warnOncePerGeneration("too-few-sand-sacrifice",
+                    "Only " + sacrificeMarkers.size() + " SAND_SACRIFICE marker(s) for "
+                    + deathCageRelativeLocations.size() + " death cage(s); the remaining cages get a "
+                    + "derived sacrifice chest. Add one SAND_SACRIFICE marker per cage.");
+        } else if (sacrificeMarkers.size() > deathCageRelativeLocations.size()) {
+            warnOncePerGeneration("too-many-sand-sacrifice",
+                    sacrificeMarkers.size() + " SAND_SACRIFICE markers for only "
+                    + deathCageRelativeLocations.size() + " death cage(s); the extras are ignored.");
+        }
+        List<Vector> sandSacrificeRelativeLocations =
+                reconcileSacrificePoints(deathCageRelativeLocations, sacrificeMarkers, hubCentre);
+
         List<Doorway> doorways = new ArrayList<>(doorwaysInDFS);
         List<Doorway> unusedOpenings = findUnusedOpenings(placedSegments, doorways);
         plugin.getLogger().info("Layout has " + doorways.size() + " doorways and "
@@ -399,7 +437,8 @@ public class DungeonGenerator {
                 placedSegments, hubRelativeLocation, vaultMarkerRelativeLocations, keySpawnRelativeLocations,
                 sandSpawnRelativeLocations, coinSpawnRelativeLocations, itemSpawnRelativeLocations,
                 blueprintBounds, safeExitRelativeLocation, timerBaseRelativeLocation, bankRelativeLocation,
-                playerSpawnRelativeLocations, sandTimerRelativeLocations, doorways, unusedOpenings,
+                playerSpawnRelativeLocations, sandTimerRelativeLocations,
+                deathCageRelativeLocations, sandSacrificeRelativeLocations, doorways, unusedOpenings,
                 mobSpawnerRelativeLocations
         );
     }
@@ -977,6 +1016,149 @@ public class DungeonGenerator {
     }
 
     /**
+     * Collects the blueprint-relative death cage cells from {@code DEATH_CAGE} markers, HUB templates
+     * winning outright exactly like the sand deposits. Capped at {@link #MAX_DEATH_CAGES}, since a team
+     * is at most four players and each player gets one cage.
+     */
+    @NotNull
+    static List<Vector> selectDeathCageRelativeLocations(@NotNull List<PlacedSegment> placedSegments) {
+        List<Vector> hubCages = new ArrayList<>();
+        List<Vector> otherCages = new ArrayList<>();
+        for (PlacedSegment placedSegment : placedSegments) {
+            Segment template = placedSegment.getSegmentTemplate();
+            if (template == null) continue;
+            boolean fromHub = template.getType() == SegmentType.HUB;
+            Vector origin = placedSegment.getWorldOrigin().toVector();
+            for (BlockVector3 offset : template.getDeathCageOffsets()) {
+                BlockVector3 rot = placedSegment.getRotatedOffset(offset);
+                Vector abs = origin.clone().add(new Vector(rot.x(), rot.y(), rot.z()));
+                (fromHub ? hubCages : otherCages).add(abs);
+            }
+        }
+        List<Vector> chosen = !hubCages.isEmpty() ? hubCages : otherCages;
+        return chosen.size() > MAX_DEATH_CAGES ? new ArrayList<>(chosen.subList(0, MAX_DEATH_CAGES)) : chosen;
+    }
+
+    /**
+     * Collects the blueprint-relative sacrifice point cells from {@code SAND_SACRIFICE} markers — the
+     * chests a teammate right-clicks to buy a caged player out. HUB templates win outright, as for
+     * every other hub feature.
+     *
+     * <p>Returned raw and unpaired; {@link #reconcileSacrificePoints} is what matches them to cages.
+     */
+    @NotNull
+    static List<Vector> selectSandSacrificeRelativeLocations(@NotNull List<PlacedSegment> placedSegments) {
+        List<Vector> hubPoints = new ArrayList<>();
+        List<Vector> otherPoints = new ArrayList<>();
+        for (PlacedSegment placedSegment : placedSegments) {
+            Segment template = placedSegment.getSegmentTemplate();
+            if (template == null) continue;
+            boolean fromHub = template.getType() == SegmentType.HUB;
+            Vector origin = placedSegment.getWorldOrigin().toVector();
+            for (BlockVector3 offset : template.getSandSacrificeLocations()) {
+                BlockVector3 rot = placedSegment.getRotatedOffset(offset);
+                Vector abs = origin.clone().add(new Vector(rot.x(), rot.y(), rot.z()));
+                (fromHub ? hubPoints : otherPoints).add(abs);
+            }
+        }
+        return !hubPoints.isEmpty() ? hubPoints : otherPoints;
+    }
+
+    /**
+     * The blueprint-relative centre of the hub segment, used to orient derived sacrifice points.
+     *
+     * <p>Falls back to the hub origin when the hub segment cannot be identified, which only leaves
+     * the derivation slightly off rather than failing generation.
+     */
+    @NotNull
+    static Vector hubCentreOf(@NotNull List<PlacedSegment> placedSegments, @NotNull Vector hubRelativeLocation) {
+        for (PlacedSegment placedSegment : placedSegments) {
+            Segment template = placedSegment.getSegmentTemplate();
+            if (template == null || template.getType() != SegmentType.HUB) continue;
+            BlockVector3 size = template.getSize();
+            return placedSegment.getWorldOrigin().toVector().clone()
+                    .add(new Vector(size.x() / 2.0, size.y() / 2.0, size.z() / 2.0));
+        }
+        return hubRelativeLocation.clone();
+    }
+
+    /**
+     * Four evenly spread fallback cages for a hub that defines no {@code DEATH_CAGE} markers at all.
+     *
+     * <p>Spread around the hub's <em>centre</em> horizontally, but standing on the hub's <em>floor</em>.
+     * The hub is placed at {@link BlockVector3#ZERO} and {@code hubRelativeLocation} is therefore its
+     * origin corner, so the offsets this replaces put two of the four cages at negative coordinates —
+     * outside the dungeon entirely. Centring fixes that; taking the centre's <em>height</em> too would
+     * swap one bug for another and hang the cages in mid-air, half the hub up.
+     */
+    @NotNull
+    static List<Vector> fallbackCageLocations(@NotNull Vector hubCentre, double floorY) {
+        int[][] offsets = { {3, 0, 3}, {3, 0, -3}, {-3, 0, 3}, {-3, 0, -3} };
+        // Floored to whole cells: an even-sized hub centres on a .5 boundary, and a cage on a block
+        // corner would put its teleport and its chest half a block out.
+        Vector base = new Vector(Math.floor(hubCentre.getX()), Math.floor(floorY), Math.floor(hubCentre.getZ()));
+        List<Vector> cages = new ArrayList<>();
+        for (int[] offset : offsets) {
+            cages.add(base.clone().add(new Vector(offset[0], offset[1], offset[2])));
+        }
+        return cages;
+    }
+
+    /**
+     * Pairs each death cage with the sacrifice point that frees it, so the returned list is always
+     * the same size as {@code cages} and index-aligned with it.
+     *
+     * <p>Markers are consumed in placement order — the Nth {@code SAND_SACRIFICE} marker frees the Nth
+     * {@code DEATH_CAGE}. Any cage left over (because the template defines fewer points than cages, or
+     * none at all) gets a point derived beside it; any surplus marker is dropped.
+     *
+     * <p>The derivation moves <em>every</em> cage by one shared cardinal step rather than resolving a
+     * direction per cage. Per-cage "toward the hub centre" breaks on exactly the layout hubs tend to
+     * use: the bundled hub's four cages sit in a row along X, and resolving each one independently
+     * flips some of them onto the X axis and leaves the row incoherent. One shared translation keeps
+     * the points in front of the row, and — because translating distinct cells by a single vector
+     * cannot collide them — guarantees no two cages ever share a sacrifice point.
+     */
+    @NotNull
+    static List<Vector> reconcileSacrificePoints(@NotNull List<Vector> cages,
+                                                 @NotNull List<Vector> markers,
+                                                 @NotNull Vector hubCentre) {
+        List<Vector> paired = new ArrayList<>(cages.size());
+        Vector step = derivationStep(cages, hubCentre);
+        for (int i = 0; i < cages.size(); i++) {
+            if (i < markers.size()) {
+                paired.add(markers.get(i).clone());
+            } else {
+                paired.add(cages.get(i).clone().add(step));
+            }
+        }
+        return paired;
+    }
+
+    /**
+     * The single cardinal offset used to derive sacrifice points, pointing from the cages toward the
+     * hub centre along whichever horizontal axis is more wrong. Ties (and a degenerate case where the
+     * cages sit exactly on the centre) resolve to +Z so the result is always deterministic.
+     */
+    @NotNull
+    private static Vector derivationStep(@NotNull List<Vector> cages, @NotNull Vector hubCentre) {
+        if (cages.isEmpty()) return new Vector(0, 0, SACRIFICE_DERIVE_DISTANCE);
+
+        double sumX = 0, sumZ = 0;
+        for (Vector cage : cages) {
+            sumX += cage.getX();
+            sumZ += cage.getZ();
+        }
+        double dx = hubCentre.getX() - (sumX / cages.size());
+        double dz = hubCentre.getZ() - (sumZ / cages.size());
+
+        if (Math.abs(dx) > Math.abs(dz)) {
+            return new Vector(dx > 0 ? SACRIFICE_DERIVE_DISTANCE : -SACRIFICE_DERIVE_DISTANCE, 0, 0);
+        }
+        return new Vector(0, 0, dz < 0 ? -SACRIFICE_DERIVE_DISTANCE : SACRIFICE_DERIVE_DISTANCE);
+    }
+
+    /**
      * Iterates through all placed segments in the completed blueprint layout and consolidates
      * the relative locations of all defined features (vaults, keys, spawns) into the final maps/lists
      * used to construct the DungeonBlueprint object. Converts relative BlockVector3 offsets to relative Bukkit Vectors.
@@ -1029,6 +1211,15 @@ public class DungeonGenerator {
                      warnOncePerGeneration("dup-vault:" + vaultColor + ":" + template.getName(),
                              "Duplicate vault marker found for color " + vaultColor + " in segment " + template.getName() + ". Keeping first one found.");
                 }
+            } else if (vaultColor != null) {
+                // A VAULT_DOOR marker sets containedVault too, so a segment saved with a vault door and
+                // no VAULT_MARKER claims a vault it cannot provide: the DFS counts the colour as placed
+                // while no marker is emitted, and every attempt then fails on the missing marker.
+                // SaveSegmentCommand refuses this now; templates saved before it can still be on disk.
+                warnOncePerGeneration("vault-no-marker:" + vaultColor + ":" + template.getName(),
+                        "Segment " + template.getName() + " claims the " + vaultColor + " vault but has no"
+                        + " VAULT_MARKER (a VAULT_DOOR marker alone sets the colour). Generation cannot"
+                        + " place that vault -- re-save the segment with a matching VAULT_MARKER.");
             }
 
             // --- Consolidate Key Spawn ---

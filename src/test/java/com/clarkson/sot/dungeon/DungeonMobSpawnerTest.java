@@ -31,7 +31,7 @@ class DungeonMobSpawnerTest {
         Area bounds = new Area(new Location(null, 0, 0, 0), new Location(null, 15, 7, 15));
         return new DungeonBlueprint(List.of(), new Vector(0, 0, 0), Map.of(), Map.of(),
                 List.of(), List.of(), List.of(), bounds, null, null, null, List.of(),
-                List.of(), List.of(), List.of(), mobSpawners);
+                List.of(), List.of(), List.of(), List.of(), List.of(), mobSpawners);
     }
 
     private Dungeon dungeon(List<Location> mobSpawners) {

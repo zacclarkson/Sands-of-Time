@@ -4,6 +4,8 @@ package com.clarkson.sot.dungeon;
 import com.clarkson.sot.dungeon.segment.EntryPoint;
 import com.clarkson.sot.dungeon.segment.PlacedSegment;
 import com.clarkson.sot.dungeon.segment.Segment;
+import com.clarkson.sot.dungeon.segment.SegmentBound;
+import com.clarkson.sot.dungeon.segment.SegmentGeometry;
 import com.clarkson.sot.entities.Area;
 import com.clarkson.sot.events.FloorItemManager;
 import com.clarkson.sot.main.GameManager;
@@ -52,6 +54,7 @@ import java.io.FileInputStream;
 import java.io.IOException;
 import java.util.*;
 import java.util.logging.Level;
+import java.util.logging.Logger;
 import java.util.stream.Collectors;
 
 /**
@@ -191,22 +194,16 @@ public class DungeonManager {
 
 
         // --- 3. Create Dungeon Data Object ---
-        // Create 4 death cage + sacrifice point pairs near the hub (one per player, max 4)
+        // Death cages and their sacrifice points come straight from the blueprint, which guarantees
+        // the two lists are the same length and index-aligned (DungeonGenerator derives a point for
+        // any cage the templates left unpaired), so this is a plain zip.
+        List<Location> absCages = calculateAbsoluteLocations(blueprintData.getDeathCageRelativeLocations());
+        List<Location> absSacrificePoints = calculateAbsoluteLocations(blueprintData.getSandSacrificeRelativeLocations());
         List<DeathCage> deathCages = new ArrayList<>();
-        if (absHubLocation != null) {
-            // Cages are placed in a row offset from the hub center
-            // Each cage has a paired sacrifice point 2 blocks in front of it
-            int[][] cageOffsets = { {3, 0, 3}, {3, 0, -3}, {-3, 0, 3}, {-3, 0, -3} };
-            for (int[] offset : cageOffsets) {
-                Location cageLoc = absHubLocation.clone().add(offset[0], offset[1], offset[2]);
-                // Sacrifice point is 2 blocks toward hub center from the cage
-                Location sacrificeLoc = cageLoc.clone().add(
-                    offset[0] > 0 ? -2 : 2, 0,
-                    offset[2] > 0 ? -2 : 2
-                );
-                deathCages.add(new DeathCage(cageLoc, sacrificeLoc));
-            }
+        for (int i = 0; i < absCages.size() && i < absSacrificePoints.size(); i++) {
+            deathCages.add(new DeathCage(absCages.get(i), absSacrificePoints.get(i)));
         }
+        plugin.getLogger().info("Prepared " + deathCages.size() + " death cage(s) for team " + teamId);
 
          try {
             this.dungeonData = new Dungeon(
@@ -230,6 +227,12 @@ public class DungeonManager {
             vaultManager.initializeForInstance(this.dungeonData);
             placeBankBlock(); // Must run after the paste: a schematic would overwrite the chest
             doorManager.initializeDoorsForInstance(this.dungeonData); // Initialize doors
+            // After the doors, so a gate overlapping an opening sealUnusedOpenings just walled off
+            // wins -- the interactive thing should.
+            doorManager.initializeGatesForInstance(teamId,
+                    resolveGateGroups(placedSegmentsInWorld, plugin.getLogger()),
+                    resolveVaultDoors(placedSegmentsInWorld, plugin.getLogger()));
+            placeSacrificePoints(); // Build the chests teammates click to revive
             populateFloorItems(); // Spawn floor items
             armMobSpawners(); // Arm mob spawners (mobs appear when a player gets close)
         } catch (Exception e) {
@@ -392,6 +395,46 @@ public class DungeonManager {
      * and places Sand blocks probabilistically based on the absolute locations
      * stored in the `dungeonData` object. Called by `initializeInstance`.
      */
+    /**
+     * Builds the chest at each death cage's sacrifice point.
+     *
+     * <p>Placing this block is what makes a sacrifice point exist at all: the marker records an
+     * <em>air</em> cell, so without writing something here there is nothing for a teammate to
+     * right-click and the revive can never fire.
+     *
+     * <p>Chests are forced to {@link org.bukkit.block.data.type.Chest.Type#SINGLE}. Two sacrifice
+     * points placed next to each other would otherwise pair into a double chest, which moves the
+     * block a click actually lands on and would break the point-to-cage lookup.
+     */
+    private void placeSacrificePoints() {
+        if (dungeonData == null) return;
+
+        int placed = 0;
+        for (DeathCage cage : dungeonData.getDeathCages()) {
+            Location loc = cage.getSacrificePointLocation();
+            try {
+                Block block = loc.getBlock();
+                if (!(block.isPassable() || block.getType().isAir() || block.isLiquid())) {
+                    plugin.getLogger().warning("Could not place sacrifice chest at " + loc.toVector()
+                            + " for team " + teamId + ": block is " + block.getType()
+                            + ". That cage cannot be revived from this round.");
+                    continue;
+                }
+                block.setType(Material.CHEST, false);
+                BlockData data = block.getBlockData();
+                if (data instanceof org.bukkit.block.data.type.Chest chestData) {
+                    chestData.setType(org.bukkit.block.data.type.Chest.Type.SINGLE);
+                    block.setBlockData(chestData, false);
+                }
+                placed++;
+            } catch (Exception e) {
+                plugin.getLogger().log(Level.WARNING,
+                        "Error placing sacrifice chest at " + loc + " for team " + teamId, e);
+            }
+        }
+        plugin.getLogger().info("Placed " + placed + " sacrifice chest(s) for team " + teamId);
+    }
+
     private void populateFloorItems() {
         // Ensure data is ready
         if (dungeonData == null) {
@@ -550,6 +593,83 @@ public class DungeonManager {
     /** Absolute cell the coin bank stands in; null when no segment template defined a BANK marker. */
     @Nullable public Location getBankLocation() { return (bankLocation != null) ? bankLocation.clone() : null; }
     @NotNull public List<PlacedSegment> getPlacedSegmentsInWorld() { return Collections.unmodifiableList(this.placedSegmentsInWorld); }
+
+    /**
+     * Pairs each placed segment's gates with the lever that opens them, in absolute coordinates.
+     *
+     * <p>Read straight off the placed segments rather than carried on the blueprint. Doorways ride
+     * the blueprint because the DFS <em>discards</em> which connections it made and that cannot be
+     * recovered afterwards; gates discard nothing -- every GATE and LEVER marker on a placed template
+     * is used verbatim. Flattening them into a dungeon-wide list, the shape every other blueprint
+     * feature uses, would also lose the per-segment pairing that makes a lever mean anything.
+     *
+     * <p>Static and package-private so it can be tested against hand-built placements: everything
+     * else on this path needs WorldEdit and a pasted dungeon.
+     */
+    @NotNull
+    static List<GateGroup> resolveGateGroups(@NotNull List<PlacedSegment> placedSegments, @NotNull Logger log) {
+        List<GateGroup> groups = new ArrayList<>();
+        for (PlacedSegment placed : placedSegments) {
+            Segment template = placed.getSegmentTemplate();
+            if (template == null) continue;
+
+            List<SegmentBound> gates = template.getGates();
+            BlockVector3 leverOffset = template.getLeverOffset();
+
+            if (gates.isEmpty()) {
+                if (leverOffset != null) {
+                    log.fine("Segment " + template.getName() + " has a LEVER marker but no gates; ignoring it.");
+                }
+                continue;
+            }
+            if (leverOffset == null) {
+                // SaveSegmentCommand refuses this combination, so only hand-edited JSON reaches here.
+                // Leaving the gates unbuilt keeps the area open rather than sealing it behind a wall
+                // nothing can ever raise.
+                log.warning("Segment " + template.getName() + " declares " + gates.size()
+                        + " gate(s) but no lever; leaving them open. Re-save the template with a LEVER marker.");
+                continue;
+            }
+
+            List<Area> bounds = new ArrayList<>();
+            for (SegmentBound gate : gates) {
+                bounds.add(SegmentGeometry.toAbsoluteArea(placed, gate));
+            }
+            groups.add(new GateGroup(SegmentGeometry.toAbsoluteLocation(placed, leverOffset),
+                    bounds, template.getName()));
+        }
+        return groups;
+    }
+
+    /**
+     * Resolves each placed segment's vault door into an absolute wall plus the colour that opens it.
+     *
+     * <p>Two segments carrying the same colour is not an error: {@code openVaultDoors} opens every
+     * door of a colour, so a duplicate simply opens both.
+     */
+    @NotNull
+    static List<VaultDoorPlacement> resolveVaultDoors(@NotNull List<PlacedSegment> placedSegments, @NotNull Logger log) {
+        List<VaultDoorPlacement> doors = new ArrayList<>();
+        for (PlacedSegment placed : placedSegments) {
+            Segment template = placed.getSegmentTemplate();
+            if (template == null) continue;
+
+            SegmentBound bound = template.getVaultDoorBound();
+            if (bound == null) continue;
+
+            VaultColor color = template.getContainedVault();
+            if (color == null) {
+                // /sotmode VAULT_DOOR with no colour stores none on the marker, so the saved template
+                // has a wall nothing can ever open.
+                log.warning("Segment " + template.getName() + " has a vault door with no vault colour;"
+                        + " skipping it. Re-place the marker with /sotmode VAULT_DOOR <color>.");
+                continue;
+            }
+            doors.add(new VaultDoorPlacement(color, SegmentGeometry.toAbsoluteArea(placed, bound),
+                    template.getName()));
+        }
+        return doors;
+    }
 
     /** Finds the PlacedSegment (with absolute world coords) at a given absolute world location within this instance. */
     @Nullable
