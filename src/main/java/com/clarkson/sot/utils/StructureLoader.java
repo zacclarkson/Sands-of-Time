@@ -275,6 +275,12 @@ public class StructureLoader {
                 timerOffset = deserializeBlockVector3(
                         json.getAsJsonObject("timerLocationOffset"), "timerLocationOffset", name, sourceFileName);
             }
+            // Optional: templates saved before BRANCH_SIGNIFIER existed simply have no array here,
+            // and generate a dungeon with no colour markings rather than failing to load.
+            List<BlockVector3> branchSignifiers = json.has("branchSignifierLocations")
+                    ? deserializeBlockVectorList(json.getAsJsonArray("branchSignifierLocations"),
+                            "branchSignifierLocations", name, sourceFileName)
+                    : new ArrayList<>();
 
             // --- Construct the Segment Template Object ---
             return new Segment(
@@ -303,7 +309,8 @@ public class StructureLoader {
                     safeExitBound,
                     sandTimers != null ? sandTimers : new ArrayList<>(),
                     timerOffset,
-                    playerSpawns != null ? playerSpawns : new ArrayList<>()
+                    playerSpawns != null ? playerSpawns : new ArrayList<>(),
+                    branchSignifiers != null ? branchSignifiers : new ArrayList<>()
             );
 
         } catch (JsonParseException | IllegalStateException | ClassCastException | NullPointerException e) {

@@ -70,6 +70,15 @@ public class Segment {
     /** Per-player spawn positions in the hub; players are spread across these at game start. */
     private final List<BlockVector3> playerSpawnOffsets;
 
+    // --- Branch colour signifier ---
+    /**
+     * Placeholder cells for the coloured wall markings that tell players which vault colour lies
+     * down a branch. The colour is not template data: the generator resolves one per placeholder
+     * from the layout it produced (see {@code DungeonGenerator.resolveBranchSignifiers}), pairing
+     * each placeholder with the nearest entry point of this template.
+     */
+    private final List<BlockVector3> branchSignifierOffsets;
+
     /**
      * Full constructor. Called by SaveSegmentCommand and StructureLoader.
      */
@@ -100,7 +109,8 @@ public class Segment {
             @Nullable SegmentBound safeExitBound,
             @NotNull  List<BlockVector3> sandTimerOffsets,
             @Nullable BlockVector3 timerOffset,
-            @NotNull  List<BlockVector3> playerSpawnOffsets
+            @NotNull  List<BlockVector3> playerSpawnOffsets,
+            @NotNull  List<BlockVector3> branchSignifierOffsets
     ) {
         Objects.requireNonNull(name, "name");
         Objects.requireNonNull(schematicFileName, "schematicFileName");
@@ -133,6 +143,7 @@ public class Segment {
         this.sandTimerOffsets       = new ArrayList<>(sandTimerOffsets);
         this.timerOffset            = timerOffset;
         this.playerSpawnOffsets     = new ArrayList<>(playerSpawnOffsets);
+        this.branchSignifierOffsets = new ArrayList<>(branchSignifierOffsets);
     }
 
     // --- Core getters ---
@@ -181,6 +192,12 @@ public class Segment {
     @NotNull  public List<BlockVector3> getSandTimerOffsets() { return Collections.unmodifiableList(sandTimerOffsets); }
     @NotNull  public List<BlockVector3> getPlayerSpawnOffsets() { return Collections.unmodifiableList(playerSpawnOffsets); }
     @Nullable public BlockVector3 getTimerOffset()            { return timerOffset; }
+
+    // --- Branch signifier getter ---
+    /** Placeholder cells for this segment's coloured branch markings (may be empty). */
+    @NotNull public List<BlockVector3> getBranchSignifierOffsets() {
+        return Collections.unmodifiableList(branchSignifierOffsets);
+    }
 
     // --- Entry-point helpers ---
     public boolean hasEntryPointInDirection(@NotNull Direction dir) {

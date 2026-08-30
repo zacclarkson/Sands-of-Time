@@ -272,7 +272,7 @@ class DungeonGeneratorSeedTest {
                 null, List.of(), null,
                 List.of(), List.of(),
                 null,
-                null, List.of(), null, List.of(), null, List.of());
+                null, List.of(), null, List.of(), null, List.of(), List.of());
     }
 
     private static Segment hub(int exits) {
@@ -288,7 +288,7 @@ class DungeonGeneratorSeedTest {
                 null, List.of(), null,
                 List.of(), List.of(),
                 null,
-                null, List.of(), null, List.of(), null, List.of());
+                null, List.of(), null, List.of(), null, List.of(), List.of());
     }
 
     private static List<Segment> fullSet() {

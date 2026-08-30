@@ -389,6 +389,8 @@ public class StructureSaver {
             if (timer != null) {
                 json.add("timerLocationOffset", serializeBlockVector3(timer));
             }
+            json.add("branchSignifierLocations", serializeBlockVectorList(
+                    segmentTemplate.getBranchSignifierOffsets(), "branchSignifierLocations", segmentName));
 
             return json;
 

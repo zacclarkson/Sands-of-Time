@@ -157,6 +157,29 @@ line — so it is actionable without rediscovering it.
   `consolidateFeatureLocations` emits no marker, and all 20 generation attempts then fail on the missing
   marker. The save command now refuses that combination and the generator warns once for templates already
   on disk.
+- **A branch's vault colour is resolved at generation, not saved on the template.** A
+  `BRANCH_SIGNIFIER` marker records only *where* a coloured wall marking goes; the colour cannot be
+  template data, because the same corridor sits on the red branch in one layout and the gold branch
+  in the next. `DungeonGenerator.generatePathRecursive` therefore **returns** the vault colours in
+  the subtree it just built and records them in `branchColoursByDoorway`, keyed on the doorway cell
+  — the same cell `findUnusedOpenings` keys on, and the cell *both* segments of a connection share
+  (`calculatePlacementOrigin`), which is what lets a marking inside the child resolve against the
+  branch it stands on. `resolveBranchSignifiers` then pairs each placeholder with the **nearest entry
+  point of its own template** and takes that branch's colour; the pairing is computed in template
+  space, so it survives rotation (index i of `getEntryPoints()` is index i of
+  `getRotatedEntryPoints()`). Two cases deliberately emit *nothing* rather than a wrong colour: a
+  placeholder beside an opening the DFS never attached a neighbour to (the hub's ~6 non-vault exits)
+  and one whose branch holds no vault. Only the **first** segment of a colour contributes, matching
+  the first-wins rule `consolidateFeatureLocations` applies to the markers — a later duplicate is not
+  the vault that reaches the blueprint, so its branch must not advertise the colour. Where a branch
+  holds several vaults the shallowest wins, since that is the one the player meets first. The
+  resolved `BranchSignifier`s ride `DungeonBlueprint` (not `Dungeon`, whose constructor is already
+  16 arguments — nothing at runtime queries "is there a marking here", and
+  `BreakableBlocks.BREAKABLE` already refuses the block during a round), and
+  `DungeonManager.placeBranchSignifiers` writes `VaultColor.getConcreteMaterial()` at each cell
+  **after** the paste, for the same reason `placeBankBlock` does. The bundled hub declares no
+  `BRANCH_SIGNIFIER` markers, so a stock server sees no colour markings; generation warns once per
+  `/sot setup` when no template declares any.
 - **Rusty keys spawn at `ITEM_SPAWN` markers.** `DungeonManager.populateFloorItems` rolls
   `RUSTY_KEY_SPAWN_CHANCE` (20%) per item spawn and calls `FloorItemManager.spawnRustyKey`,
   otherwise falling through to the loot table. Nothing called `spawnRustyKey` at all before, so

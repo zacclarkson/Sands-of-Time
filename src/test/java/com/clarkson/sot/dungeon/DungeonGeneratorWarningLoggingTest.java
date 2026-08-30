@@ -82,7 +82,7 @@ class DungeonGeneratorWarningLoggingTest {
                 null, List.of(), null,
                 List.of(), List.of(),
                 null,
-                null, List.of(), null, List.of(), null, List.of());
+                null, List.of(), null, List.of(), null, List.of(), List.of());
     }
 
     /** Hub with 8 straight SOUTH exits in disjoint x-columns, optionally carrying its own vault marker. */
@@ -101,7 +101,7 @@ class DungeonGeneratorWarningLoggingTest {
                 null, List.of(), null,
                 List.of(), List.of(),
                 null,
-                null, List.of(), null, List.of(), null, List.of());
+                null, List.of(), null, List.of(), null, List.of(), List.of());
     }
 
     private static Segment corridorNS() {
