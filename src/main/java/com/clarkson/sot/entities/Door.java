@@ -176,7 +176,14 @@ public abstract class Door {
          }.runTask(plugin);
      }
 
-    protected void cancelAnimation() {
+    /**
+     * Cancels any in-flight open/close animation.
+     *
+     * <p>Public because {@code DoorManager} (a different package) has to stop these when a round is
+     * torn down: an animation still ticking after the dungeon has been air-filled keeps writing
+     * door blocks back into the cleared region.
+     */
+    public void cancelAnimation() {
         if (this.currentAnimationTask != null && !this.currentAnimationTask.isCancelled()) {
             this.currentAnimationTask.cancel();
              plugin.getLogger().finer("Cancelled animation task for door " + id);

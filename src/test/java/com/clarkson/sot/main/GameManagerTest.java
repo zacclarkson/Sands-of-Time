@@ -4,6 +4,9 @@ import com.clarkson.sot.utils.PlayerStatus;
 
 import org.junit.jupiter.api.Test;
 
+import java.util.EnumSet;
+import java.util.Set;
+
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
@@ -14,6 +17,10 @@ import static org.junit.jupiter.api.Assertions.*;
  * it gates is queued with {@code runTask} in the same tick as the trapped teleport queued by
  * {@code handleTeamTimerEnd}, and runs after it — so letting a trapped player through here puts
  * them in the lobby instead of the trapped box, which is precisely the bug this guards against.
+ *
+ * <p>Also pins {@link GameManager#canResetFrom}, the gate on the ENDED → SETUP transition that lets
+ * a server play consecutive rounds. Both are static on purpose: building a real {@code GameManager}
+ * means building every manager and loading segment templates off disk, which these tests avoid.
  */
 class GameManagerTest {
 
@@ -28,6 +35,36 @@ class GameManagerTest {
             if (status == PlayerStatus.TRAPPED_TIMER_OUT) continue;
             assertTrue(GameManager.returnsToLobbyAtGameEnd(status),
                     status + " must still be returned to the lobby when the round ends");
+        }
+    }
+
+    /** ENDED used to be a dead end: without this transition a server could only ever play once. */
+    @Test
+    void aFinishedRoundCanBeResetSoAnotherCanBePlayed() {
+        assertTrue(GameManager.canResetFrom(GameState.ENDED));
+    }
+
+    /** Re-clearing an idle game is harmless, so an operator never has to guess whether it is safe. */
+    @Test
+    void resettingAnIdleGameIsAllowed() {
+        assertTrue(GameManager.canResetFrom(GameState.SETUP));
+    }
+
+    /**
+     * A live round has players in a dungeon and timers on the clock; tearing that down underneath
+     * them would strand them there. {@code /sot end} first.
+     */
+    @Test
+    void resetIsRefusedWhileARoundIsLive() {
+        Set<GameState> live = EnumSet.of(GameState.COUNTDOWN, GameState.RUNNING, GameState.PAUSED);
+        for (GameState state : live) {
+            assertFalse(GameManager.canResetFrom(state),
+                    state + " is a live round and must be ended before it can be reset");
+        }
+        // Every state is either resettable or live — no state may fall through both.
+        for (GameState state : GameState.values()) {
+            assertEquals(!live.contains(state), GameManager.canResetFrom(state),
+                    "unclassified game state: " + state);
         }
     }
 }

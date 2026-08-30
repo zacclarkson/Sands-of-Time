@@ -39,7 +39,8 @@ public class ReloadSegmentsCommand implements CommandExecutor {
             return true;
         }
 
-        if (gameManager.getCurrentState() == GameState.RUNNING) {
+        GameState state = gameManager.getCurrentState();
+        if (state == GameState.RUNNING || state == GameState.COUNTDOWN) {
             sender.sendMessage(Component.text(
                     "Cannot reload segments while a game is running — end it first (the running "
                     + "dungeon is already built).", NamedTextColor.RED));
