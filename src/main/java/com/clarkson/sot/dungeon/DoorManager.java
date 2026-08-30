@@ -115,7 +115,14 @@ public class DoorManager implements Listener {
       * @param teamId The UUID of the team whose state should be cleared.
       */
      public void clearTeamState(UUID teamId) {
-         doorsByTeamAndLockLocation.remove(teamId);
+         Map<Location, Door> teamDoors = doorsByTeamAndLockLocation.remove(teamId);
+         if (teamDoors != null) {
+             // Stop any animation still running, or it keeps writing door blocks into a dungeon
+             // region that end-of-round cleanup has already air-filled.
+             for (Door door : teamDoors.values()) {
+                 door.cancelAnimation();
+             }
+         }
          plugin.getLogger().info("Cleared door state for team: " + teamId);
      }
 
@@ -221,6 +228,9 @@ public class DoorManager implements Listener {
 
     public void clearAllTeamStates() {
         int count = doorsByTeamAndLockLocation.size();
+        for (UUID teamId : new ArrayList<>(doorsByTeamAndLockLocation.keySet())) {
+            clearTeamState(teamId); // Cancels in-flight animations as well as dropping the doors
+        }
         doorsByTeamAndLockLocation.clear();
         plugin.getLogger().info("Cleared door states for " + count + " teams.");
     }

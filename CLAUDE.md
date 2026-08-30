@@ -49,8 +49,8 @@ manually (see `integration-test/README.md`); it is **not** part of CI.
 - **Builder tools** (perm `sot.admin.builder` / `sot.admin.savesegment`): `/sotbuilder` (gives the
   BLAZE_ROD tool), `/sotmode <mode> [arg]` (switch placement mode), `/sotsavesegment <name> <type>`
   (save the WorldEdit selection + placed markers as a segment template).
-- **Game control** (perm `sot.admin.control`): `/sot setup [numTeams] | start | end | set <lobby|trapped>`,
-  wired to `GameManager.setupGame/startGame/endGame` and the location setters.
+- **Game control** (perm `sot.admin.control`): `/sot setup [numTeams] | start | end | reset | set <lobby|trapped>`,
+  wired to `GameManager.setupGame/startGame/endGame/resetGame` and the location setters.
 
 ## Architecture notes & gotchas
 
@@ -95,6 +95,22 @@ manually (see `integration-test/README.md`); it is **not** part of CI.
   *where you escape from*: escaping teleports the player to the **lobby**, not to the exit block —
   the round is over for them, `ESCAPED_SAFE` bars them from escaping again (`EscapeListener`) or
   spending sand (`SandManager`), and the dungeon is torn down moments later.
+- **`ENDED` is terminal; `/sot reset` is the only way back to `SETUP`.** A round ends at
+  `GameState.ENDED` and nothing rearms it automatically, so the final standings stay readable —
+  `GameManager.resetGame()` (guarded by the pure `canResetFrom`, which refuses `COUNTDOWN`/`RUNNING`/
+  `PAUSED`) is what makes consecutive games possible without a server restart. All teardown lives in
+  one idempotent `tearDownRound()`, called by `endGameInternal` (**last**, after the status read that
+  `returnsToLobbyAtGameEnd` depends on and after `displayFinalScores`), by `resetGame`, and by
+  `setupGame`. Never clear `teamDungeonManagers` directly — go through `cleanupDungeonInstances()`,
+  since a dropped `DungeonManager` strands its pasted blocks and the next round's paste uses
+  `ignoreAirBlocks` and cannot clear them. `teamManager.clearAssignments()` belongs to `resetGame`
+  only: `/sot setup` assigns players *before* calling `setupGame`, so clearing there would wipe the
+  assignments it is about to read. A missing HUB template is deliberately **not** a game state
+  (it used to latch `ENDED` at boot); `setupGame`/`startGame` check `hasHubTemplate()` instead, so
+  `/sotreloadsegments` fixes it live.
+- **Countdown tasks are epoch-guarded.** The ticker only re-checks the state once a second, so
+  `roundEpoch` (bumped on every start and end) is what stops a round aborted mid-countdown from
+  having its stale task finish the *next* round's countdown early.
 - **The end-of-round teleport must skip trapped players.** `handleTeamTimerEnd` only *queues* the
   trapped teleport (`runTask` = next tick) and then calls `checkGameEndCondition` synchronously, so
   when the last team expires `endGameInternal` runs in that same tick and queues its lobby teleport

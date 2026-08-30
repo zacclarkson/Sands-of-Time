@@ -42,7 +42,7 @@ import java.util.stream.Collectors;
 public class GameCommand implements CommandExecutor, TabCompleter {
 
     private static final String PERMISSION = "sot.admin.control";
-    private static final List<String> SUBCOMMANDS = List.of("setup", "start", "end", "set");
+    private static final List<String> SUBCOMMANDS = List.of("setup", "start", "end", "reset", "set");
     private static final List<String> SET_TARGETS = List.of("lobby", "trapped");
 
     private final Plugin plugin;
@@ -69,6 +69,7 @@ public class GameCommand implements CommandExecutor, TabCompleter {
             case "setup" -> handleSetup(sender, args);
             case "start" -> handleStart(sender);
             case "end"   -> handleEnd(sender);
+            case "reset" -> handleReset(sender);
             case "set"   -> handleSet(sender, args);
             default      -> sendUsage(sender);
         }
@@ -81,7 +82,7 @@ public class GameCommand implements CommandExecutor, TabCompleter {
         }
         if (gameManager.getCurrentState() != GameState.SETUP) {
             sender.sendMessage(Component.text("Cannot set up: game state is "
-                    + gameManager.getCurrentState() + ". Reload the plugin/server to reset.", NamedTextColor.RED));
+                    + gameManager.getCurrentState() + ". Run /sot reset first.", NamedTextColor.RED));
             return;
         }
 
@@ -118,7 +119,17 @@ public class GameCommand implements CommandExecutor, TabCompleter {
             teamManager.assignPlayerToTeam(players.get(i), teamIds.get(i % numTeams));
         }
 
-        gameManager.setupGame(teamIds, players);
+        if (!gameManager.setupGame(teamIds, players)) {
+            // setupGame refuses on its own for a missing HUB template or an unconfigured location,
+            // and used to do so silently behind an unconditional success message.
+            if (!gameManager.getDungeonGenerator().hasHubTemplate()) {
+                sender.sendMessage(Component.text("Setup failed: no HUB segment template loaded. Save "
+                        + "one with /sotsavesegment <name> HUB, then /sotreloadsegments.", NamedTextColor.RED));
+            } else {
+                sender.sendMessage(Component.text("Setup failed. Check the console.", NamedTextColor.RED));
+            }
+            return;
+        }
         sender.sendMessage(Component.text("Game set up with " + numTeams + " team(s) and "
                 + players.size() + " player(s). Run ", NamedTextColor.GREEN)
                 .append(Component.text("/sot start", NamedTextColor.YELLOW))
@@ -130,28 +141,58 @@ public class GameCommand implements CommandExecutor, TabCompleter {
             return;
         }
         if (gameManager.getCurrentState() != GameState.SETUP) {
-            sender.sendMessage(Component.text("Cannot start: run /sot setup first (state is "
-                    + gameManager.getCurrentState() + ").", NamedTextColor.RED));
+            sender.sendMessage(Component.text("Cannot start: run "
+                    + (gameManager.getCurrentState() == GameState.ENDED ? "/sot reset" : "/sot setup")
+                    + " first (state is " + gameManager.getCurrentState() + ").", NamedTextColor.RED));
             return;
         }
         gameManager.startGame();
-        // startGame() sets state to RUNNING on success, or ENDED if generation failed.
-        if (gameManager.getCurrentState() == GameState.RUNNING) {
+        // startGame() hands off to the pre-game countdown, so COUNTDOWN is the success state here —
+        // RUNNING only arrives once the countdown finishes. On failure it either leaves SETUP (no
+        // HUB template, unconfigured locations) or lands on ENDED (generation failed).
+        GameState after = gameManager.getCurrentState();
+        if (after == GameState.COUNTDOWN || after == GameState.RUNNING) {
             sender.sendMessage(Component.text("Game started.", NamedTextColor.GREEN));
+        } else if (!gameManager.getDungeonGenerator().hasHubTemplate()) {
+            sender.sendMessage(Component.text("Start failed: no HUB segment template loaded. Save one "
+                    + "with /sotsavesegment <name> HUB, then /sotreloadsegments.", NamedTextColor.RED));
         } else {
-            sender.sendMessage(Component.text("Start failed (likely no HUB segment template loaded). "
+            sender.sendMessage(Component.text("Start failed (state is " + after + "). "
                     + "Check the console.", NamedTextColor.RED));
         }
     }
 
     private void handleEnd(@NotNull CommandSender sender) {
         GameState state = gameManager.getCurrentState();
-        if (state != GameState.RUNNING && state != GameState.PAUSED) {
+        // COUNTDOWN counts as active: a round started by mistake must be abortable before it begins.
+        if (state != GameState.RUNNING && state != GameState.PAUSED && state != GameState.COUNTDOWN) {
             sender.sendMessage(Component.text("No active game to end (state is " + state + ").", NamedTextColor.RED));
             return;
         }
         gameManager.endGame();
-        sender.sendMessage(Component.text("Game ended.", NamedTextColor.GREEN));
+        sender.sendMessage(Component.text("Game ended. Run ", NamedTextColor.GREEN)
+                .append(Component.text("/sot reset", NamedTextColor.YELLOW))
+                .append(Component.text(" to play another round.", NamedTextColor.GREEN)));
+    }
+
+    /**
+     * {@code /sot reset} — clears a finished round and returns the game to SETUP so another round
+     * can be set up, without restarting the server. Refused while a round is still live.
+     */
+    private void handleReset(@NotNull CommandSender sender) {
+        GameState state = gameManager.getCurrentState();
+        if (!GameManager.canResetFrom(state)) {
+            sender.sendMessage(Component.text("Cannot reset while a game is " + state
+                    + ". Run /sot end first.", NamedTextColor.RED));
+            return;
+        }
+        if (gameManager.resetGame()) {
+            sender.sendMessage(Component.text("Game reset. Run ", NamedTextColor.GREEN)
+                    .append(Component.text("/sot setup", NamedTextColor.YELLOW))
+                    .append(Component.text(" to start another round.", NamedTextColor.GREEN)));
+        } else {
+            sender.sendMessage(Component.text("Reset failed. Check the console.", NamedTextColor.RED));
+        }
     }
 
     /**
@@ -178,8 +219,11 @@ public class GameCommand implements CommandExecutor, TabCompleter {
             case "lobby" -> {
                 // startGame() derives the dungeon world and origin from the lobby, so moving it
                 // mid-round would strand players and orphan the generated dungeons.
+                // COUNTDOWN counts too: startGame has already derived the world and pasted every
+                // dungeon from the lobby by the time the countdown is on screen.
                 GameState state = gameManager.getCurrentState();
-                if (state == GameState.RUNNING || state == GameState.PAUSED) {
+                if (state == GameState.RUNNING || state == GameState.PAUSED
+                        || state == GameState.COUNTDOWN) {
                     sender.sendMessage(Component.text(
                             "Cannot move the lobby while a game is " + state + ". End it first.",
                             NamedTextColor.RED));
@@ -226,12 +270,14 @@ public class GameCommand implements CommandExecutor, TabCompleter {
     }
 
     private void sendUsage(@NotNull CommandSender sender) {
-        sender.sendMessage(Component.text("Usage: /sot <setup|start|end|set>", NamedTextColor.YELLOW));
+        sender.sendMessage(Component.text("Usage: /sot <setup|start|end|reset|set>", NamedTextColor.YELLOW));
         sender.sendMessage(Component.text("  /sot setup [numTeams]  - assign online players to teams",
                 NamedTextColor.GRAY));
         sender.sendMessage(Component.text("  /sot start             - generate the dungeon and start timers",
                 NamedTextColor.GRAY));
         sender.sendMessage(Component.text("  /sot end               - force-end the current game", NamedTextColor.GRAY));
+        sender.sendMessage(Component.text("  /sot reset             - clear a finished round so another can be set up",
+                NamedTextColor.GRAY));
         sender.sendMessage(Component.text("  /sot set <lobby|trapped> - store your current location in config.yml",
                 NamedTextColor.GRAY));
     }
