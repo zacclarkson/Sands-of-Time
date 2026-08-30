@@ -25,6 +25,14 @@ import java.util.logging.Level;
  * Requires a specific VaultColor key, checked via ItemManager.
  * Opening changes the vault marker block.
  * Does not use the standard open/close animation from the abstract Door class.
+ *
+ * <p><b>Not currently wired up.</b> {@code DoorManager} used to register one of these at every
+ * vault marker block, which duplicated {@code VaultManager}'s handling of the same click (and
+ * skipped the rewards it spawns -- see the TODO in {@link #open}). {@code VaultManager} owns
+ * vault markers now. The class is kept for the separate "vault door" feature described in
+ * GAME_RULES.md -- an opening blocked until the matching vault is opened, sized by
+ * {@code Segment.getVaultDoorBound()} -- and for the key-tagging contract pinned by
+ * {@code KeyItemTaggingTest}.
  */
 public class VaultDoor extends Door {
 

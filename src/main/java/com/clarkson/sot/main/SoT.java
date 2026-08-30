@@ -140,7 +140,8 @@ public class SoT extends JavaPlugin {
 
         // --- Register Listeners ---
         // All gameplay listeners are the GameManager-owned instances so they operate on the
-        // live game state. FloorItemManager and DoorManager were previously never registered.
+        // live game state, and this is the only place any of them is registered -- the managers
+        // deliberately do not register themselves (that ran every handler twice).
         getServer().getPluginManager().registerEvents(new ToolListener(this, builderSessionManager), this);
         getServer().getPluginManager().registerEvents(gameManager.getVaultManager(), this);
         getServer().getPluginManager().registerEvents(gameManager.getBankingManager(), this);
