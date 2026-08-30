@@ -11,7 +11,6 @@ import net.kyori.adventure.text.format.NamedTextColor;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.Material;
-import org.bukkit.NamespacedKey;
 import org.bukkit.Sound;
 import org.bukkit.SoundCategory;
 import org.bukkit.World;
@@ -42,7 +41,9 @@ import java.util.*;
  * the trip back to the timer is the risk the game is built around.
  *
  * <p>Carried sand lives in the player's inventory and nowhere else; there is no parallel counter to
- * drift out of sync with it. Sacrificing 1 sand at a sacrifice point revives a dead teammate.
+ * drift out of sync with it. Sand is also the price of a revive: a caged teammate is bought out by
+ * right-clicking their sacrifice chest, one sand per click, until their death count (capped at
+ * {@link DeathCage#MAX_REVIVE_COST}) has been paid.
  *
  * <p>Dying drops undeposited sand on the floor where you fell, like any other item, so the corpse run
  * can win it back — see {@link #dropCarriedSandOnDeath(PlayerDeathEvent)}.
@@ -53,15 +54,10 @@ public class SandManager implements Listener {
     private final Plugin plugin;
 
     public static final int SECONDS_PER_SAND = 10;
-    public static final int REVIVE_COST = 1;
-
-    // PDC key to identify sand sacrifice point blocks
-    private static NamespacedKey SACRIFICE_POINT_KEY;
 
     public SandManager(GameManager gameManager, Plugin plugin) {
         this.gameManager = Objects.requireNonNull(gameManager);
         this.plugin = Objects.requireNonNull(plugin);
-        SACRIFICE_POINT_KEY = new NamespacedKey(plugin, "sot_sand_sacrifice");
     }
 
     /**
@@ -80,12 +76,16 @@ public class SandManager implements Listener {
     }
 
     /**
-     * Attempts to revive the specific player assigned to the given death cage.
-     * The reviver must have at least 1 sand. The caged player is freed and teleported to the hub.
+     * Puts one sand toward freeing the player assigned to the given death cage, and frees them once
+     * the full price is paid.
      *
-     * @param reviver The player sacrificing sand at the sacrifice point.
+     * <p>The price escalates with the caged player's death count (see {@link DeathCage}), and is paid
+     * a sand at a time, so any number of teammates can chip in on the same revive. Each accepted click
+     * consumes exactly one sand; a reviver who is short simply pays nothing.
+     *
+     * @param reviver The player sacrificing sand at the chest.
      * @param cage The death cage whose sacrifice point was interacted with.
-     * @return true if the assigned player was successfully revived.
+     * @return true if this sacrifice completed the price and the caged player was revived.
      */
     public boolean attemptRevive(Player reviver, DeathCage cage) {
         UUID teamId = gameManager.getTeamManager().getPlayerTeamId(reviver);
@@ -110,14 +110,32 @@ public class SandManager implements Listener {
             return false;
         }
 
-        // Check if reviver is carrying enough sand
-        if (getPlayerSandCount(reviver) < REVIVE_COST) {
-            reviver.sendMessage(Component.text("You need at least " + REVIVE_COST + " sand to revive a teammate!", NamedTextColor.RED));
+        // One sand per click. Refused without cost when they are carrying none.
+        if (getPlayerSandCount(reviver) < 1) {
+            reviver.sendMessage(Component.text("You need sand to free a teammate!", NamedTextColor.RED));
             return false;
         }
 
-        // Consume sand
-        removeSand(reviver, REVIVE_COST);
+        removeSand(reviver, 1);
+        boolean complete = cage.depositSand();
+        gameManager.getSacrificeIndicatorManager().update(cage);
+
+        if (!complete) {
+            int remaining = cage.getRemainingSand();
+            reviver.sendActionBar(Component.text(
+                    "Sacrificed 1 sand — " + remaining + " more to free " + deadPlayer.getName(),
+                    NamedTextColor.YELLOW));
+            reviver.playSound(reviver.getLocation(), Sound.BLOCK_SAND_PLACE, SoundCategory.PLAYERS, 1.0f, 1.0f);
+            deadPlayer.sendActionBar(Component.text(
+                    reviver.getName() + " paid 1 sand — " + remaining + " more to free you",
+                    NamedTextColor.YELLOW));
+            plugin.getLogger().fine(reviver.getName() + " paid 1 sand toward reviving "
+                    + deadPlayer.getName() + " (" + remaining + " remaining)");
+            return false;
+        }
+
+        int totalCost = cage.getRequiredSand();
+        cage.clearProgress();
 
         // Revive the dead player
         gameManager.getPlayerStateManager().updateStatus(deadPlayer, PlayerStatus.ALIVE_IN_DUNGEON);
@@ -137,7 +155,7 @@ public class SandManager implements Listener {
         reviver.playSound(reviver.getLocation(), Sound.BLOCK_BEACON_ACTIVATE, SoundCategory.PLAYERS, 1.0f, 1.5f);
         deadPlayer.playSound(deadPlayer.getLocation(), Sound.BLOCK_BEACON_ACTIVATE, SoundCategory.PLAYERS, 1.0f, 1.5f);
 
-        plugin.getLogger().info(reviver.getName() + " revived " + deadPlayer.getName() + " (cost: " + REVIVE_COST + " sand)");
+        plugin.getLogger().info(reviver.getName() + " revived " + deadPlayer.getName() + " (cost: " + totalCost + " sand)");
         return true;
     }
 
@@ -372,8 +390,12 @@ public class SandManager implements Listener {
     }
 
     /**
-     * Detects interaction with sand sacrifice points to revive the specific caged teammate.
-     * Each sacrifice point (LODESTONE) is paired with a specific death cage and player.
+     * Detects interaction with a sacrifice chest to pay toward freeing the teammate caged there.
+     * Each chest is paired with a specific death cage and player.
+     *
+     * <p>The click is cancelled before anything else, because a sacrifice point is a real chest and an
+     * uncancelled right-click opens its inventory. That has to happen ahead of the team lookup too:
+     * bailing out early for a player with no team would leave them able to open the chest.
      */
     @EventHandler(priority = EventPriority.NORMAL)
     public void onPlayerInteract(PlayerInteractEvent event) {
@@ -383,22 +405,21 @@ public class SandManager implements Listener {
         Block clickedBlock = event.getClickedBlock();
         if (clickedBlock == null) return;
 
-        // Sacrifice points are LODESTONE blocks
-        if (clickedBlock.getType() != Material.LODESTONE) return;
+        // Sacrifice points are CHEST blocks
+        if (clickedBlock.getType() != Material.CHEST) return;
 
         Player player = event.getPlayer();
         UUID teamId = gameManager.getTeamManager().getPlayerTeamId(player);
+
+        // Look up which death cage this chest belongs to. Checked against every team's dungeon so a
+        // player with no team (or on another team) still cannot open someone's sacrifice chest.
+        if (!gameManager.isAnySacrificePointAt(clickedBlock.getLocation())) return;
+        event.setCancelled(true);
         if (teamId == null) return;
 
-        // Look up which death cage this sacrifice point belongs to
         DeathCage cage = gameManager.getDeathCageAtSacrificePoint(teamId, clickedBlock.getLocation());
-        if (cage == null) return; // Not a registered sacrifice point
+        if (cage == null) return; // Someone else's team's chest
 
-        event.setCancelled(true);
         attemptRevive(player, cage);
-    }
-
-    public static NamespacedKey getSacrificePointKey() {
-        return SACRIFICE_POINT_KEY;
     }
 }

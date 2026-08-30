@@ -8,6 +8,7 @@ import com.clarkson.sot.scoring.BankingManager;
 import com.clarkson.sot.scoring.ScoreManager;
 import com.clarkson.sot.timer.VisualTimerLayout;
 import com.clarkson.sot.ui.GameScoreboardManager;
+import com.clarkson.sot.ui.SacrificeIndicatorManager;
 import com.clarkson.sot.utils.*; // PlayerStateManager, PlayerStatus, SandManager, SoTTeam, TeamDefinition, TeamManager
 
 import org.bukkit.Bukkit;
@@ -50,6 +51,7 @@ public class GameManager {
     private final FloorItemManager floorItemManager; // Added
     private final DoorManager doorManager; // Added
     private final GameScoreboardManager scoreboardManager; // Live standings sidebar
+    private final SacrificeIndicatorManager sacrificeIndicatorManager; // Floating sand above active sacrifice chests
     private final Map<UUID, DungeonManager> teamDungeonManagers; // TeamID -> Manager for their instance
     private final Map<UUID, SoTTeam> activeTeamsInGame; // TeamID -> Active team object
     private DungeonBlueprint dungeonLayoutBlueprint; // Shared blueprint for this game run
@@ -107,6 +109,7 @@ public class GameManager {
         this.doorManager = new DoorManager((SoT) plugin, this); // Pass SoT plugin, GameManager
         this.dungeonGenerator = new DungeonGenerator(plugin);
         this.scoreboardManager = new GameScoreboardManager(plugin, this); // Reads the managers above
+        this.sacrificeIndicatorManager = new SacrificeIndicatorManager(plugin.getLogger());
 
         // Initialize maps
         this.activeTeamsInGame = new ConcurrentHashMap<>(); // Use concurrent maps if accessed by events/tasks
@@ -410,6 +413,10 @@ public class GameManager {
                  plugin.getLogger().info("Player " + memberUUID + " trapped due to timer expiry!");
                  playerStateManager.updateStatus(memberUUID, PlayerStatus.TRAPPED_TIMER_OUT);
                  scoreManager.applyTimerEndPenalty(memberUUID);
+                 // Nobody can be bought out of the cage once the timer has taken them, so the chest
+                 // goes dark even though sand may already have been paid toward the revive.
+                 DeathCage expiredCage = getPlayerDeathCage(team.getTeamId(), memberUUID);
+                 if (expiredCage != null) sacrificeIndicatorManager.hide(expiredCage);
                  Player onlinePlayer = Bukkit.getPlayer(memberUUID);
                  if (onlinePlayer != null && onlinePlayer.isOnline()) {
                      // Snapshot the destination now: /sot set trapped may move it before the task runs.
@@ -540,6 +547,11 @@ public class GameManager {
         // Take the sidebar down before the teams are cleared below, so every player gets the
         // server's own scoreboard back rather than a frozen one.
         scoreboardManager.stop();
+
+        // Drop the floating sacrifice indicators before the dungeons go: cleanupInstance() removes
+        // the entities inside its bounds anyway, but this also empties the manager's own map so it
+        // is not holding references to removed displays into the next round.
+        sacrificeIndicatorManager.clearAll();
 
         cleanupDungeonInstances();
         activeTeamsInGame.clear();
@@ -690,13 +702,28 @@ public class GameManager {
         // Update state
         playerStateManager.updateStatus(playerUUID, PlayerStatus.DEAD_AWAITING_REVIVE);
 
+        // Raise the price of this player's next revive and light up their sacrifice chest. Done before
+        // the teleport so the cost is known by the time we tell them what it is.
+        DeathCage cage = getPlayerDeathCage(teamId, playerUUID);
+        int reviveCost = 0;
+        if (cage != null) {
+            cage.recordDeath();
+            reviveCost = cage.getRequiredSand();
+            sacrificeIndicatorManager.update(cage);
+        }
+
         // Teleport to player's assigned death cage
         Location cageLocation = getPlayerDeathCageLocation(teamId, playerUUID);
         if (cageLocation != null) {
+            final int cost = reviveCost;
             Bukkit.getScheduler().runTask(plugin, () -> {
                 if (player.isValid()) {
                     player.teleport(cageLocation.clone().add(0.5, 0.1, 0.5));
-                    player.sendMessage(Component.text("You died! A teammate must sacrifice sand to free you.", NamedTextColor.RED));
+                    Component costText = cost > 0
+                            ? Component.text("You died! A teammate must sacrifice " + cost
+                                    + " sand to free you.", NamedTextColor.RED)
+                            : Component.text("You died! A teammate must sacrifice sand to free you.", NamedTextColor.RED);
+                    player.sendMessage(costText);
                 }
             });
         }
@@ -718,28 +745,6 @@ public class GameManager {
         if (lostCoins > 0) {
             plugin.getLogger().info(player.getName() + " died, lost " + lostCoins + " unbanked coins");
         }
-    }
-
-    /**
-     * Handles reviving a dead player (called from SandManager after sand is consumed).
-     */
-    public void handlePlayerRevive(Player deadPlayer, Player reviver) {
-        if (deadPlayer == null || reviver == null) return;
-        UUID teamId = teamManager.getPlayerTeamId(deadPlayer);
-        if (teamId == null) return;
-
-        playerStateManager.updateStatus(deadPlayer, PlayerStatus.ALIVE_IN_DUNGEON);
-
-        Location hubLocation = getTeamHubLocation(teamId);
-        if (hubLocation != null) {
-            Bukkit.getScheduler().runTask(plugin, () -> {
-                if (deadPlayer.isValid()) {
-                    deadPlayer.teleport(hubLocation.clone().add(0.5, 0.1, 0.5));
-                }
-            });
-        }
-
-        plugin.getLogger().info(reviver.getName() + " revived " + deadPlayer.getName());
     }
 
     /**
@@ -943,6 +948,38 @@ public class GameManager {
     }
 
     /**
+     * Gets the DeathCage assigned to a specific player, or null if they have none.
+     */
+    @Nullable
+    private DeathCage getPlayerDeathCage(UUID teamId, UUID playerUUID) {
+        DungeonManager teamDungeonManager = teamDungeonManagers.get(teamId);
+        if (teamDungeonManager == null || teamDungeonManager.getDungeonData() == null) return null;
+        for (DeathCage cage : teamDungeonManager.getDungeonData().getDeathCages()) {
+            if (playerUUID.equals(cage.getAssignedPlayerUUID())) {
+                return cage;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * True if the location is a sacrifice chest belonging to <em>any</em> team's dungeon.
+     *
+     * <p>Used to suppress the vanilla chest UI on every sacrifice point, including for a player who
+     * is not on the owning team (or on no team at all) and so cannot pay at it.
+     */
+    public boolean isAnySacrificePointAt(Location location) {
+        if (location == null) return false;
+        for (DungeonManager teamDungeonManager : teamDungeonManagers.values()) {
+            if (teamDungeonManager == null || teamDungeonManager.getDungeonData() == null) continue;
+            for (DeathCage cage : teamDungeonManager.getDungeonData().getDeathCages()) {
+                if (cage.isSacrificePointAt(location)) return true;
+            }
+        }
+        return false;
+    }
+
+    /**
      * Finds the DeathCage whose sacrifice point is at the given location for a team.
      * @return The DeathCage, or null if no match.
      */
@@ -987,6 +1024,7 @@ public class GameManager {
     public FloorItemManager getFloorItemManager() { return floorItemManager; } // Added Getter
     public DoorManager getDoorManager() { return doorManager; } // Added Getter
     public GameScoreboardManager getScoreboardManager() { return scoreboardManager; }
+    public SacrificeIndicatorManager getSacrificeIndicatorManager() { return sacrificeIndicatorManager; }
     /** The universal trapped location. Returns a copy: {@link Location} is mutable. */
     public Location getTrappedLocation() { return configTrappedLocation.clone(); }
     /** The lobby anchor. Returns a copy: {@link Location} is mutable. */

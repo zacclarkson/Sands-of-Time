@@ -15,6 +15,7 @@ import org.bukkit.Material;
 import org.bukkit.NamespacedKey;
 import org.bukkit.World;
 import org.bukkit.block.Block;
+import org.bukkit.block.data.BlockData;
 import org.bukkit.entity.Entity; // Import Entity
 import org.bukkit.entity.Player; // Import Player
 import org.bukkit.persistence.PersistentDataType;
@@ -158,22 +159,16 @@ public class DungeonManager {
 
 
         // --- 3. Create Dungeon Data Object ---
-        // Create 4 death cage + sacrifice point pairs near the hub (one per player, max 4)
+        // Death cages and their sacrifice points come straight from the blueprint, which guarantees
+        // the two lists are the same length and index-aligned (DungeonGenerator derives a point for
+        // any cage the templates left unpaired), so this is a plain zip.
+        List<Location> absCages = calculateAbsoluteLocations(blueprintData.getDeathCageRelativeLocations());
+        List<Location> absSacrificePoints = calculateAbsoluteLocations(blueprintData.getSandSacrificeRelativeLocations());
         List<DeathCage> deathCages = new ArrayList<>();
-        if (absHubLocation != null) {
-            // Cages are placed in a row offset from the hub center
-            // Each cage has a paired sacrifice point 2 blocks in front of it
-            int[][] cageOffsets = { {3, 0, 3}, {3, 0, -3}, {-3, 0, 3}, {-3, 0, -3} };
-            for (int[] offset : cageOffsets) {
-                Location cageLoc = absHubLocation.clone().add(offset[0], offset[1], offset[2]);
-                // Sacrifice point is 2 blocks toward hub center from the cage
-                Location sacrificeLoc = cageLoc.clone().add(
-                    offset[0] > 0 ? -2 : 2, 0,
-                    offset[2] > 0 ? -2 : 2
-                );
-                deathCages.add(new DeathCage(cageLoc, sacrificeLoc));
-            }
+        for (int i = 0; i < absCages.size() && i < absSacrificePoints.size(); i++) {
+            deathCages.add(new DeathCage(absCages.get(i), absSacrificePoints.get(i)));
         }
+        plugin.getLogger().info("Prepared " + deathCages.size() + " death cage(s) for team " + teamId);
 
          try {
             this.dungeonData = new Dungeon(
@@ -195,6 +190,7 @@ public class DungeonManager {
         try {
             vaultManager.initializeForInstance(this.dungeonData);
             doorManager.initializeDoorsForInstance(this.dungeonData); // Initialize doors
+            placeSacrificePoints(); // Build the chests teammates click to revive
             populateFloorItems(); // Spawn floor items
         } catch (Exception e) {
              plugin.getLogger().log(Level.SEVERE, "Error during feature manager initialization for team " + teamId, e);
@@ -356,6 +352,46 @@ public class DungeonManager {
      * and places Sand blocks probabilistically based on the absolute locations
      * stored in the `dungeonData` object. Called by `initializeInstance`.
      */
+    /**
+     * Builds the chest at each death cage's sacrifice point.
+     *
+     * <p>Placing this block is what makes a sacrifice point exist at all: the marker records an
+     * <em>air</em> cell, so without writing something here there is nothing for a teammate to
+     * right-click and the revive can never fire.
+     *
+     * <p>Chests are forced to {@link org.bukkit.block.data.type.Chest.Type#SINGLE}. Two sacrifice
+     * points placed next to each other would otherwise pair into a double chest, which moves the
+     * block a click actually lands on and would break the point-to-cage lookup.
+     */
+    private void placeSacrificePoints() {
+        if (dungeonData == null) return;
+
+        int placed = 0;
+        for (DeathCage cage : dungeonData.getDeathCages()) {
+            Location loc = cage.getSacrificePointLocation();
+            try {
+                Block block = loc.getBlock();
+                if (!(block.isPassable() || block.getType().isAir() || block.isLiquid())) {
+                    plugin.getLogger().warning("Could not place sacrifice chest at " + loc.toVector()
+                            + " for team " + teamId + ": block is " + block.getType()
+                            + ". That cage cannot be revived from this round.");
+                    continue;
+                }
+                block.setType(Material.CHEST, false);
+                BlockData data = block.getBlockData();
+                if (data instanceof org.bukkit.block.data.type.Chest chestData) {
+                    chestData.setType(org.bukkit.block.data.type.Chest.Type.SINGLE);
+                    block.setBlockData(chestData, false);
+                }
+                placed++;
+            } catch (Exception e) {
+                plugin.getLogger().log(Level.WARNING,
+                        "Error placing sacrifice chest at " + loc + " for team " + teamId, e);
+            }
+        }
+        plugin.getLogger().info("Placed " + placed + " sacrifice chest(s) for team " + teamId);
+    }
+
     private void populateFloorItems() {
         // Ensure data is ready
         if (dungeonData == null) {
