@@ -5,7 +5,6 @@ import com.clarkson.sot.dungeon.segment.EntryPoint;
 import com.clarkson.sot.entities.Door;
 import com.clarkson.sot.main.GameManager;
 import com.clarkson.sot.main.GameState;
-import com.clarkson.sot.main.SoT;
 import com.clarkson.sot.utils.ItemManager;
 import com.clarkson.sot.utils.TeamManager;
 
@@ -17,6 +16,7 @@ import org.bukkit.block.BlockFace;
 import org.bukkit.event.block.Action;
 import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.inventory.ItemStack;
+import org.bukkit.plugin.Plugin;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -26,7 +26,6 @@ import org.mockbukkit.mockbukkit.entity.PlayerMock;
 
 import java.util.List;
 import java.util.UUID;
-import java.util.logging.Logger;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
@@ -50,7 +49,7 @@ class DoorManagerSegmentDoorTest {
 
     private ServerMock server;
     private World world;
-    private SoT plugin;
+    private Plugin plugin;
     private GameManager gameManager;
     private DoorManager doorManager;
     private PlayerMock player;
@@ -62,9 +61,9 @@ class DoorManagerSegmentDoorTest {
         world = server.addSimpleWorld("segment-door-world");
         teamId = UUID.randomUUID();
 
-        plugin = mock(SoT.class);
-        when(plugin.getLogger()).thenReturn(Logger.getLogger("DoorManagerSegmentDoorTest"));
-        when(plugin.getName()).thenReturn("SoT");
+        // A real MockBukkit plugin, not a Mockito mock: JavaPlugin.getName() is final, so a mock
+        // hands NamespacedKey a null namespace, and the door animation needs a live scheduler.
+        plugin = MockBukkit.createMockPlugin();
         ItemManager.initializeKeys(plugin);
 
         player = server.addPlayer();

@@ -7,7 +7,6 @@ import com.clarkson.sot.entities.Door;
 import com.clarkson.sot.entities.SegmentDoor;
 import com.clarkson.sot.main.GameManager;
 import com.clarkson.sot.main.GameState;
-import com.clarkson.sot.main.SoT;
 
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
@@ -23,6 +22,7 @@ import org.bukkit.event.Listener;
 import org.bukkit.event.block.Action;
 import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.inventory.ItemStack;
+import org.bukkit.plugin.Plugin;
 import org.bukkit.util.Vector;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -53,12 +53,14 @@ public class DoorManager implements Listener {
     /** Height of a doorway opening, in blocks, measured from the entry point marker upwards. */
     private static final int OPENING_HEIGHT = 4;
 
-    private final SoT plugin;
+    // Plugin, not SoT: this manager only needs a logger and a scheduler handle to pass to its
+    // doors, and taking the interface lets the tests drive it with a real plugin.
+    private final Plugin plugin;
     private final GameManager gameManager;
     // Store active doors per team instance, mapped by their Lock Location for quick lookup
     private final Map<UUID, Map<Location, Door>> doorsByTeamAndLockLocation;
 
-    public DoorManager(SoT plugin, GameManager gameManager) {
+    public DoorManager(Plugin plugin, GameManager gameManager) {
         this.plugin = plugin;
         this.gameManager = gameManager;
         this.doorsByTeamAndLockLocation = new ConcurrentHashMap<>();
