@@ -24,6 +24,7 @@ import org.bukkit.plugin.java.JavaPlugin;
 // Import Commands
 import com.clarkson.sot.commands.*;
 // Import Listeners / Session management
+import com.clarkson.sot.events.BlockProtectionListener;
 import com.clarkson.sot.events.BuilderSessionManager;
 import com.clarkson.sot.events.CountdownFreezeListener;
 import com.clarkson.sot.events.DeathListener;
@@ -105,6 +106,18 @@ public class SoT extends JavaPlugin {
                     + " unset. /sot setup and /sot start will refuse to run until they are.");
         }
 
+        // 1c. Apply the dungeon seed from config.yml. Unlike the locations, having none is the
+        //     normal case -- it just means every round rolls its own -- so this never blocks a game.
+        Long configuredSeed = SoTConfig.readSeed(getConfig(), SoTConfig.SEED_PATH, getLogger());
+        gameManager.setDungeonSeed(configuredSeed);
+        if (configuredSeed != null) {
+            getLogger().info("Dungeon seed fixed at " + configuredSeed
+                    + " ('" + SoTConfig.SEED_PATH + "' in config.yml); every round will lay out identically.");
+        } else {
+            getLogger().info("No dungeon seed set; each round rolls its own. The seed used is logged"
+                    + " at generation, and /sot seed <value> pins it.");
+        }
+
         // 2. Managers are owned and constructed by GameManager (which also loads the dungeon
         //    segment templates in its constructor). We register GameManager's instances as
         //    listeners below so events act on the objects that hold the live game state.
@@ -152,6 +165,9 @@ public class SoT extends JavaPlugin {
         getServer().getPluginManager().registerEvents(new DeathListener(gameManager), this);
         getServer().getPluginManager().registerEvents(new EscapeListener(gameManager), this);
         getServer().getPluginManager().registerEvents(new CountdownFreezeListener(gameManager), this);
+        // Stops players mining the dungeon apart mid-round -- notably their own sand timer column.
+        // Registered at LOW priority inside the listener so a denied break never reaches SandManager.
+        getServer().getPluginManager().registerEvents(new BlockProtectionListener(gameManager), this);
         // Nether portals are used as the safe-exit visual; suppress the vanilla teleport so nobody is
         // sent to the Nether when they walk into one.
         getServer().getPluginManager().registerEvents(new NetherPortalListener(), this);

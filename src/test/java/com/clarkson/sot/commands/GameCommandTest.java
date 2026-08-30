@@ -242,4 +242,97 @@ class GameCommandTest {
         assertTrue(completions.contains("set"));
         assertTrue(completions.contains("setup"));
     }
+
+    // --- /sot seed (issue #49) ---
+
+    @Test
+    void seedAppliesLiveAndPersists() {
+        assertTrue(run(opPlayer(), "seed", "4815162342"));
+
+        verify(gameManager).setDungeonSeed(4815162342L);
+        verify(plugin).saveConfig();
+        assertEquals(4815162342L, config.getLong(SoTConfig.SEED_PATH));
+    }
+
+    @Test
+    void seedHashesANonNumericValue() {
+        assertTrue(run(opPlayer(), "seed", "mcc-finals"));
+
+        verify(gameManager).setDungeonSeed((long) "mcc-finals".hashCode());
+        assertEquals("mcc-finals".hashCode(), config.getLong(SoTConfig.SEED_PATH));
+    }
+
+    @Test
+    void seedRandomClearsTheSeed() {
+        assertTrue(run(opPlayer(), "seed", "random"));
+
+        verify(gameManager).setDungeonSeed(null);
+        verify(plugin).saveConfig();
+        assertNull(SoTConfig.readSeed(config, SoTConfig.SEED_PATH,
+                java.util.logging.Logger.getLogger(GameCommandTest.class.getName())));
+    }
+
+    @Test
+    void seedIsRefusedWhileAGameIsRunning() {
+        // The round's dungeon is already generated, so accepting the change would be a lie.
+        when(gameManager.getCurrentState()).thenReturn(GameState.RUNNING);
+
+        assertTrue(run(opPlayer(), "seed", "42"));
+
+        verify(gameManager, never()).setDungeonSeed(any());
+        verify(plugin, never()).saveConfig();
+        assertFalse(config.contains(SoTConfig.SEED_PATH));
+    }
+
+    @Test
+    void bareSeedReportsWithoutWriting() {
+        when(gameManager.getConfiguredDungeonSeed()).thenReturn(7L);
+        when(gameManager.getRoundSeed()).thenReturn(7L);
+
+        assertTrue(run(opPlayer(), "seed"));
+
+        verify(gameManager, never()).setDungeonSeed(any());
+        verify(plugin, never()).saveConfig();
+    }
+
+    @Test
+    void bareSeedIsAllowedMidGame() {
+        // Reading the seed of a round in progress is exactly when an operator wants it.
+        when(gameManager.getCurrentState()).thenReturn(GameState.RUNNING);
+        when(gameManager.getRoundSeed()).thenReturn(123L);
+
+        assertTrue(run(opPlayer(), "seed"));
+
+        verify(gameManager).getRoundSeed();
+    }
+
+    @Test
+    void tabCompleteOffersTheLastUsedSeedForReplay() {
+        when(gameManager.getRoundSeed()).thenReturn(4815162342L);
+
+        List<String> completions =
+                command.onTabComplete(opPlayer(), bukkitCommand, "sot", new String[]{"seed", ""});
+
+        assertTrue(completions.contains("4815162342"),
+                "the seed just played should be one keypress away, got: " + completions);
+        assertTrue(completions.contains("random"));
+    }
+
+    @Test
+    void tabCompleteOmitsTheLastUsedSeedBeforeAnyRound() {
+        when(gameManager.getRoundSeed()).thenReturn(null);
+
+        List<String> completions =
+                command.onTabComplete(opPlayer(), bukkitCommand, "sot", new String[]{"seed", ""});
+
+        assertEquals(List.of("random"), completions);
+    }
+
+    @Test
+    void tabCompleteOffersSeedAsASubcommand() {
+        List<String> completions =
+                command.onTabComplete(opPlayer(), bukkitCommand, "sot", new String[]{"see"});
+
+        assertEquals(List.of("seed"), completions);
+    }
 }

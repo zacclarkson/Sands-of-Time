@@ -21,6 +21,8 @@ import java.io.File;
 import java.io.FileReader;
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Comparator;
 import java.util.List;
 import java.util.logging.Level;
 
@@ -71,6 +73,12 @@ public class StructureLoader {
             plugin.getLogger().info("[StructureLoader] No '.json' segment files found directly in directory: " + dataDir.getAbsolutePath());
             return loadedSegments; // Return empty list
         }
+
+        // Sort by filename before loading. File.listFiles() has no defined order, and the dungeon
+        // seed indexes into this list (DungeonGenerator picks templates by random index, and takes
+        // the first HUB it finds), so an unsorted list would make the same seed produce a different
+        // dungeon on a different machine -- or after the data folder is simply re-copied.
+        Arrays.sort(jsonFiles, Comparator.comparing(File::getName));
 
         plugin.getLogger().info("[StructureLoader] Found " + jsonFiles.length + " potential segment JSON files in " + dataDir.getAbsolutePath() + ". Attempting to load templates...");
 

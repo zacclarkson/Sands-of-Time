@@ -42,7 +42,7 @@ class DungeonGeneratorMobSpawnerTest {
         Plugin plugin = mock(Plugin.class);
         when(plugin.getLogger()).thenReturn(Logger.getLogger("DungeonGeneratorMobSpawnerTest"));
         generator = new DungeonGenerator(plugin);
-        generator.setRandomSeedForTest(20260830L);
+        generator.setSeed(20260830L);
     }
 
     // --- Segment builders (5x5x5 rooms, entries centred on their face) ---

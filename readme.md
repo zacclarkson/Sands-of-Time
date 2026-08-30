@@ -97,6 +97,14 @@ This plugin implements (or plans to implement) the following core features of th
 * `/sot set <lobby|trapped>`
   (Admin) Stores your current position as one of the two universal game locations, writes it to `config.yml` and applies it immediately. Hub, Exit, and Cage are instance-specific and are not set this way.
 
+* `/sot seed [<value>|random]`
+  (Admin) Shows or fixes the dungeon generation seed, writing it to `config.yml` and applying it
+  immediately. With no argument it reports the configured seed *and* the seed the last round actually
+  generated from - so a good random dungeon can be captured after the fact and replayed with
+  `/sot seed <that number>`. A whole number is used directly; anything else is hashed, so
+  `/sot seed mcc-finals` works. `random` clears it. Refused while a round is live, since that
+  dungeon is already generated.
+
 * `/team assign <Player> <TeamID>`
   (Admin - if using internal `TeamManager`) Assigns a player to a team definition.
 
@@ -169,6 +177,18 @@ This plugin implements (or plans to implement) the following core features of th
   * Both ship unset. The plugin still enables without them (falling back to the main world's spawn
     and logging a warning) so that `/sot set` is reachable, but `/sot setup` and `/sot start` refuse
     to run until both are configured.
+* **Dungeon Seed**:
+  * `dungeon.seed` in the same `config.yml` fixes dungeon generation, so every round lays out
+    identically - same rooms, same vaults and keys, same loot and floor sand, for every team:
+
+    ```yaml
+    dungeon:
+      seed: 4815162342
+    ```
+
+  * It ships blank, which means each round rolls its own seed. Either way the seed used is printed to
+    the console at generation, so a random layout worth keeping can be captured and replayed.
+  * `/sot seed <value>` sets it without a restart, and `/sot seed random` clears it back.
 * **Visual Timers**:
   * The visual timers are placed relative to the `lobby` location set above. Ensure the surrounding area is suitable.
 

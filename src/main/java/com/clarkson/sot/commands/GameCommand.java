@@ -26,7 +26,7 @@ import java.util.UUID;
 import java.util.stream.Collectors;
 
 /**
- * /sot &lt;setup|start|end|set&gt; — minimal admin control for a Sands of Time round.
+ * /sot &lt;setup|start|end|reset|set|seed&gt; — minimal admin control for a Sands of Time round.
  *
  * <p>This wires the existing {@link GameManager} lifecycle ({@code setupGame}/{@code startGame}/
  * {@code endGame}) to an in-game command so an operator can actually reach a running game on a
@@ -42,7 +42,7 @@ import java.util.stream.Collectors;
 public class GameCommand implements CommandExecutor, TabCompleter {
 
     private static final String PERMISSION = "sot.admin.control";
-    private static final List<String> SUBCOMMANDS = List.of("setup", "start", "end", "reset", "set");
+    private static final List<String> SUBCOMMANDS = List.of("setup", "start", "end", "reset", "set", "seed");
     private static final List<String> SET_TARGETS = List.of("lobby", "trapped");
 
     private final Plugin plugin;
@@ -71,6 +71,7 @@ public class GameCommand implements CommandExecutor, TabCompleter {
             case "end"   -> handleEnd(sender);
             case "reset" -> handleReset(sender);
             case "set"   -> handleSet(sender, args);
+            case "seed"  -> handleSeed(sender, args);
             default      -> sendUsage(sender);
         }
         return true;
@@ -257,6 +258,72 @@ public class GameCommand implements CommandExecutor, TabCompleter {
         }
     }
 
+    /**
+     * {@code /sot seed [<value>|random]} — reads or fixes the dungeon generation seed, both on the
+     * live {@link GameManager} and in {@code config.yml}, so it survives a restart.
+     *
+     * <p>With no argument it reports the configured seed <i>and</i> the seed the last round actually
+     * generated from, which is the point of the whole feature: an operator who just played a good
+     * random dungeon can read the number off and pin it.
+     */
+    private void handleSeed(@NotNull CommandSender sender, @NotNull String[] args) {
+        if (args.length < 2) {
+            reportSeed(sender);
+            return;
+        }
+
+        // The dungeon for a live round is already generated, so accepting a change now would be a
+        // lie: it could not take effect until the next round. Mirrors the lobby guard above.
+        GameState state = gameManager.getCurrentState();
+        if (state == GameState.RUNNING || state == GameState.PAUSED || state == GameState.COUNTDOWN) {
+            sender.sendMessage(Component.text("Cannot change the seed while a game is " + state
+                    + " — this round's dungeon is already generated. End it first.", NamedTextColor.RED));
+            return;
+        }
+
+        String raw = args[1];
+        Long seed = raw.equalsIgnoreCase(SoTConfig.RANDOM_SEED_KEYWORD) || raw.equalsIgnoreCase("clear")
+                ? null
+                : SoTConfig.parseSeed(raw);
+
+        gameManager.setDungeonSeed(seed);
+        SoTConfig.writeSeed(plugin.getConfig(), SoTConfig.SEED_PATH, seed);
+        plugin.saveConfig();
+
+        if (seed == null) {
+            sender.sendMessage(Component.text("Dungeon seed cleared: every round now rolls its own.",
+                    NamedTextColor.GREEN));
+            return;
+        }
+        Component message = Component.text("Dungeon seed set to " + seed, NamedTextColor.GREEN);
+        if (!String.valueOf(seed).equals(raw.trim())) {
+            // parseSeed hashed a non-numeric input; show what it became so it can be typed directly.
+            message = message.append(Component.text(" (hashed from '" + raw + "')", NamedTextColor.GRAY));
+        }
+        sender.sendMessage(message.append(Component.text(" and written to config.yml. Every round will"
+                + " now lay out identically.", NamedTextColor.GREEN)));
+    }
+
+    /** Reports the configured seed and the seed the most recent round generated from. */
+    private void reportSeed(@NotNull CommandSender sender) {
+        Long configured = gameManager.getConfiguredDungeonSeed();
+        if (configured != null) {
+            sender.sendMessage(Component.text("Dungeon seed: " + configured + " (fixed).", NamedTextColor.GREEN));
+        } else {
+            sender.sendMessage(Component.text("Dungeon seed: random each round.", NamedTextColor.YELLOW));
+        }
+
+        Long lastUsed = gameManager.getRoundSeed();
+        if (lastUsed == null) {
+            sender.sendMessage(Component.text("No dungeon has been generated yet this session.",
+                    NamedTextColor.GRAY));
+        } else if (!lastUsed.equals(configured)) {
+            sender.sendMessage(Component.text("Last generated from " + lastUsed + ". Run ", NamedTextColor.GRAY)
+                    .append(Component.text("/sot seed " + lastUsed, NamedTextColor.YELLOW))
+                    .append(Component.text(" to replay that layout.", NamedTextColor.GRAY)));
+        }
+    }
+
     /** Reports the missing locations and returns false when the game cannot run yet. */
     private boolean locationsConfigured(@NotNull CommandSender sender) {
         if (gameManager.areLocationsConfigured()) {
@@ -280,6 +347,8 @@ public class GameCommand implements CommandExecutor, TabCompleter {
                 NamedTextColor.GRAY));
         sender.sendMessage(Component.text("  /sot set <lobby|trapped> - store your current location in config.yml",
                 NamedTextColor.GRAY));
+        sender.sendMessage(Component.text("  /sot seed [<value>|random] - show or fix the dungeon generation seed",
+                NamedTextColor.GRAY));
     }
 
     @Override
@@ -292,6 +361,18 @@ public class GameCommand implements CommandExecutor, TabCompleter {
         if (args.length == 2 && args[0].equalsIgnoreCase("set")) {
             String prefix = args[1].toLowerCase();
             return SET_TARGETS.stream().filter(s -> s.startsWith(prefix)).collect(Collectors.toList());
+        }
+        if (args.length == 2 && args[0].equalsIgnoreCase("seed")) {
+            // Offer the last round's seed alongside "random", so replaying a layout is a keypress
+            // rather than a trip to the console log.
+            List<String> options = new ArrayList<>();
+            options.add(SoTConfig.RANDOM_SEED_KEYWORD);
+            Long lastUsed = gameManager.getRoundSeed();
+            if (lastUsed != null) {
+                options.add(String.valueOf(lastUsed));
+            }
+            String prefix = args[1].toLowerCase();
+            return options.stream().filter(s -> s.startsWith(prefix)).collect(Collectors.toList());
         }
         return List.of();
     }
