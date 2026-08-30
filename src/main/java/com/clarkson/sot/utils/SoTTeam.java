@@ -108,6 +108,14 @@ public class SoTTeam {
         }
     }
 
+    /**
+     * True if the given block location is part of this team's visual sand column. Used to stop players
+     * mining their own timer for sand. False when the team has no visual timer.
+     */
+    public boolean isVisualTimerBlock(Location location) {
+        return visualTimerDisplay != null && visualTimerDisplay.isColumnBlock(location);
+    }
+
     /** Stops the visual timer task and clears its sand column. Used by end-of-game cleanup. */
     public void clearVisualTimer() {
         if (visualTimerDisplay != null) {

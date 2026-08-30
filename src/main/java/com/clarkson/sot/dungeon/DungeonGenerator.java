@@ -282,13 +282,18 @@ public class DungeonGenerator {
 
         Vector timerBaseRelativeLocation = selectTimerBaseRelativeLocation(placedSegments);
         List<Vector> playerSpawnRelativeLocations = selectPlayerSpawnRelativeLocations(placedSegments);
+        List<Vector> sandTimerRelativeLocations = selectSandTimerRelativeLocations(placedSegments);
+        if (sandTimerRelativeLocations.isEmpty()) {
+            plugin.getLogger().warning("No TIMER_DEPOSIT marker on any segment template: collected sand "
+                    + "cannot be spent on the timer. Add TIMER_DEPOSIT markers to the HUB segment and re-save it.");
+        }
 
         // --- Create and Return Blueprint ---
         return new DungeonBlueprint(
                 placedSegments, hubRelativeLocation, vaultMarkerRelativeLocations, keySpawnRelativeLocations,
                 sandSpawnRelativeLocations, coinSpawnRelativeLocations, itemSpawnRelativeLocations,
                 blueprintBounds, safeExitRelativeLocation, timerBaseRelativeLocation,
-                playerSpawnRelativeLocations
+                playerSpawnRelativeLocations, sandTimerRelativeLocations
         );
     }
 
@@ -766,6 +771,31 @@ public class DungeonGenerator {
             }
         }
         return !hubSpawns.isEmpty() ? hubSpawns : otherSpawns;
+    }
+
+    /**
+     * Collects the blueprint-relative sand deposit points from {@code TIMER_DEPOSIT} markers — the cells
+     * players place carried sand into to feed their team's timer. Like the player spawns, a HUB template's
+     * points win outright: if any HUB defines deposit points those are used exclusively, otherwise every
+     * segment's are gathered. Empty when no template defines any, in which case a team simply has nowhere
+     * to spend sand (generation still succeeds; {@link com.clarkson.sot.utils.SandManager} logs it).
+     */
+    @NotNull
+    static List<Vector> selectSandTimerRelativeLocations(@NotNull List<PlacedSegment> placedSegments) {
+        List<Vector> hubDeposits = new ArrayList<>();
+        List<Vector> otherDeposits = new ArrayList<>();
+        for (PlacedSegment placedSegment : placedSegments) {
+            Segment template = placedSegment.getSegmentTemplate();
+            if (template == null) continue;
+            boolean fromHub = template.getType() == SegmentType.HUB;
+            Vector origin = placedSegment.getWorldOrigin().toVector();
+            for (BlockVector3 offset : template.getSandTimerOffsets()) {
+                BlockVector3 rot = placedSegment.getRotatedOffset(offset);
+                Vector abs = origin.clone().add(new Vector(rot.x(), rot.y(), rot.z()));
+                (fromHub ? hubDeposits : otherDeposits).add(abs);
+            }
+        }
+        return !hubDeposits.isEmpty() ? hubDeposits : otherDeposits;
     }
 
     /**

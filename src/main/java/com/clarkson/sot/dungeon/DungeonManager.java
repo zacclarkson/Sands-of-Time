@@ -125,6 +125,7 @@ public class DungeonManager {
         List<Location> absCoinSpawns = calculateAbsoluteLocations(blueprintData.getCoinSpawnRelativeLocations());
         List<Location> absItemSpawns = calculateAbsoluteLocations(blueprintData.getItemSpawnRelativeLocations());
         List<Location> absPlayerSpawns = calculateAbsoluteLocations(blueprintData.getPlayerSpawnRelativeLocations());
+        List<Location> absSandTimers = calculateAbsoluteLocations(blueprintData.getSandTimerRelativeLocations());
         Location absHubLocation = dungeonOrigin.clone().add(blueprintData.getHubRelativeLocation());
         Vector safeExitRelative = blueprintData.getSafeExitRelativeLocation();
         Location absSafeExitLocation = (safeExitRelative != null) ? dungeonOrigin.clone().add(safeExitRelative) : null;
@@ -167,7 +168,7 @@ public class DungeonManager {
                 teamId, world, dungeonOrigin, blueprintData,
                 absHubLocation, absVaultMarkers, absKeySpawns,
                 absSandSpawns, absCoinSpawns, absItemSpawns,
-                deathCages, absSafeExitLocation, absPlayerSpawns
+                deathCages, absSafeExitLocation, absPlayerSpawns, absSandTimers
             );
              plugin.getLogger().info("Created Dungeon data object for team " + teamId);
          } catch (Exception e) {

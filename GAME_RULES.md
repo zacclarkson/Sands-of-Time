@@ -84,6 +84,7 @@ The hub has approximately **10 exits** leading into the dungeon. These exits fal
 - **Sand timer** — a physical column of sand blocks that drains as time passes (each block = 10 seconds visually)
 - **Sphinx** — the banking NPC/location where players deposit coins
 - **Death cage** — where dead players respawn, awaiting rescue
+- **Timer deposit points** — the cells beside the sand column where carried sand is spent on the timer
 - **Sand sacrifice points** — one per player on the team, used to free teammates from the death cage
 - **Safe exit** — the block players interact with to leave the dungeon permanently
 - **Blue key spawn** — the blue vault key is always available in the hub (every hub must have a blue key spawn location)
@@ -112,10 +113,23 @@ The hub has approximately **10 exits** leading into the dungeon. These exits fal
 
 - Sand spawns throughout the dungeon as **normal sand blocks** placed in the world
 - Players must **break the sand with a shovel** to pick it up (like mining normal sand)
-- Each sand block collected adds **10 seconds** to the team's timer
+- Breaking sand puts a **sand item in your inventory**. It adds **no time on its own** — carrying it
+  back is the whole point
 - Sand is also used to **free teammates** from the death cage (see [Death & Corpse Run](#death--corpse-run))
 - Sand spawn locations have a **40% chance** of actually spawning sand per location
 - Finding and returning sand to the timer is essential for survival
+
+### Depositing Sand
+
+- The hub has **timer deposit points** beside the sand column — the cells marked by the builder's
+  `TIMER_DEPOSIT` tool
+- **Place a sand block on a deposit point** to spend it: the block never stands, and the team timer
+  gains **10 seconds**
+- A deposit is **refused** while the timer is at its 150-second cap, and the sand stays in your
+  inventory rather than being spent for nothing
+- You **cannot mine your own team's timer column** for sand
+- Escaping the dungeon **wipes your inventory**, so undeposited sand is lost; any sand still carried
+  when the round ends is cleared too
 
 ### Sand Sacrifice
 
