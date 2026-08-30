@@ -44,6 +44,10 @@ public class DungeonBlueprint {
     // no segment carries one.
     private final List<Vector> sandTimerRelativeLocations;
 
+    // Cells where hostile mobs are armed to spawn (MOB_SPAWNER markers). Empty when no segment
+    // carries one -- the bundled hub does not, so a stock server generates no mob encounters.
+    private final List<Vector> mobSpawnerRelativeLocations;
+
     // Death cages (DEATH_CAGE markers) and the sacrifice points that free them (SAND_SACRIFICE
     // markers). These two lists are index-aligned and always the same length: DungeonGenerator
     // reconciles them, deriving a point beside any cage the templates left unpaired, so
@@ -79,7 +83,8 @@ public class DungeonBlueprint {
                             @NotNull List<Vector> deathCageRelativeLocations,
                             @NotNull List<Vector> sandSacrificeRelativeLocations,
                             @NotNull List<Doorway> doorways,
-                            @NotNull List<Doorway> unusedOpenings
+                            @NotNull List<Doorway> unusedOpenings,
+                            @NotNull List<Vector> mobSpawnerRelativeLocations
                            ) {
 
         // Validate inputs
@@ -116,6 +121,7 @@ public class DungeonBlueprint {
         this.sandSacrificeRelativeLocations = Collections.unmodifiableList(new ArrayList<>(sandSacrificeRelativeLocations));
         this.doorways = Collections.unmodifiableList(new ArrayList<>(doorways));
         this.unusedOpenings = Collections.unmodifiableList(new ArrayList<>(unusedOpenings));
+        this.mobSpawnerRelativeLocations = Collections.unmodifiableList(new ArrayList<>(mobSpawnerRelativeLocations));
     }
 
     // --- Getters ---
@@ -143,6 +149,9 @@ public class DungeonBlueprint {
 
     /** Relative per-player spawn points (empty if no segment defines a PLAYER_SPAWN marker). */
     @NotNull public List<Vector> getPlayerSpawnRelativeLocations() { return playerSpawnRelativeLocations; }
+
+    /** Relative mob spawner cells (empty if no segment defines a MOB_SPAWNER marker). */
+    @NotNull public List<Vector> getMobSpawnerRelativeLocations() { return mobSpawnerRelativeLocations; }
 
     /** Relative sand deposit cells (empty if no segment defines a TIMER_DEPOSIT marker). */
     @NotNull public List<Vector> getSandTimerRelativeLocations() { return sandTimerRelativeLocations; }

@@ -2,8 +2,9 @@ package com.clarkson.sot.main;
 
 // Required Imports (ensure all needed imports are present)
 import com.clarkson.sot.dungeon.*; // Includes Dungeon, DungeonBlueprint, DeathCage, VaultColor, VaultManager
-import com.clarkson.sot.dungeon.DoorManager; // Import DoorManager
+import com.clarkson.sot.dungeon.DoorManager;
 import com.clarkson.sot.events.FloorItemManager; // Import FloorItemManager
+import com.clarkson.sot.player.SoTPlayerManager;
 import com.clarkson.sot.scoring.BankingManager;
 import com.clarkson.sot.scoring.ScoreManager;
 import com.clarkson.sot.timer.VisualTimerLayout;
@@ -50,6 +51,8 @@ public class GameManager {
     private final DungeonGenerator dungeonGenerator;
     private final FloorItemManager floorItemManager; // Added
     private final DoorManager doorManager; // Added
+    private final MobManager mobManager;
+    private final SoTPlayerManager playerManager;
     private final GameScoreboardManager scoreboardManager; // Live standings sidebar
     private final SacrificeIndicatorManager sacrificeIndicatorManager; // Floating sand above active sacrifice chests
     private final Map<UUID, DungeonManager> teamDungeonManagers; // TeamID -> Manager for their instance
@@ -107,6 +110,9 @@ public class GameManager {
         this.vaultManager = new VaultManager((SoT) plugin, this); // Pass SoT plugin, GameManager
         this.floorItemManager = new FloorItemManager((SoT) plugin, this, scoreManager); // Pass SoT plugin, GameManager, ScoreManager
         this.doorManager = new DoorManager((SoT) plugin, this); // Pass SoT plugin, GameManager
+        // playerManager first: MobManager credits kills through getPlayerManager().
+        this.playerManager = new SoTPlayerManager(plugin);
+        this.mobManager = new MobManager(plugin, this);
         this.dungeonGenerator = new DungeonGenerator(plugin);
         this.scoreboardManager = new GameScoreboardManager(plugin, this); // Reads the managers above
         this.sacrificeIndicatorManager = new SacrificeIndicatorManager(plugin.getLogger());
@@ -193,6 +199,7 @@ public class GameManager {
                  if (p != null && p.isOnline()) {
                      activeTeam.addMember(p);
                      playerStateManager.initializePlayer(p);
+                     playerManager.initializePlayer(p);
                  } else { /* ... warning ... */ }
              }
         }
@@ -348,6 +355,7 @@ public class GameManager {
         if (currentState != GameState.COUNTDOWN || epoch != roundEpoch) return;
         this.currentState = GameState.RUNNING;
         scoreboardManager.start(); // Live standings sidebar, refreshed once a second
+        mobManager.start(); // Mob spawners produce waves while a team member stands near them
         for (SoTTeam team : activeTeamsInGame.values()) { team.startTimer(); }
         Title go = Title.title(
                 Component.text("GO!", NamedTextColor.GREEN, TextDecoration.BOLD),
@@ -562,6 +570,9 @@ public class GameManager {
         vaultManager.clearAllTeamStates();
         doorManager.clearAllTeamStates();
         floorItemManager.clearAllTeamStates();
+        mobManager.clearAllTeamStates();
+        // Drops the strong Player references SoTPlayerData holds, as well as last round's stats.
+        playerManager.clearAll();
         dungeonLayoutBlueprint = null;
     }
 
@@ -1064,6 +1075,8 @@ public class GameManager {
     public DungeonGenerator getDungeonGenerator() { return dungeonGenerator; }
     public FloorItemManager getFloorItemManager() { return floorItemManager; } // Added Getter
     public DoorManager getDoorManager() { return doorManager; } // Added Getter
+    public MobManager getMobManager() { return mobManager; }
+    public SoTPlayerManager getPlayerManager() { return playerManager; }
     public GameScoreboardManager getScoreboardManager() { return scoreboardManager; }
     public SacrificeIndicatorManager getSacrificeIndicatorManager() { return sacrificeIndicatorManager; }
     /** The universal trapped location. Returns a copy: {@link Location} is mutable. */
