@@ -25,6 +25,9 @@ public class SegmentDoor extends Door {
     // Material the door is made of when closed
     private final Material doorMaterial;
 
+    // Material of the keyhole block players right-click with a rusty key
+    private final Material lockMaterial;
+
     // Key constants are now managed by ItemManager
 
     /**
@@ -37,9 +40,26 @@ public class SegmentDoor extends Door {
      * @param doorMaterial The material the door blocks should be when closed.
      */
     public SegmentDoor(@NotNull Plugin plugin, @NotNull UUID teamId, @NotNull Area bounds, @NotNull Location lockLocation, @NotNull Material doorMaterial) {
+        this(plugin, teamId, bounds, lockLocation, doorMaterial, doorMaterial);
+    }
+
+    /**
+     * Constructor for SegmentDoor with a distinct keyhole block.
+     *
+     * @param plugin Plugin instance for scheduling.
+     * @param teamId Team this door belongs to.
+     * @param bounds Area containing the door blocks.
+     * @param lockLocation Location of the lock block.
+     * @param doorMaterial The material the door blocks should be when closed.
+     * @param lockMaterial The material of the keyhole block at {@code lockLocation}, so players can
+     *                     see where to use the rusty key.
+     */
+    public SegmentDoor(@NotNull Plugin plugin, @NotNull UUID teamId, @NotNull Area bounds, @NotNull Location lockLocation,
+                       @NotNull Material doorMaterial, @NotNull Material lockMaterial) {
         // Call the abstract super constructor
         super(plugin, teamId, bounds, lockLocation);
         this.doorMaterial = Objects.requireNonNull(doorMaterial, "Door material cannot be null");
+        this.lockMaterial = Objects.requireNonNull(lockMaterial, "Lock material cannot be null");
 
         // Key initialization is handled centrally (e.g., SoTKeys/ItemManager init in onEnable)
     }
@@ -67,6 +87,17 @@ public class SegmentDoor extends Door {
     @NotNull
     protected Material getClosedMaterial() {
         return this.doorMaterial;
+    }
+
+    /**
+     * Gets the Material of the keyhole block players right-click with a rusty key.
+     *
+     * @return The Material for the lock block.
+     */
+    @Override
+    @NotNull
+    protected Material getLockMaterial() {
+        return this.lockMaterial;
     }
 
     // open() and close() are inherited from abstract Door
