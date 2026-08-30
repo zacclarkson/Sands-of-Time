@@ -265,9 +265,14 @@ line — so it is actionable without rediscovering it.
   second pass would overwrite the confirmation with "You have no coins to bank!" — and must cancel
   the event, or the vanilla ender chest inventory opens over the bank. `BankingManager` holds no
   per-team state (the cell is looked up through `GameManager` each click), so there is nothing to
-  clear between rounds; it also cancels `BlockBreakEvent` on the bank cell, since an ender chest
-  mined without silk touch drops 8 obsidian and takes the team's bank out of the hub. A hub with no
-  `BANK` marker simply plays with no bank, warned once per `/sot setup` via `warnOncePerGeneration`.
+  clear between rounds, and no `BlockBreakEvent` handler either — an ender chest mined without silk
+  touch drops 8 obsidian and takes the team's bank out of the hub, but `ENDER_CHEST` is absent from
+  the `BreakableBlocks` whitelist, so `BlockProtectionListener` already refuses the break at `LOW`.
+  A bank-specific guard on top of that double-messaged the player (chat line over the listener's
+  action bar) and cancelled for an admin in Creative, whom the listener deliberately waves through —
+  the same contradiction that removed `SandManager`'s timer-column guard. `BankingManagerTest`
+  registers the listener so the property stays pinned. A hub with no `BANK` marker simply plays with
+  no bank, warned once per `/sot setup` via `warnOncePerGeneration`.
 - **Sand is an item; only a deposit point converts it to time.** Breaking a dungeon sand block hands the
   player a plain `Material.SAND` item and adds *no* time — `SandManager.onBlockPlace` does that, when the
   sand is placed on one of the team's `TIMER_DEPOSIT` marker cells. The chain mirrors `PLAYER_SPAWN`:
