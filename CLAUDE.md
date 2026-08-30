@@ -21,7 +21,7 @@ generated dungeon, collect and bank coins, and race a sand timer. See `readme.md
 
 - `mvn -B verify` — compile, run the unit tests, and produce the shaded jar
   `target/SoT-1.0-SNAPSHOT.jar` (gson is relocated under `com.clarkson.sot.libs.gson`). CI runs this
-  on Temurin 21.
+  on Temurin 25 — it has to, since the build targets release 25 and MockBukkit ships Java 25 bytecode.
 - `mvn -B test` — just the unit tests.
 - `mvn install` — additionally copies the jar to the local server plugins dir set by the
   `server.plugins.dir` property in `pom.xml` (adjust it to your own path).
