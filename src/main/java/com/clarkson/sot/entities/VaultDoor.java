@@ -10,12 +10,15 @@ import org.bukkit.Material;
 import org.bukkit.Sound;
 import org.bukkit.SoundCategory;
 import org.bukkit.World;
+import org.bukkit.block.Block;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.plugin.Plugin;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
+import java.util.Comparator;
+import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
 
@@ -35,6 +38,14 @@ import java.util.UUID;
 public class VaultDoor extends Door {
 
     private final VaultColor vaultColor;
+
+    /**
+     * The vault marker block, which sinks with the wall rather than being left behind.
+     *
+     * <p>Set only when the vault is opened, so {@link #buildClosed()} never paints over the marker
+     * {@code VaultManager} placed. Null when the marker is not part of this door.
+     */
+    @Nullable private Location markerBlock;
 
     // Key constants are now managed by ItemManager
 
@@ -89,6 +100,40 @@ public class VaultDoor extends Door {
             case GOLD:  return Material.GOLD_BLOCK;
             default:    return Material.STONE; // Fallback
         }
+    }
+
+    /**
+     * Opens the vault door, sinking the vault marker block with it.
+     *
+     * <p>The marker is the block the player right-clicked, and it is part of the wall as far as the
+     * player is concerned -- leaving it hanging in mid-air after the wall dropped read as a bug. The
+     * reward is whatever the segment puts <em>behind</em> the wall, revealed as it falls.
+     *
+     * @param marker The vault marker block to sink with the wall, or null to sink the wall alone.
+     */
+    public boolean openRevealing(@Nullable Location marker) {
+        this.markerBlock = marker;
+        return open();
+    }
+
+    /**
+     * The wall's blocks plus the vault marker, so the marker clears in step with the layer it sits in
+     * rather than after the animation or not at all.
+     */
+    @Override
+    @NotNull
+    protected List<Block> getBlocksSorted(boolean topToBottom) {
+        List<Block> blocks = super.getBlocksSorted(topToBottom);
+        if (markerBlock == null || !markerBlock.isWorldLoaded()) return blocks;
+
+        Block marker = markerBlock.getBlock();
+        if (blocks.contains(marker)) return blocks; // The marker is already inside the wall's bounds.
+
+        blocks.add(marker);
+        blocks.sort(topToBottom
+                ? Comparator.comparingDouble(Block::getY).reversed()
+                : Comparator.comparingDouble(Block::getY));
+        return blocks;
     }
 
     /**

@@ -138,6 +138,38 @@ class DoorManagerVaultDoorTest {
     }
 
     @Test
+    void theVaultMarkerSinksWithTheWall() {
+        Area wall = wallAt(5, 64, 5);
+        // The marker the player clicks sits beside the wall, not inside it.
+        Location marker = at(4, 65, 5);
+        marker.getBlock().setType(Material.BLUE_CONCRETE);
+
+        doorManager.initializeGatesForInstance(teamId, List.of(),
+                List.of(new VaultDoorPlacement(VaultColor.BLUE, wall, "blueroom")));
+
+        assertEquals(1, doorManager.openVaultDoors(teamId, VaultColor.BLUE, marker));
+        server.getScheduler().performTicks(18L);
+
+        assertFilledWith(wall, Material.AIR);
+        assertEquals(Material.AIR, marker.getBlock().getType(),
+                "the marker goes down with the wall rather than hanging where it stood");
+    }
+
+    @Test
+    void aMarkerInsideTheWallIsNotClearedTwice() {
+        Area wall = wallAt(5, 64, 5);
+        Location marker = wall.getMinPoint().clone();
+
+        doorManager.initializeGatesForInstance(teamId, List.of(),
+                List.of(new VaultDoorPlacement(VaultColor.BLUE, wall, "blueroom")));
+
+        assertEquals(1, doorManager.openVaultDoors(teamId, VaultColor.BLUE, marker));
+        server.getScheduler().performTicks(18L);
+
+        assertFilledWith(wall, Material.AIR);
+    }
+
+    @Test
     void aVaultDoorIsNotAKeyDoor() {
         Area wall = wallAt(5, 64, 5);
 

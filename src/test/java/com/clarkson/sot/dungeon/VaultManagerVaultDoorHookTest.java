@@ -30,6 +30,8 @@ import java.util.UUID;
 import java.util.logging.Logger;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
 /**
@@ -46,6 +48,7 @@ class VaultManagerVaultDoorHookTest {
     private SoT plugin;
     private DoorManager doorManager;
     private VaultManager vaultManager;
+    private FloorItemManager floorItemManager;
     private Player player;
 
     private final UUID teamId = UUID.randomUUID();
@@ -84,7 +87,8 @@ class VaultManagerVaultDoorHookTest {
         when(gameManager.getTeamManager()).thenReturn(teamManager);
         when(gameManager.getDoorManager()).thenReturn(doorManager);
         when(gameManager.getTeamDungeonManager(teamId)).thenReturn(dungeonManager);
-        when(gameManager.getFloorItemManager()).thenReturn(mock(FloorItemManager.class));
+        floorItemManager = mock(FloorItemManager.class);
+        when(gameManager.getFloorItemManager()).thenReturn(floorItemManager);
 
         vaultManager = new VaultManager(plugin, gameManager);
     }
@@ -102,24 +106,35 @@ class VaultManagerVaultDoorHookTest {
     }
 
     @Test
-    void openingAVaultOpensItsDoor() {
+    void openingAVaultSinksItsDoorAndTheMarkerWithIt() {
         rightClickMarker(ItemManager.createVaultKey(VaultColor.BLUE));
 
-        verify(doorManager).openVaultDoors(teamId, VaultColor.BLUE);
+        // The marker goes down with the wall: leaving it hanging where the wall used to be reads as
+        // a bug, and the reward is whatever the segment puts behind the wall.
+        verify(doorManager).openVaultDoors(teamId, VaultColor.BLUE, blueMarker.getBlock().getLocation());
+    }
+
+    @Test
+    void openingAVaultSpawnsNoCoinsAtTheMarker() {
+        rightClickMarker(ItemManager.createVaultKey(VaultColor.BLUE));
+
+        // Rewards used to be scattered around the marker -- in front of the wall the vault was meant
+        // to be sealing. They now sit behind the door and are revealed when it drops.
+        verify(floorItemManager, never()).spawnCoinStack(any(), anyInt(), any(), any(), anyInt());
     }
 
     @Test
     void aKeyOfTheWrongColourOpensNoDoor() {
         rightClickMarker(ItemManager.createVaultKey(VaultColor.RED));
 
-        verify(doorManager, never()).openVaultDoors(any(), any());
+        verify(doorManager, never()).openVaultDoors(any(), any(), any());
     }
 
     @Test
     void anEmptyHandOpensNoDoor() {
         rightClickMarker(null);
 
-        verify(doorManager, never()).openVaultDoors(any(), any());
+        verify(doorManager, never()).openVaultDoors(any(), any(), any());
     }
 
     @Test
@@ -127,6 +142,6 @@ class VaultManagerVaultDoorHookTest {
         rightClickMarker(ItemManager.createVaultKey(VaultColor.BLUE));
         rightClickMarker(ItemManager.createVaultKey(VaultColor.BLUE));
 
-        verify(doorManager, times(1)).openVaultDoors(teamId, VaultColor.BLUE);
+        verify(doorManager, times(1)).openVaultDoors(eq(teamId), eq(VaultColor.BLUE), any());
     }
 }

@@ -118,7 +118,13 @@ manually (see `integration-test/README.md`); it is **not** part of CI.
   `DoorManager.openVaultDoors(teamId, colour)` from its own marker handler — the marker click stays
   VaultManager's (bug #65), the wall stays DoorManager's — and they live in `vaultDoorsByTeamAndColor`,
   never in `doorsByTeamAndLockLocation`, so `getDoorAt` still resolves nothing at a vault or a gate.
-  `VaultDoor.isCorrectKey` survives only for `KeyItemTaggingTest`. **A vault door must live in the same
+  `VaultDoor.isCorrectKey` survives only for `KeyItemTaggingTest`. The **vault marker sinks with the
+  wall**: `VaultManager.revealVault` hands the clicked block to `openVaultDoors`, and `VaultDoor`
+  merges it into `getBlocksSorted` so it clears with the layer it sits in (the marker is only attached
+  at open time, so `buildClosed()` never paints over it). Nothing spawns coins at the marker any more —
+  the reward is what the segment puts *behind* the door, which is the only place a wall can reveal
+  anything; scattering it around the marker put it in front of the wall and left the marker standing
+  as glass. **A vault door must live in the same
   segment as its vault marker**: `SaveSegmentCommand` sets `containedVault` from the `VAULT_DOOR` marker, so
   a segment claiming a vault with no `VAULT_MARKER` makes the DFS count that colour as placed while
   `consolidateFeatureLocations` emits no marker, and all 20 generation attempts then fail on the missing

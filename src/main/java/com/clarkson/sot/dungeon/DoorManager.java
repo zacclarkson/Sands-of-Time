@@ -457,6 +457,16 @@ public class DoorManager implements Listener {
      * @return how many doors this opened; 0 when no segment carried a door of that colour.
      */
     public int openVaultDoors(@NotNull UUID teamId, @NotNull VaultColor color) {
+        return openVaultDoors(teamId, color, null);
+    }
+
+    /**
+     * Opens a team's vault doors of one colour, sinking the vault marker block with them.
+     *
+     * @param markerLocation The vault marker the player clicked, sunk with the wall so it does not
+     *                       hang in mid-air once the wall has dropped. Null to sink the wall alone.
+     */
+    public int openVaultDoors(@NotNull UUID teamId, @NotNull VaultColor color, @Nullable Location markerLocation) {
         Map<VaultColor, List<VaultDoor>> teamDoors = vaultDoorsByTeamAndColor.get(teamId);
         if (teamDoors == null) return 0;
         List<VaultDoor> doors = teamDoors.get(color);
@@ -464,7 +474,7 @@ public class DoorManager implements Listener {
 
         int opened = 0;
         for (VaultDoor door : doors) {
-            if (door.open()) opened++;
+            if (door.openRevealing(markerLocation)) opened++;
         }
         return opened;
     }

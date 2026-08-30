@@ -211,9 +211,8 @@ public class VaultManager implements Listener {
 
         if (consumeKeyItem(player, keyColor)) {
             markVaultOpen(teamId, clickedVaultColor);
-            openVaultDoorFor(teamId, clickedVaultColor);
-            openVaultEffects(player, clickedVaultColor, clickedBlock.getLocation());
-            spawnVaultRewards(teamId, clickedVaultColor, clickedBlock.getLocation());
+            revealVault(teamId, clickedVaultColor, clickedBlock.getLocation());
+            openVaultEffects(player, clickedVaultColor);
         } else {
             player.sendMessage(Component.text("Error: Could not consume the key from your inventory!", NamedTextColor.RED));
             plugin.getLogger().warning("Failed to consume key " + keyColor + " from " + player.getName() + " even after checks passed.");
@@ -221,27 +220,42 @@ public class VaultManager implements Listener {
     }
 
     /**
-     * Sinks the matching vault door into the floor.
+     * Sinks the vault door -- and the marker block with it -- to reveal what is behind the wall.
      *
-     * <p>Deliberately a one-line hand-off. The vault marker click is this manager's alone (bug #65),
-     * and the wall behind it belongs to {@link DoorManager}, which built it and owns its animation
-     * task. There is no second keyhole and no second key -- opening the vault is what opens its door.
+     * <p>The reward is whatever the segment places <em>behind</em> the vault door, uncovered as the
+     * wall drops. Coins used to be spawned in a scatter around the marker instead, which put them in
+     * front of the wall the vault was supposed to be sealing, and left the marker itself standing in
+     * mid-air as a glass block once the wall fell.
+     *
+     * <p>Deliberately a one-line hand-off to {@link DoorManager}: the vault marker click is this
+     * manager's alone (bug #65), and the wall belongs to DoorManager, which built it and owns its
+     * animation task.
      */
-    private void openVaultDoorFor(UUID teamId, VaultColor color) {
+    private void revealVault(UUID teamId, VaultColor color, Location markerLocation) {
         DoorManager doorManager = gameManager.getDoorManager();
-        if (doorManager == null) return;
-        if (doorManager.openVaultDoors(teamId, color) == 0) {
-            plugin.getLogger().fine("No " + color + " vault door for team " + teamId + "; nothing to open.");
+        if (doorManager != null && doorManager.openVaultDoors(teamId, color, markerLocation) > 0) {
+            return;
         }
+        // No wall to sink the marker with -- a segment can declare a vault marker and no vault door --
+        // so clear it here, or it stands as a solid block over the reward it was guarding.
+        plugin.getLogger().fine("No " + color + " vault door for team " + teamId + "; clearing the marker alone.");
+        new BukkitRunnable() {
+            @Override
+            public void run() {
+                Block block = markerLocation.getBlock();
+                if (block.getType() == getVaultMaterial(color)) block.setType(Material.AIR, false);
+            }
+        }.runTask(plugin);
     }
 
     /**
-     * Performs the visual effects and messaging for opening a vault.
+     * Messages the opener and their team. The marker block is not touched here -- it sinks with the
+     * vault door in {@link #revealVault}.
+     *
      * @param player The player who opened the vault.
      * @param vaultColor The color of the vault.
-     * @param vaultLocation The location of the vault marker block.
      */
-    private void openVaultEffects(Player player, VaultColor vaultColor, Location vaultLocation) {
+    private void openVaultEffects(Player player, VaultColor vaultColor) {
         player.sendMessage(Component.text("You opened the ", NamedTextColor.GREEN)
             .append(Component.text(vaultColor.name(), getVaultColorTextColor(vaultColor)))
             .append(Component.text(" vault!", NamedTextColor.GREEN)));
@@ -260,20 +274,8 @@ public class VaultManager implements Listener {
              });
         }
 
-        new BukkitRunnable() {
-            @Override
-            public void run() {
-                Block block = vaultLocation.getBlock();
-                if(block.getType() == getVaultMaterial(vaultColor)) {
-                    block.setType(Material.GLASS);
-                    // TODO: Add particle/sound effects?
-                }
-            }
-        }.runTask(plugin);
-
-        plugin.getLogger().info(vaultColor + " vault at " + vaultLocation.toVector() + " opened by " + player.getName());
+        plugin.getLogger().info(vaultColor + " vault opened by " + player.getName());
     }
-
 
     // --- State Management (isVaultOpen, markVaultOpen) remains the same ---
     public boolean isVaultOpen(UUID teamId, VaultColor color) {
@@ -347,41 +349,6 @@ public class VaultManager implements Listener {
         }
     }
 
-    /**
-     * Spawns high-value coin rewards near the opened vault.
-     * Harder vaults give bigger rewards.
-     */
-    private void spawnVaultRewards(UUID teamId, VaultColor color, Location vaultLocation) {
-        // Reward values scale by vault difficulty
-        int baseRewardValue;
-        int coinCount;
-        switch (color) {
-            case BLUE:  baseRewardValue = 30;  coinCount = 5;  break;
-            case GREEN: baseRewardValue = 40;  coinCount = 6;  break;
-            case RED:   baseRewardValue = 60;  coinCount = 8;  break;
-            case GOLD:  baseRewardValue = 100; coinCount = 10; break;
-            default:    baseRewardValue = 20;  coinCount = 4;  break;
-        }
-
-        var floorItemManager = gameManager.getFloorItemManager();
-        if (floorItemManager == null) {
-            plugin.getLogger().warning("Cannot spawn vault rewards: FloorItemManager is null");
-            return;
-        }
-
-        // Spawn coins in a small area around the vault
-        Random random = new Random();
-        UUID instanceId = UUID.randomUUID(); // Use a dummy segment ID for vault rewards
-        for (int i = 0; i < coinCount; i++) {
-            double offsetX = (random.nextDouble() - 0.5) * 4; // Spread within 4 blocks
-            double offsetZ = (random.nextDouble() - 0.5) * 4;
-            Location coinLoc = vaultLocation.clone().add(offsetX, 0, offsetZ);
-            int value = baseRewardValue + random.nextInt(baseRewardValue / 2);
-            floorItemManager.spawnCoinStack(coinLoc, value, teamId, instanceId, 0);
-        }
-
-        plugin.getLogger().info("Spawned " + coinCount + " reward coins for " + color + " vault (team " + teamId + ")");
-    }
 
     /**
      * Clears the vault open state for ALL teams.

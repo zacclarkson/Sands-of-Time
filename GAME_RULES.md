@@ -278,7 +278,9 @@ and it will naturally prefer a puzzle room once those exist.
 - Each vault has a **colored marker block** that serves as the activation point
 - Right-click the marker block with the matching colored key to open the vault
 - The key is **consumed** on use
-- Opening a vault changes the marker block to glass and plays sound effects
+- Opening a vault sinks the marker block along with the vault door, and plays sound effects
+- The reward is whatever the segment places **behind** the vault door, revealed as the wall drops —
+  no coins are spawned at the marker, which would put them in front of the wall the vault was sealing
 - Only one of each vault color exists per dungeon
 
 ### Vault Block Materials
