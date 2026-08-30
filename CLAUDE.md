@@ -368,7 +368,9 @@ line — so it is actionable without rediscovering it.
   sits at segment-relative `(21, 1, 18)`, the pedestal under the sand column baked into `hub.schem`.
   **The hub must declare itself tall enough to hold the column it anchors.** The column occupies
   relative Y `timerLocationOffset.y + 1` through `+ VisualTimerLayout.COLUMN_HEIGHT_BLOCKS`, but the
-  blueprint bounds come from the template's declared `size` (`DungeonGenerator.calculateRelativeMaxBounds`),
+  blueprint bounds come from the template's declared `size` — rotated, via `PlacedSegment.getRotatedSize()`
+  (`DungeonGenerator.calculateRelativeMaxBounds`; the unrotated size under-covered any non-square segment
+  placed at 90/270 and left its overhang standing between rounds) —
   and those bounds are exactly what `DungeonManager.cleanupInstance()` air-fills between rounds.
   `hub.json` therefore declares `size.y = 17` while `hub.schem` is only 15 tall — the two extra
   layers are air, `ignoreAirBlocks` means they cost nothing to paste, and nothing cross-checks the

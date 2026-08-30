@@ -863,8 +863,12 @@ public class DungeonGenerator {
         for (PlacedSegment segment : placedSegments) {
             // Get the relative origin vector of this segment (world is null)
             Vector origin = segment.getWorldOrigin().toVector();
-            // Get the size of the segment template
-            BlockVector3 size = segment.getSegmentTemplate().getSize();
+            // Get the ROTATED footprint of this placement: 90/270 steps swap X and Z, so the
+            // unrotated template size would under-cover a non-square segment on one axis. These
+            // bounds become the blueprint Area that DungeonManager.cleanupInstance() air-fills
+            // between rounds, and blocks left outside it survive the next round's paste
+            // (ignoreAirBlocks). Matches calculatePotentialBounds and PlacedSegment's own bounds.
+            BlockVector3 size = segment.getRotatedSize();
 
             // Calculate the maximum corner coordinates for this segment
             // Remember size includes the origin block, so add size-1 to origin coord
