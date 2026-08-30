@@ -48,6 +48,7 @@ class BlockProtectionListenerTest {
     private Plugin plugin;
     private World world;
     private GameManager gameManager;
+    private TeamManager teamManager;
     private PlayerMock player;
 
     @BeforeEach
@@ -58,6 +59,11 @@ class BlockProtectionListenerTest {
 
         gameManager = mock(GameManager.class);
         when(gameManager.getCurrentState()).thenReturn(GameState.RUNNING);
+        // GameManager builds this in its constructor, so it is never null in production. Stubbed for
+        // every test because the placement path resolves the player's team before it can decide
+        // whether a placement is a sand deposit.
+        teamManager = mock(TeamManager.class);
+        when(gameManager.getTeamManager()).thenReturn(teamManager);
 
         player = server.addPlayer();
         player.setGameMode(GameMode.SURVIVAL);
@@ -93,8 +99,6 @@ class BlockProtectionListenerTest {
     /** Marks a single block location as one of the team's TIMER_DEPOSIT cells. */
     private void depositPointAt(Block block) {
         UUID teamId = UUID.randomUUID();
-        TeamManager teamManager = mock(TeamManager.class);
-        when(gameManager.getTeamManager()).thenReturn(teamManager);
         when(teamManager.getPlayerTeamId(player)).thenReturn(teamId);
         when(gameManager.isTeamSandTimerDepositAt(eq(teamId), any(Location.class)))
                 .thenAnswer(invocation -> {
@@ -292,8 +296,6 @@ class BlockProtectionListenerTest {
     @Test
     void miningTheTimerColumnHandsOutNoSand() {
         SandManager sandManager = registerRealSandManager();
-        TeamManager teamManager = mock(TeamManager.class);
-        when(gameManager.getTeamManager()).thenReturn(teamManager);
 
         Block column = blockAt(21, 102, 18, Material.SAND);
         timerColumnAt(column);
@@ -312,9 +314,7 @@ class BlockProtectionListenerTest {
         SandManager sandManager = registerRealSandManager();
 
         UUID teamId = UUID.randomUUID();
-        TeamManager teamManager = mock(TeamManager.class);
         SoTTeam team = mock(SoTTeam.class);
-        when(gameManager.getTeamManager()).thenReturn(teamManager);
         when(teamManager.getPlayerTeamId(player)).thenReturn(teamId);
         when(gameManager.getActiveTeams()).thenReturn(Map.of(teamId, team));
         when(team.isVisualTimerBlock(any(Location.class))).thenReturn(false);
