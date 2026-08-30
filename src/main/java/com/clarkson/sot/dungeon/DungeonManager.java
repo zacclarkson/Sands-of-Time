@@ -383,7 +383,7 @@ public class DungeonManager {
                 if (absLoc == null) continue;
                 try {
                     int depth = dungeonData.getDepthAtLocation(absLoc, this.placedSegmentsInWorld);
-                    int baseValue = 5 + (depth / 2);
+                    int baseValue = coinBaseValueForDepth(depth);
                     floorItemManager.spawnCoinStack(absLoc, baseValue, teamId, instanceUUID, depth);
                 } catch (Exception e) {
                     plugin.getLogger().log(Level.WARNING, "Error processing coin spawn at " + absLoc + " for team " + teamId, e);
@@ -463,11 +463,21 @@ public class DungeonManager {
     }
 
     /**
+     * Base coin value for a pickup at the given depth, before {@code ScoreManager}'s depth multiplier.
+     *
+     * <p>Shared with {@link MobManager}, which pays the same for a destroyed mob spawner, so the two
+     * cannot drift apart.
+     */
+    static int coinBaseValueForDepth(int depth) {
+        return 5 + (depth / 2);
+    }
+
+    /**
      * Hands every {@code MOB_SPAWNER} marker in this instance to the {@link MobManager}.
      *
-     * <p>Nothing is spawned here — the manager fires a spawner when a member of the team first
-     * comes near it. Depth is resolved the same way {@link #populateFloorItems()} resolves it,
-     * because this class is the only place holding {@link #placedSegmentsInWorld}.
+     * <p>This places the spawner blocks; no mob appears until a member of the team comes near one.
+     * Depth is resolved the same way {@link #populateFloorItems()} resolves it, because this class
+     * is the only place holding {@link #placedSegmentsInWorld}.
      */
     private void armMobSpawners() {
         if (dungeonData == null) {
@@ -486,14 +496,14 @@ public class DungeonManager {
             if (absLoc == null) continue;
             try {
                 int depth = dungeonData.getDepthAtLocation(absLoc, this.placedSegmentsInWorld);
-                mobManager.armSpawner(absLoc, teamId, depth);
+                mobManager.armSpawner(absLoc, teamId, dungeonData.getInstanceId(), depth);
                 armed++;
             } catch (Exception e) {
                 plugin.getLogger().log(Level.WARNING, "Error arming mob spawner at " + absLoc
                         + " for team " + teamId, e);
             }
         }
-        plugin.getLogger().fine("Armed " + armed + " of " + spawnerLocs.size()
+        plugin.getLogger().fine("Placed " + armed + " of " + spawnerLocs.size()
                 + " mob spawners for team " + teamId + ".");
     }
 

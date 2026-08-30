@@ -106,25 +106,36 @@ manually (see `integration-test/README.md`); it is **not** part of CI.
   every segment door was permanently locked. Placement is by chance rather than one-per-room, so a
   branch can come up with no key and stay shut — raise the constant if that bites; the doorway and
   key counts are both logged.
-- **Mobs are armed at `MOB_SPAWNER` markers, not spawned there.** The markers were placeable and
-  saved (`mobSpawnerLocations`) long before anything read them, so no mob ever appeared. They now
-  ride the same channel coins and items take — `Segment.getMobSpawnerLocations()` →
-  `DungeonGenerator.consolidateFeatureLocations` → `DungeonBlueprint` → `DungeonManager.armMobSpawners`
-  → `MobManager.armSpawner`. `DungeonManager` resolves the depth, because it is the only holder of
-  `placedSegmentsInWorld`. Nothing spawns at setup: `MobManager.onPlayerMove` fires a spawner when a
-  member of the **owning team** first comes within 10 blocks, and firing is **one-shot** — a cleared
-  room stays cleared, so a corpse run is a race against the timer rather than a rematch.
-  `mobsForDepth` is a pure static (like `spawnsRustyKey`) and widens both the pool and the group size
-  with depth: 1 mob below depth 3, 2 below 6, 3 beyond. Every spawned mob is PDC-tagged
-  (`sot_dungeon_mob` + team UUID), which is what separates a designed encounter from the mobs vanilla
-  spawns in any dark room — only tagged mobs are tracked, removed by `clearTeamState`, and counted
-  toward `SoTPlayerData.monstersKilled`. That counter is why `GameManager` now owns a
-  `SoTPlayerManager` (previously dead code, constructed nowhere); it is keyed by UUID rather than
-  `Player` identity, since a reconnect hands out a fresh instance. Mob hardening
-  (`setRemoveWhenFarAway`, `setShouldBurnInDay`) and the group-spread passability check are wrapped
-  in best-effort try/catch: an implementation that does not support them should downgrade the
-  encounter, not abort the spawn — and MockBukkit throws on all three. **The bundled hub declares no
-  `MOB_SPAWNER` markers**, so a stock server sees no mobs until a segment carrying them is saved.
+- **A `MOB_SPAWNER` marker becomes a real, breakable block.** The markers were placeable and saved
+  (`mobSpawnerLocations`) long before anything read them, so no mob ever appeared. They now ride the
+  same channel coins and items take — `Segment.getMobSpawnerLocations()` →
+  `DungeonGenerator.consolidateFeatureLocations` → `DungeonBlueprint` → `Dungeon` →
+  `DungeonManager.armMobSpawners` → `MobManager.armSpawner`, which writes a `Material.SPAWNER` block
+  at each marker. `DungeonManager` resolves the depth, because it is the only holder of
+  `placedSegmentsInWorld`. **The block is the encounter**: `MobManager`'s repeating task starts it
+  when a member of the **owning team** comes within 10 blocks and it then produces a wave every
+  8 seconds for as long as someone is in range — it never stops on its own. Breaking it **with a
+  pickaxe** is the only way to end it, and pays the same coins as an ordinary stack at that depth
+  (`DungeonManager.coinBaseValueForDepth`, shared so the two cannot drift), dropped through
+  `FloorItemManager` so it inherits the usual visual, pickup and cleanup. A bare-handed or
+  wrong-tool break is cancelled rather than silently unrewarded. The 10-block radius is deliberately
+  wider than a player's ~5-block reach, so the fight always starts before the block can be attacked;
+  `MAX_LIVE_MOBS_PER_SPAWNER` (6) is what stops an ignored spawner filling the dungeon. The vanilla
+  spawner logic inside the placed block is neutralised (`setSpawnCount(0)` + a huge delay), or it
+  would produce untagged mobs alongside ours. `mobsForDepth` is a pure static (like `spawnsRustyKey`)
+  widening pool and wave size with depth: 1 mob below depth 3, 2 below 6, 3 beyond. Every spawned mob
+  is PDC-tagged (`sot_dungeon_mob` + team UUID), which is what separates a designed encounter from
+  the mobs vanilla spawns in any dark room — only tagged mobs are tracked, removed by
+  `clearTeamState`, and counted toward `SoTPlayerData.monstersKilled`. That counter is why
+  `GameManager` now owns a `SoTPlayerManager` (previously dead code, constructed nowhere); it is
+  keyed by UUID rather than `Player` identity, since a reconnect hands out a fresh instance. The
+  spawn task is owned by `GameManager` like `GameScoreboardManager` — started in `beginPlay`, stopped
+  via `clearAllTeamStates` in `tearDownRound` — and its clock is injected so the cadence is testable
+  without a scheduler. Mob hardening (`setRemoveWhenFarAway`, `setShouldBurnInDay`), the block
+  configuration and the wave-spread passability check are all wrapped in best-effort try/catch: an
+  implementation that does not support them should downgrade the encounter, not abort the spawn — and
+  MockBukkit throws on all three. **The bundled hub declares no `MOB_SPAWNER` markers**, so a stock
+  server sees no mobs until a segment carrying them is saved.
 - **The safe exit is a segment marker.** The escape point comes from a `SAFE_EXIT` marker on a
   segment template; a marker on the HUB segment wins over one on any other segment. Templates saved
   before that marker existed carry none, so `GameManager.getTeamSafeExitLocation` falls back to the

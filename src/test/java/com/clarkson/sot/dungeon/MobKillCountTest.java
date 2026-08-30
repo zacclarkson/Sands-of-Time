@@ -26,6 +26,7 @@ import org.mockbukkit.mockbukkit.entity.PlayerMock;
 
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicLong;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
@@ -49,6 +50,8 @@ class MobKillCountTest {
     private PlayerMock player;
 
     private final UUID teamId = UUID.randomUUID();
+    private final UUID instanceId = UUID.randomUUID();
+    private final AtomicLong now = new AtomicLong(0);
 
     @BeforeEach
     void setUp() {
@@ -69,7 +72,7 @@ class MobKillCountTest {
         when(gameManager.getTeamManager()).thenReturn(teamManager);
         when(gameManager.getPlayerManager()).thenReturn(playerManager);
 
-        mobManager = new MobManager(plugin, gameManager);
+        mobManager = new MobManager(plugin, gameManager, now::get);
         server.getPluginManager().registerEvents(mobManager, plugin);
     }
 
@@ -152,8 +155,10 @@ class MobKillCountTest {
     @Test
     void aKilledMobIsNoLongerTrackedForCleanup() {
         // Spawn through the manager so it is genuinely tracked, then kill it.
-        mobManager.armSpawner(new Location(world, 100, 64, 100), teamId, 0);
-        player.simulatePlayerMove(new Location(world, 100, 64, 96));
+        mobManager.armSpawner(new Location(world, 100, 64, 100), teamId, instanceId, 0);
+        player.teleport(new Location(world, 100, 64, 96));
+        now.incrementAndGet();
+        mobManager.tick();
         assertEquals(1, mobManager.getTrackedMobCount(teamId), "precondition: the spawner fired");
 
         Mob spawned = world.getEntitiesByClass(Mob.class).iterator().next();

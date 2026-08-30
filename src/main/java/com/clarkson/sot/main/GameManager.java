@@ -352,6 +352,7 @@ public class GameManager {
         if (currentState != GameState.COUNTDOWN || epoch != roundEpoch) return;
         this.currentState = GameState.RUNNING;
         scoreboardManager.start(); // Live standings sidebar, refreshed once a second
+        mobManager.start(); // Mob spawners produce waves while a team member stands near them
         for (SoTTeam team : activeTeamsInGame.values()) { team.startTimer(); }
         Title go = Title.title(
                 Component.text("GO!", NamedTextColor.GREEN, TextDecoration.BOLD),
