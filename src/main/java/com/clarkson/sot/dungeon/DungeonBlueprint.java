@@ -55,6 +55,12 @@ public class DungeonBlueprint {
     private final List<Vector> deathCageRelativeLocations;
     private final List<Vector> sandSacrificeRelativeLocations;
 
+    // Cells where sand is traded for depth-scaled coins (SAND_TRADE markers). Unrelated to the
+    // sacrifice points above despite both being chests: these are gathered from every segment rather
+    // than the hub winning outright, are not paired with anything, and are simply empty when no
+    // template declares one.
+    private final List<Vector> sandTradeRelativeLocations;
+
     // Connections between segments. Each becomes a rusty-key door; the unused openings are the
     // entry points the generator never attached a neighbour to, and get sealed as plain wall.
     private final List<Doorway> doorways;
@@ -84,7 +90,8 @@ public class DungeonBlueprint {
                             @NotNull List<Vector> sandSacrificeRelativeLocations,
                             @NotNull List<Doorway> doorways,
                             @NotNull List<Doorway> unusedOpenings,
-                            @NotNull List<Vector> mobSpawnerRelativeLocations
+                            @NotNull List<Vector> mobSpawnerRelativeLocations,
+                            @NotNull List<Vector> sandTradeRelativeLocations
                            ) {
 
         // Validate inputs
@@ -122,6 +129,7 @@ public class DungeonBlueprint {
         this.doorways = Collections.unmodifiableList(new ArrayList<>(doorways));
         this.unusedOpenings = Collections.unmodifiableList(new ArrayList<>(unusedOpenings));
         this.mobSpawnerRelativeLocations = Collections.unmodifiableList(new ArrayList<>(mobSpawnerRelativeLocations));
+        this.sandTradeRelativeLocations = Collections.unmodifiableList(new ArrayList<>(sandTradeRelativeLocations));
     }
 
     // --- Getters ---
@@ -152,6 +160,9 @@ public class DungeonBlueprint {
 
     /** Relative mob spawner cells (empty if no segment defines a MOB_SPAWNER marker). */
     @NotNull public List<Vector> getMobSpawnerRelativeLocations() { return mobSpawnerRelativeLocations; }
+
+    /** Relative sand trade cells (empty if no segment defines a SAND_TRADE marker). */
+    @NotNull public List<Vector> getSandTradeRelativeLocations() { return sandTradeRelativeLocations; }
 
     /** Relative sand deposit cells (empty if no segment defines a TIMER_DEPOSIT marker). */
     @NotNull public List<Vector> getSandTimerRelativeLocations() { return sandTimerRelativeLocations; }

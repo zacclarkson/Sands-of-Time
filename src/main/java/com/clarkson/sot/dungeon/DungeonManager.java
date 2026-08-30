@@ -170,6 +170,7 @@ public class DungeonManager {
         List<Location> absPlayerSpawns = calculateAbsoluteLocations(blueprintData.getPlayerSpawnRelativeLocations());
         List<Location> absSandTimers = calculateAbsoluteLocations(blueprintData.getSandTimerRelativeLocations());
         List<Location> absMobSpawners = calculateAbsoluteLocations(blueprintData.getMobSpawnerRelativeLocations());
+        List<Location> absSandTrades = calculateAbsoluteLocations(blueprintData.getSandTradeRelativeLocations());
         Location absHubLocation = dungeonOrigin.clone().add(blueprintData.getHubRelativeLocation());
         Vector safeExitRelative = blueprintData.getSafeExitRelativeLocation();
         Location absSafeExitLocation = (safeExitRelative != null) ? dungeonOrigin.clone().add(safeExitRelative) : null;
@@ -211,7 +212,7 @@ public class DungeonManager {
                 absHubLocation, absVaultMarkers, absKeySpawns,
                 absSandSpawns, absCoinSpawns, absItemSpawns,
                 deathCages, absSafeExitLocation, this.bankLocation, absPlayerSpawns, absSandTimers,
-                absMobSpawners,
+                absMobSpawners, absSandTrades,
                 absDoorways, absUnusedOpenings
             );
              plugin.getLogger().info("Created Dungeon data object for team " + teamId);
@@ -233,6 +234,7 @@ public class DungeonManager {
                     resolveGateGroups(placedSegmentsInWorld, plugin.getLogger()),
                     resolveVaultDoors(placedSegmentsInWorld, plugin.getLogger()));
             placeSacrificePoints(); // Build the chests teammates click to revive
+            placeSandTradePoints(); // Build the chests that buy coins for sand out in the branches
             populateFloorItems(); // Spawn floor items
             armMobSpawners(); // Arm mob spawners (mobs appear when a player gets close)
         } catch (Exception e) {
@@ -433,6 +435,64 @@ public class DungeonManager {
             }
         }
         plugin.getLogger().info("Placed " + placed + " sacrifice chest(s) for team " + teamId);
+    }
+
+    /**
+     * Builds the chest at each {@code SAND_TRADE} marker — the points out in the branches that buy
+     * depth-scaled coins for a sand.
+     *
+     * <p>As with {@link #placeSacrificePoints()}, writing the block is what makes the point exist:
+     * the marker records an <em>air</em> cell, so registering the location without a chest in it
+     * leaves nothing to right-click. Chests are forced to
+     * {@link org.bukkit.block.data.type.Chest.Type#SINGLE} for the same reason too — two trade points
+     * side by side would otherwise pair into a double chest and move the block a click lands on.
+     */
+    private void placeSandTradePoints() {
+        if (dungeonData == null) return;
+
+        List<Location> tradePoints = dungeonData.getSandTradeLocations();
+        if (tradePoints.isEmpty()) {
+            plugin.getLogger().fine("No sand trade points for team " + teamId);
+            return;
+        }
+
+        int placed = 0;
+        for (Location loc : tradePoints) {
+            if (loc == null) continue;
+            try {
+                Block block = loc.getBlock();
+                if (!(block.isPassable() || block.getType().isAir() || block.isLiquid())) {
+                    plugin.getLogger().warning("Could not place sand trade chest at " + loc.toVector()
+                            + " for team " + teamId + ": block is " + block.getType()
+                            + ". That trade point is unusable this round.");
+                    continue;
+                }
+                block.setType(Material.CHEST, false);
+                BlockData data = block.getBlockData();
+                if (data instanceof org.bukkit.block.data.type.Chest chestData) {
+                    chestData.setType(org.bukkit.block.data.type.Chest.Type.SINGLE);
+                    block.setBlockData(chestData, false);
+                }
+                placed++;
+            } catch (Exception e) {
+                plugin.getLogger().log(Level.WARNING,
+                        "Error placing sand trade chest at " + loc + " for team " + teamId, e);
+            }
+        }
+        plugin.getLogger().info("Placed " + placed + " sand trade chest(s) for team " + teamId);
+    }
+
+    /**
+     * The depth of the segment containing {@code location}, or 0 when it falls outside every placed
+     * segment (or the instance has not been initialized).
+     *
+     * <p>This class is the only holder of {@link #placedSegmentsInWorld}, so a caller that needs a
+     * depth at runtime — a sand trade paying out — has to come through here, exactly as
+     * {@link #populateFloorItems()} and {@link #armMobSpawners()} do at setup.
+     */
+    public int getDepthAt(@NotNull Location location) {
+        if (dungeonData == null) return 0;
+        return dungeonData.getDepthAtLocation(location, this.placedSegmentsInWorld);
     }
 
     private void populateFloorItems() {

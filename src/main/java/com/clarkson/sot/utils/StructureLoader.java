@@ -205,6 +205,12 @@ public class StructureLoader {
                     json.getAsJsonArray("sandSacrificeLocations"), "sandSacrificeLocations", name, sourceFileName);
             List<BlockVector3> mobSpawners = deserializeBlockVectorList(
                     json.getAsJsonArray("mobSpawnerLocations"), "mobSpawnerLocations", name, sourceFileName);
+            // Optional: every template on disk predates the SAND_TRADE marker, so a missing array
+            // just means this segment has no trade points -- not a malformed template.
+            List<BlockVector3> sandTrades = json.has("sandTradeLocations")
+                    ? deserializeBlockVectorList(json.getAsJsonArray("sandTradeLocations"),
+                            "sandTradeLocations", name, sourceFileName)
+                    : new ArrayList<>();
 
             // --- Deserialize hub features ---
             BlockVector3 bankOffset = null;
@@ -254,7 +260,8 @@ public class StructureLoader {
                     safeExitBound,
                     sandTimers != null ? sandTimers : new ArrayList<>(),
                     timerOffset,
-                    playerSpawns != null ? playerSpawns : new ArrayList<>()
+                    playerSpawns != null ? playerSpawns : new ArrayList<>(),
+                    sandTrades   != null ? sandTrades   : new ArrayList<>()
             );
 
         } catch (JsonParseException | IllegalStateException | ClassCastException | NullPointerException e) {

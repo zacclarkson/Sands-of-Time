@@ -4,6 +4,7 @@ import com.clarkson.sot.dungeon.DeathCage;
 import com.clarkson.sot.events.BlockProtectionListener;
 import com.clarkson.sot.main.GameManager;
 import com.clarkson.sot.main.GameState;
+import com.clarkson.sot.scoring.ScoreManager;
 import com.clarkson.sot.timer.TeamTimer;
 import com.clarkson.sot.ui.SacrificeIndicatorManager;
 
@@ -63,6 +64,7 @@ class SandManagerTest {
     private PlayerMock player;
     private SandManager sandManager;
     private SacrificeIndicatorManager indicators;
+    private ScoreManager scoreManager;
     private final UUID teamId = UUID.randomUUID();
 
     @BeforeEach
@@ -82,6 +84,8 @@ class SandManagerTest {
         when(gameManager.getActiveTeams()).thenReturn(Map.of(teamId, team));
         indicators = mock(SacrificeIndicatorManager.class);
         when(gameManager.getSacrificeIndicatorManager()).thenReturn(indicators);
+        scoreManager = mock(ScoreManager.class);
+        when(gameManager.getScoreManager()).thenReturn(scoreManager);
         when(team.getTeamName()).thenReturn("Red Rabbits");
         when(team.getRemainingSeconds()).thenReturn(60);
 
@@ -636,5 +640,161 @@ class SandManagerTest {
         assertEquals(4, sandCount(player), "one right-click, one sand");
         assertEquals(2, cage.getRemainingSand());
         assertTrue(offHand.isCancelled(), "the off-hand pass must still not open the chest");
+    }
+
+    // --- sand trade: buying coins with sand out in the branches ---
+
+    /**
+     * Registers {@code cell} as this team's only sand trade chest, sitting at {@code depth}, and
+     * builds the block.
+     */
+    private Block tradeChest(Location cell, int depth) {
+        Block block = world.getBlockAt(cell);
+        block.setType(Material.CHEST);
+        when(gameManager.isAnySandTradePointAt(any(Location.class))).thenAnswer(invocation ->
+                sameBlock(invocation.getArgument(0), cell));
+        when(gameManager.isTeamSandTradePointAt(eq(teamId), any(Location.class))).thenAnswer(invocation ->
+                sameBlock(invocation.getArgument(1), cell));
+        when(gameManager.getTeamDepthAt(eq(teamId), any(Location.class))).thenReturn(depth);
+        return block;
+    }
+
+    private static boolean sameBlock(Location queried, Location cell) {
+        return queried != null
+                && queried.getBlockX() == cell.getBlockX()
+                && queried.getBlockY() == cell.getBlockY()
+                && queried.getBlockZ() == cell.getBlockZ();
+    }
+
+    @Test
+    void rightClickingATradeChestSpendsOneSandForDepthScaledCoins() {
+        Block chest = tradeChest(new Location(world, 60, 65, 60), 8);
+        player.getInventory().addItem(new ItemStack(Material.SAND, 3));
+
+        PlayerInteractEvent event = rightClick(player, chest);
+
+        assertTrue(event.isCancelled(), "the vanilla chest UI must never open on a trade point");
+        assertEquals(2, sandCount(player), "exactly one sand is spent");
+        verify(scoreManager).awardDepthScaledCoins(player, SandManager.TRADE_COINS_PER_SAND, 8);
+    }
+
+    @Test
+    void aTradeAtTheHubPaysTheUnscaledRate() {
+        Block chest = tradeChest(new Location(world, 60, 65, 60), 0);
+        player.getInventory().addItem(new ItemStack(Material.SAND, 1));
+
+        rightClick(player, chest);
+
+        verify(scoreManager).awardDepthScaledCoins(player, SandManager.TRADE_COINS_PER_SAND, 0);
+    }
+
+    @Test
+    void aTraderWithNoSandPaysNothingAndEarnsNothing() {
+        Block chest = tradeChest(new Location(world, 60, 65, 60), 4);
+
+        PlayerInteractEvent event = rightClick(player, chest);
+
+        assertTrue(event.isCancelled(), "the chest still must not open");
+        assertEquals(0, sandCount(player));
+        verify(scoreManager, never()).awardDepthScaledCoins(any(), anyInt(), anyInt());
+    }
+
+    @Test
+    void theOffHandPassDoesNotChargeASecondSandAtATradeChest() {
+        // Same trap as the sacrifice chest: PlayerInteractEvent fires once per hand, and cancelling
+        // the main-hand pass does not stop the off-hand one.
+        Block chest = tradeChest(new Location(world, 60, 65, 60), 2);
+        player.getInventory().addItem(new ItemStack(Material.SAND, 5));
+
+        rightClick(player, chest);
+        PlayerInteractEvent offHand = new PlayerInteractEvent(
+                player, Action.RIGHT_CLICK_BLOCK, player.getInventory().getItemInOffHand(),
+                chest, BlockFace.UP, EquipmentSlot.OFF_HAND);
+        server.getPluginManager().callEvent(offHand);
+
+        assertEquals(4, sandCount(player), "one right-click, one sand");
+        verify(scoreManager, times(1)).awardDepthScaledCoins(any(), anyInt(), anyInt());
+        assertTrue(offHand.isCancelled(), "the off-hand pass must still not open the chest");
+    }
+
+    @Test
+    void someoneWithNoTeamCannotOpenATradeChest() {
+        Block chest = tradeChest(new Location(world, 60, 65, 60), 3);
+        PlayerMock outsider = server.addPlayer();
+        when(gameManager.getTeamManager().getPlayerTeamId(outsider)).thenReturn(null);
+        outsider.getInventory().addItem(new ItemStack(Material.SAND, 2));
+
+        PlayerInteractEvent event = rightClick(outsider, chest);
+
+        assertTrue(event.isCancelled(), "cancelled before the team check, so the chest stays shut");
+        assertEquals(2, sandCount(outsider), "and they pay nothing");
+        verify(scoreManager, never()).awardDepthScaledCoins(any(), anyInt(), anyInt());
+    }
+
+    @Test
+    void anotherTeamsTradeChestTakesNoSand() {
+        // Cancelled for everyone (so it never opens), but only the owning team can actually trade.
+        Block chest = tradeChest(new Location(world, 60, 65, 60), 3);
+        when(gameManager.isTeamSandTradePointAt(eq(teamId), any(Location.class))).thenReturn(false);
+        player.getInventory().addItem(new ItemStack(Material.SAND, 2));
+
+        PlayerInteractEvent event = rightClick(player, chest);
+
+        assertTrue(event.isCancelled());
+        assertEquals(2, sandCount(player));
+        verify(scoreManager, never()).awardDepthScaledCoins(any(), anyInt(), anyInt());
+    }
+
+    @Test
+    void anEscapedPlayerCannotTrade() {
+        Block chest = tradeChest(new Location(world, 60, 65, 60), 3);
+        when(stateManager.getStatus(player)).thenReturn(PlayerStatus.ESCAPED_SAFE);
+        player.getInventory().addItem(new ItemStack(Material.SAND, 2));
+
+        rightClick(player, chest);
+
+        assertEquals(2, sandCount(player), "the round is over for them");
+        verify(scoreManager, never()).awardDepthScaledCoins(any(), anyInt(), anyInt());
+    }
+
+    @Test
+    void tradeChestsAreInertOutsideARunningGame() {
+        Block chest = tradeChest(new Location(world, 60, 65, 60), 3);
+        when(gameManager.getCurrentState()).thenReturn(GameState.ENDED);
+        player.getInventory().addItem(new ItemStack(Material.SAND, 2));
+
+        PlayerInteractEvent event = rightClick(player, chest);
+
+        assertFalse(event.isCancelled());
+        assertEquals(2, sandCount(player));
+    }
+
+    @Test
+    void aChestThatIsBothWouldBeTreatedAsASacrificePoint() {
+        // The two kinds are the same block, so the handler has to pick one meaning. Reviving a caged
+        // teammate is the one that must win: it is the only one with a deadline.
+        PlayerMock caged = server.addPlayer();
+        DeathCage cage = cagedTeammate(caged, 1);
+        Block chest = sacrificeChest(cage);
+        tradeChest(cage.getSacrificePointLocation(), 5);
+        player.getInventory().addItem(new ItemStack(Material.SAND, 2));
+
+        rightClick(player, chest);
+
+        verify(stateManager).updateStatus(caged, PlayerStatus.ALIVE_IN_DUNGEON);
+        verify(scoreManager, never()).awardDepthScaledCoins(any(), anyInt(), anyInt());
+    }
+
+    @Test
+    void anOrdinaryChestIsStillLeftAloneWhenTradePointsExist() {
+        tradeChest(new Location(world, 60, 65, 60), 3);
+        Block plainChest = world.getBlockAt(new Location(world, 40, 65, 40));
+        plainChest.setType(Material.CHEST);
+        player.getInventory().addItem(new ItemStack(Material.SAND, 2));
+
+        PlayerInteractEvent event = rightClick(player, plainChest);
+
+        assertFalse(event.isCancelled(), "a chest that is neither kind still opens normally");
+        assertEquals(2, sandCount(player));
     }
 }

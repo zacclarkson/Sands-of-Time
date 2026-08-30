@@ -37,6 +37,7 @@ public class Dungeon {
     private final List<Location> playerSpawnLocations; // Absolute per-player start points (may be empty)
     private final List<Location> sandTimerLocations; // Absolute sand deposit cells (may be empty)
     private final List<Location> mobSpawnerLocations; // Absolute mob spawner cells (may be empty)
+    private final List<Location> sandTradeLocations; // Absolute sand trade chests (may be empty)
 
     // Absolute openings between segments. Doorways get a rusty-key door; unused openings are the
     // entry points generation never attached a neighbour to and are sealed as plain wall.
@@ -63,6 +64,7 @@ public class Dungeon {
      * @param playerSpawnLocations List of absolute per-player spawn points (may be empty).
      * @param sandTimerLocations List of absolute cells where carried sand is deposited onto the timer.
      * @param mobSpawnerLocations List of absolute cells where hostile mobs are armed to spawn.
+     * @param sandTradeLocations List of absolute cells holding a sand trade chest (may be empty).
      * @param doorways Absolute doorways between connected segments (one rusty-key door each).
      * @param unusedOpenings Absolute entry points with no neighbour attached, to be sealed.
      */
@@ -79,6 +81,7 @@ public class Dungeon {
                    @NotNull List<Location> playerSpawnLocations,
                    @NotNull List<Location> sandTimerLocations,
                    @NotNull List<Location> mobSpawnerLocations,
+                   @NotNull List<Location> sandTradeLocations,
                    @NotNull List<EntryPoint> doorways,
                    @NotNull List<EntryPoint> unusedOpenings) {
 
@@ -101,6 +104,7 @@ public class Dungeon {
         this.playerSpawnLocations = Collections.unmodifiableList(new ArrayList<>(playerSpawnLocations));
         this.sandTimerLocations = Collections.unmodifiableList(new ArrayList<>(sandTimerLocations));
         this.mobSpawnerLocations = Collections.unmodifiableList(new ArrayList<>(mobSpawnerLocations));
+        this.sandTradeLocations = Collections.unmodifiableList(new ArrayList<>(sandTradeLocations));
         this.doorways = Collections.unmodifiableList(new ArrayList<>(doorways));
         this.unusedOpenings = Collections.unmodifiableList(new ArrayList<>(unusedOpenings));
     }
@@ -142,6 +146,32 @@ public class Dungeon {
      * a member of the owning team first comes near.
      */
     @NotNull public List<Location> getMobSpawnerLocations() { return mobSpawnerLocations; } // Already unmodifiable
+
+    /**
+     * Absolute sand trade cells (empty if no segment template defined a {@code SAND_TRADE} marker).
+     *
+     * <p>A chest is built at each of these; right-clicking one buys depth-scaled coins for a sand.
+     */
+    @NotNull public List<Location> getSandTradeLocations() { return sandTradeLocations; } // Already unmodifiable
+
+    /**
+     * True if the given block location is one of this instance's sand trade chests.
+     *
+     * <p>Matched on exact block coordinates, with no tolerance, for the same reason as
+     * {@link #isBankAt}: the builder tool records a {@code SAND_TRADE} marker at the <em>air cell</em>
+     * next to the face the builder clicked, which is precisely the cell the chest is written into.
+     */
+    public boolean isSandTradePointAt(@NotNull Location location) {
+        for (Location trade : sandTradeLocations) {
+            if (trade.getBlockX() == location.getBlockX()
+                    && trade.getBlockY() == location.getBlockY()
+                    && trade.getBlockZ() == location.getBlockZ()
+                    && Objects.equals(trade.getWorld(), location.getWorld())) {
+                return true;
+            }
+        }
+        return false;
+    }
 
     /**
      * True if the given block location is one of this instance's sand deposit cells.

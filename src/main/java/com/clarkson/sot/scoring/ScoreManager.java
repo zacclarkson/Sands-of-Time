@@ -52,13 +52,30 @@ public class ScoreManager {
     public void collectFloorItem(Player player, FloorItem item) {
         if (item instanceof CoinStack) {
             CoinStack coin = (CoinStack) item;
-            int scaledValue = calculateScaledCoinValue(coin.getBaseValue(), coin.getDepth());
-            updatePlayerUnbankedScore(player.getUniqueId(), scaledValue);
-            pickupNotifier.notifyPickup(player, scaledValue);
+            int scaledValue = awardDepthScaledCoins(player, coin.getBaseValue(), coin.getDepth());
             plugin.getLogger().fine(player.getName() + " collected coin worth " + scaledValue
                     + " (base: " + coin.getBaseValue() + ", depth: " + coin.getDepth() + ")");
         }
         // Future: handle FloorLoot (add to inventory), SandPile (add sand to team), etc.
+    }
+
+    /**
+     * Adds depth-scaled coins to a player's <em>unbanked</em> score and folds the amount into their
+     * running pickup message.
+     *
+     * <p>The path a coin stack takes, and also the one a sand trade takes — trading deep pays more for
+     * the same sand, on exactly the multiplier that makes a deep coin worth more than a shallow one.
+     * The coins land unbanked on purpose: they are lost on death and on a timer-out like any other
+     * unbanked coin, which is what keeps a trade a gamble rather than a safe conversion.
+     *
+     * @return the scaled amount actually added.
+     */
+    public int awardDepthScaledCoins(Player player, int baseValue, int depth) {
+        if (baseValue <= 0) return 0;
+        int scaledValue = calculateScaledCoinValue(baseValue, depth);
+        updatePlayerUnbankedScore(player.getUniqueId(), scaledValue);
+        pickupNotifier.notifyPickup(player, scaledValue);
+        return scaledValue;
     }
 
     /**

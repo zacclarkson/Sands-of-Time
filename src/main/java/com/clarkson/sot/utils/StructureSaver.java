@@ -371,6 +371,8 @@ public class StructureSaver {
 
             json.add("sandSacrificeLocations", serializeBlockVectorList(
                     segmentTemplate.getSandSacrificeLocations(), "sandSacrificeLocations", segmentName));
+            json.add("sandTradeLocations", serializeBlockVectorList(
+                    segmentTemplate.getSandTradeLocations(), "sandTradeLocations", segmentName));
             json.add("mobSpawnerLocations", serializeBlockVectorList(
                     segmentTemplate.getMobSpawnerLocations(), "mobSpawnerLocations", segmentName));
 

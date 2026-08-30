@@ -88,6 +88,7 @@ public class ToolListener implements Listener {
     private static final String MT_LEVER            = "LEVER";
     private static final String MT_SAND_SPAWN       = "SAND_SPAWN";
     private static final String MT_SAND_SACRIFICE   = "SAND_SACRIFICE";
+    private static final String MT_SAND_TRADE       = "SAND_TRADE";
     private static final String MT_SAFE_EXIT        = "SAFE_EXIT";
     private static final String MT_COIN_SPAWN       = "COIN_SPAWN";
     private static final String MT_ITEM_SPAWN       = "ITEM_SPAWN";
@@ -137,6 +138,10 @@ public class ToolListener implements Listener {
     private static final double KEY_MARKER_HEIGHT   = 0.5;
     // Sand sacrifice uses soul sand (was gold — gold now reads as coins).
     private static final Material SACRIFICE_MATERIAL = Material.SOUL_SAND;
+    // Sand trade points render as a chest in game, exactly like a sacrifice point. In *build* mode
+    // they must be told apart at a glance, so the marker is gold — what the point pays out — over a
+    // sand icon, what it costs.
+    private static final Material TRADE_MATERIAL = Material.GOLD_BLOCK;
     // Coin custom-model-data thresholds, mirroring CoinStack so the marker matches the real coin.
     private static final int COIN_MODEL_SMALL = 1001, COIN_MODEL_MEDIUM = 1002, COIN_MODEL_LARGE = 1003;
 
@@ -236,6 +241,10 @@ public class ToolListener implements Listener {
             case SAND_SACRIFICE:
                 placeBlockMarker(event, player, MT_SAND_SACRIFICE, SACRIFICE_MATERIAL, 0.5f, null, -1,
                         null, Component.text("Sacrifice", NamedTextColor.GOLD));
+                break;
+            case SAND_TRADE:
+                placeBlockMarker(event, player, MT_SAND_TRADE, TRADE_MATERIAL, 0.5f, null, -1,
+                        new ItemStack(Material.SAND), Component.text("Sand Trade", NamedTextColor.GOLD));
                 break;
             case COIN_SPAWN: {
                 int val = session.getCoinValue();

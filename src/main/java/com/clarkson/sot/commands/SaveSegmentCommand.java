@@ -175,6 +175,7 @@ public class SaveSegmentCommand implements CommandExecutor, TabCompleter {
         List<BlockVector3> itemSpawns          = new ArrayList<>();
         List<BlockVector3> coinSpawns          = new ArrayList<>();
         List<BlockVector3> sandSacrifices      = new ArrayList<>();
+        List<BlockVector3> sandTrades          = new ArrayList<>();
         List<BlockVector3> mobSpawners         = new ArrayList<>();
         List<SegmentBound> gates               = new ArrayList<>();
 
@@ -315,6 +316,9 @@ public class SaveSegmentCommand implements CommandExecutor, TabCompleter {
                 case "SAND_SACRIFICE":
                     sandSacrifices.add(relPos);
                     break;
+                case "SAND_TRADE":
+                    sandTrades.add(relPos);
+                    break;
                 case "SAFE_EXIT": {
                     SegmentBound bound = readBound(pdc, selMin);
                     if (bound != null) {
@@ -424,6 +428,7 @@ public class SaveSegmentCommand implements CommandExecutor, TabCompleter {
         player.sendMessage(info("Coin Spawns",     coinSpawns.size())
                 .append(Component.text(" (total value: " + totalCoins + ")", NamedTextColor.GRAY)));
         player.sendMessage(info("Sand Sacrifices", sandSacrifices.size()));
+        player.sendMessage(info("Sand Trades",     sandTrades.size()));
         player.sendMessage(info("Mob Spawners",    mobSpawners.size()));
         player.sendMessage(info("Gates",           gates.size()));
         player.sendMessage(Component.text("  Lever: ", NamedTextColor.WHITE)
@@ -475,7 +480,7 @@ public class SaveSegmentCommand implements CommandExecutor, TabCompleter {
                     sandSacrifices, mobSpawners,
                     safeExitOffset,
                     bankOffset, deathCageOffsets, safeExitBound, sandTimerOffsets, timerOffset,
-                    playerSpawnOffsets
+                    playerSpawnOffsets, sandTrades
             );
         } catch (Exception e) {
             plugin.getLogger().log(Level.SEVERE, "Error constructing Segment for " + segmentName, e);
@@ -543,6 +548,7 @@ public class SaveSegmentCommand implements CommandExecutor, TabCompleter {
             case "MOB_SPAWNER":
             case "SAND_SPAWN":
             case "SAND_SACRIFICE":
+            case "SAND_TRADE":
             case "PLAYER_SPAWN":
                 return true;
             default:

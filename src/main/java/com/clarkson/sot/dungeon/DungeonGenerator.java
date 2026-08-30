@@ -427,6 +427,12 @@ public class DungeonGenerator {
         List<Vector> sandSacrificeRelativeLocations =
                 reconcileSacrificePoints(deathCageRelativeLocations, sacrificeMarkers, hubCentre);
 
+        // Sand trade points. Optional and unpaired, so unlike a missing bank this is not worth a
+        // warning: every template saved before the SAND_TRADE marker existed carries none, and a
+        // dungeon with no trade points plays perfectly well.
+        List<Vector> sandTradeRelativeLocations = selectSandTradeRelativeLocations(placedSegments);
+        plugin.getLogger().fine("Layout has " + sandTradeRelativeLocations.size() + " sand trade point(s).");
+
         List<Doorway> doorways = new ArrayList<>(doorwaysInDFS);
         List<Doorway> unusedOpenings = findUnusedOpenings(placedSegments, doorways);
         plugin.getLogger().info("Layout has " + doorways.size() + " doorways and "
@@ -439,7 +445,7 @@ public class DungeonGenerator {
                 blueprintBounds, safeExitRelativeLocation, timerBaseRelativeLocation, bankRelativeLocation,
                 playerSpawnRelativeLocations, sandTimerRelativeLocations,
                 deathCageRelativeLocations, sandSacrificeRelativeLocations, doorways, unusedOpenings,
-                mobSpawnerRelativeLocations
+                mobSpawnerRelativeLocations, sandTradeRelativeLocations
         );
     }
 
@@ -1062,6 +1068,30 @@ public class DungeonGenerator {
             }
         }
         return !hubPoints.isEmpty() ? hubPoints : otherPoints;
+    }
+
+    /**
+     * Collects the blueprint-relative sand trade point cells from {@code SAND_TRADE} markers — the
+     * chests that buy depth-scaled coins for sand.
+     *
+     * <p>Deliberately <em>not</em> hub-wins, unlike every other selector here. A trade point is worth
+     * more the deeper it sits, so they belong out in the branches: gathering only the HUB's markers
+     * whenever the hub happened to carry one would throw away every trade point in the dungeon, and
+     * every one of them would have been at depth 0 anyway.
+     */
+    @NotNull
+    static List<Vector> selectSandTradeRelativeLocations(@NotNull List<PlacedSegment> placedSegments) {
+        List<Vector> points = new ArrayList<>();
+        for (PlacedSegment placedSegment : placedSegments) {
+            Segment template = placedSegment.getSegmentTemplate();
+            if (template == null) continue;
+            Vector origin = placedSegment.getWorldOrigin().toVector();
+            for (BlockVector3 offset : template.getSandTradeLocations()) {
+                BlockVector3 rot = placedSegment.getRotatedOffset(offset);
+                points.add(origin.clone().add(new Vector(rot.x(), rot.y(), rot.z())));
+            }
+        }
+        return points;
     }
 
     /**

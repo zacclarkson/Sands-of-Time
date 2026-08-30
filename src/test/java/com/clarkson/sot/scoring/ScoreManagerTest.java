@@ -107,6 +107,42 @@ class ScoreManagerTest {
         assertEquals(0, pickupNotifier.getPendingTotal(id));
     }
 
+    @Test
+    void awardedCoinsScaleWithDepthAndLandUnbanked() {
+        // The path a sand trade takes: the same multiplier as a coin stack, into the same at-risk
+        // unbanked pot, so a trade stays a gamble rather than a safe conversion.
+        UUID id = UUID.randomUUID();
+        Player player = mock(Player.class);
+        when(player.getUniqueId()).thenReturn(id);
+
+        assertEquals(30, scoreManager.awardDepthScaledCoins(player, 25, 10));
+        assertEquals(30, scoreManager.getPlayerUnbankedScore(id));
+    }
+
+    @Test
+    void awardedCoinsJoinTheRunningPickupMessage() {
+        UUID id = UUID.randomUUID();
+        Player player = mock(Player.class);
+        when(player.getUniqueId()).thenReturn(id);
+
+        scoreManager.collectFloorItem(player, coin(5, 0));
+        scoreManager.awardDepthScaledCoins(player, 25, 0);
+
+        assertEquals(30, pickupNotifier.getPendingTotal(id),
+                "a trade and a pickup in the same burst read as one message");
+    }
+
+    @Test
+    void awardingNothingIsANoOp() {
+        UUID id = UUID.randomUUID();
+        Player player = mock(Player.class);
+        when(player.getUniqueId()).thenReturn(id);
+
+        assertEquals(0, scoreManager.awardDepthScaledCoins(player, 0, 5));
+        assertEquals(0, scoreManager.getPlayerUnbankedScore(id));
+        assertEquals(0, pickupNotifier.getPendingTotal(id), "and sends no empty action bar");
+    }
+
     /** A mocked coin of the given base value and depth. */
     private CoinStack coin(int baseValue, int depth) {
         CoinStack coin = mock(CoinStack.class);
