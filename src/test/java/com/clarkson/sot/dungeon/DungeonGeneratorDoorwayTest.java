@@ -41,7 +41,7 @@ class DungeonGeneratorDoorwayTest {
         Plugin plugin = mock(Plugin.class);
         when(plugin.getLogger()).thenReturn(Logger.getLogger("DungeonGeneratorDoorwayTest"));
         generator = new DungeonGenerator(plugin);
-        generator.setRandomSeedForTest(20260829L);
+        generator.setSeed(20260829L);
     }
 
     // --- Same synthetic 5x5x5 segment set as DungeonGeneratorGenerationTest ---

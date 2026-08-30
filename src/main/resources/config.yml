@@ -35,3 +35,22 @@ locations:
     z: 0.0
     yaw: 0.0
     pitch: 0.0
+
+dungeon:
+
+  # Dungeon generation seed. Leave blank (or write 'random') to roll a fresh
+  # seed every round; set a value to make every round lay out identically --
+  # same rooms, same vaults and keys, same loot and sand on the floor, for every
+  # team.
+  #
+  # A value that is a whole number is used as the seed directly. Anything else
+  # is hashed, so a memorable name works too:
+  #
+  #   seed: 4815162342
+  #   seed: 'mcc-finals'
+  #
+  # The seed actually used is printed to the console when the dungeon is
+  # generated, so a random layout worth keeping can be captured and replayed.
+  # Stand anywhere and run /sot seed <value> to set this without a restart, or
+  # /sot seed random to clear it.
+  seed: ''

@@ -580,6 +580,21 @@ public class GameManager {
     }
 
     /**
+     * Whether a round is on the clock — the states in which players are inside a dungeon and the
+     * world has to be protected from them ({@code BlockProtectionListener}).
+     *
+     * <p>The exact complement of {@link #canResetFrom}, but written as its own explicit whitelist
+     * rather than a negation, so that a new {@link GameState} constant is classified by neither and
+     * fails {@code GameManagerTest} instead of silently defaulting to "unprotected".
+     *
+     * <p>{@code COUNTDOWN} counts: the hub segment's baked sand shaft is real sand in the world from
+     * the moment the dungeon is pasted, well before the visual timer arms itself.
+     */
+    public static boolean isRoundLive(GameState state) {
+        return state == GameState.COUNTDOWN || state == GameState.RUNNING || state == GameState.PAUSED;
+    }
+
+    /**
      * Clears a finished round away and returns to {@link GameState#SETUP} so another game can be
      * set up and started, without restarting the server.
      *
@@ -902,6 +917,22 @@ public class GameManager {
     }
 
     /**
+     * Whether the location is part of <em>any</em> active team's visual sand timer column.
+     *
+     * <p>Every team, not just the one the player belongs to: {@link #getTeamIdForLocation} is still
+     * a stub, team dungeons are thousands of blocks apart so a cross-team hit cannot happen by
+     * accident, and an operator who teleported into someone else's hub is exactly the case worth
+     * covering. Costs one coordinate comparison per active team.
+     */
+    public boolean isVisualTimerBlock(@Nullable Location location) {
+        if (location == null) return false;
+        for (SoTTeam team : activeTeamsInGame.values()) {
+            if (team.isVisualTimerBlock(location)) return true;
+        }
+        return false;
+    }
+
+    /**
      * Assigns each player on a team to their own death cage.
      * Called during startGame() after dungeon instances are created.
      */
@@ -968,6 +999,16 @@ public class GameManager {
         return teamDungeonManager.getDungeonData().isSandTimerDepositAt(location);
     }
 
+    /**
+     * True if the given block location is the team's coin bank (the ender chest built at the
+     * BANK marker). False when the team has no dungeon, or the dungeon defines no bank.
+     */
+    public boolean isTeamBankAt(UUID teamId, Location location) {
+        DungeonManager teamDungeonManager = teamDungeonManagers.get(teamId);
+        if (teamDungeonManager == null || teamDungeonManager.getDungeonData() == null) return false;
+        return teamDungeonManager.getDungeonData().isBankAt(location);
+    }
+
     /** Finds the team ID associated with a given world location. */
     @Nullable
     public UUID getTeamIdForLocation(Location location) { /* ... (Implementation remains the same) ... */ return null;}
@@ -1025,6 +1066,34 @@ public class GameManager {
         if (!lobbyConfigured) names.add("lobby");
         if (!trappedConfigured) names.add("trapped");
         return names;
+    }
+
+    // --- Dungeon seed (see /sot seed and config.yml) ---
+
+    /**
+     * Fixes the seed future rounds generate from, or clears it with {@code null} so each round rolls
+     * its own. Only read when {@link #startGame} generates a layout, so this is safe to change
+     * between rounds; changing it mid-round has no effect on the dungeon already standing, which is
+     * why {@code /sot seed} refuses it rather than silently doing nothing.
+     */
+    public void setDungeonSeed(@Nullable Long seed) {
+        dungeonGenerator.setSeed(seed);
+    }
+
+    /** The configured fixed seed, or null when each round rolls its own. */
+    @Nullable
+    public Long getConfiguredDungeonSeed() {
+        return dungeonGenerator.getSeed();
+    }
+
+    /**
+     * The seed the current (or most recent) round's dungeon was generated from, or null before any
+     * round has generated one. This is what the population RNGs derive from, so that every team's
+     * dungeon is populated identically, and what an operator reads back to replay a random layout.
+     */
+    @Nullable
+    public Long getRoundSeed() {
+        return dungeonGenerator.getLastUsedSeed();
     }
 
 }

@@ -312,6 +312,16 @@ public class SandManager implements Listener {
      * Detects when a player breaks a SAND block in a dungeon and hands them the sand as an item.
      * Deliberately adds no time: sand only becomes seconds at a deposit point (see
      * {@link #onBlockPlace(BlockPlaceEvent)}).
+     *
+     * <p>{@code BlockProtectionListener} runs at {@code LOW} and has already cancelled any break it
+     * disallows, so with {@code ignoreCancelled = true} at {@code NORMAL} a protected block never
+     * reaches this method and it can pay out unconditionally. <b>Do not raise this priority.</b>
+     *
+     * <p>This used to re-check the team's own timer column itself. That check is gone because the
+     * listener subsumes it and then some — it covers every team's column, not just the breaker's,
+     * and the whole live round rather than only {@code RUNNING}. The only case it did not subsume
+     * was a participant in Creative, where it contradicted the listener's deliberate
+     * Creative/Spectator bypass by refusing the break anyway.
      */
     @EventHandler(priority = EventPriority.NORMAL, ignoreCancelled = true)
     public void onBlockBreak(BlockBreakEvent event) {
@@ -324,19 +334,8 @@ public class SandManager implements Listener {
         PlayerStatus status = gameManager.getPlayerStateManager().getStatus(player);
         if (status != PlayerStatus.ALIVE_IN_DUNGEON) return;
 
-        UUID teamId = gameManager.getTeamManager().getPlayerTeamId(player);
-        if (teamId == null) return;
-        SoTTeam team = gameManager.getActiveTeams().get(teamId);
-        if (team == null) return;
-
-        // The visual timer column is made of sand and stands in the hub, so without this it is just a
-        // sand mine: a mined block is not restored until the next visual sync, which the deposit of
-        // that very sand triggers — putting the block back and netting the team free time forever.
-        if (team.isVisualTimerBlock(block.getLocation())) {
-            event.setCancelled(true);
-            player.sendActionBar(Component.text("You can't mine your own timer!", NamedTextColor.RED));
-            return;
-        }
+        // No team lookup: it existed only for the timer-column check above, and ALIVE_IN_DUNGEON is
+        // already only ever set on players who were assigned to a team at setup.
 
         // Cancel the normal drop; collectSandItem hands the sand over instead.
         event.setDropItems(false);

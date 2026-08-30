@@ -44,7 +44,7 @@ public enum BuilderMode {
             "Right-click to mark a mob spawner position.",
             false),
     BANK("Bank",
-            "Right-click to mark where players bank coins (the Sphinx / bank spot). One per HUB.",
+            "Right-click to mark where players bank coins (an ender chest is built here). One per HUB.",
             false),
     DEATH_CAGE("Death Cage",
             "Right-click to mark a death/respawn cage. Place 1-4 (one per player). A lodestone 'Revive' preview appears 2 blocks toward your facing — aim before you click.",

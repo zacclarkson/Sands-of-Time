@@ -33,6 +33,7 @@ public class Dungeon {
     private final List<Location> itemSpawnLocations;
     private final List<DeathCage> deathCages;
     private final Location safeExitLocation; // Null when no segment template defined one
+    private final Location bankLocation; // Cell holding the coin bank; null when no BANK marker was defined
     private final List<Location> playerSpawnLocations; // Absolute per-player start points (may be empty)
     private final List<Location> sandTimerLocations; // Absolute sand deposit cells (may be empty)
 
@@ -57,6 +58,7 @@ public class Dungeon {
      * @param itemSpawnLocations List of absolute general item spawn locations.
      * @param deathCages List of death cage + sacrifice point pairs (max 4).
      * @param safeExitLocation The absolute location players interact with to escape, or null if undefined.
+     * @param bankLocation The absolute cell the coin bank stands in, or null if no BANK marker was defined.
      * @param playerSpawnLocations List of absolute per-player spawn points (may be empty).
      * @param sandTimerLocations List of absolute cells where carried sand is deposited onto the timer.
      * @param doorways Absolute doorways between connected segments (one rusty-key door each).
@@ -71,6 +73,7 @@ public class Dungeon {
                    @NotNull List<Location> itemSpawnLocations,
                    @NotNull List<DeathCage> deathCages,
                    @Nullable Location safeExitLocation,
+                   @Nullable Location bankLocation,
                    @NotNull List<Location> playerSpawnLocations,
                    @NotNull List<Location> sandTimerLocations,
                    @NotNull List<EntryPoint> doorways,
@@ -83,6 +86,7 @@ public class Dungeon {
         this.blueprint = Objects.requireNonNull(blueprint, "Blueprint cannot be null");
         this.hubLocation = hubLocation;
         this.safeExitLocation = safeExitLocation;
+        this.bankLocation = bankLocation;
 
         // Store immutable copies of maps/lists containing ABSOLUTE locations
         this.vaultMarkerLocations = Collections.unmodifiableMap(new HashMap<>(vaultMarkerLocations));
@@ -146,6 +150,24 @@ public class Dungeon {
             }
         }
         return false;
+    }
+
+    /** Absolute cell the coin bank stands in, or null if no segment template defined a BANK marker. */
+    @Nullable public Location getBankLocation() { return bankLocation != null ? bankLocation.clone() : null; }
+
+    /**
+     * True if the given block location is this instance's coin bank.
+     *
+     * <p>Matched on exact block coordinates, with no tolerance, for the same reason as
+     * {@link #isSandTimerDepositAt}: the builder tool records a BANK marker at the <em>air cell</em>
+     * next to the face the builder clicked, which is precisely the cell the bank block is written into.
+     */
+    public boolean isBankAt(@NotNull Location location) {
+        return bankLocation != null
+                && bankLocation.getBlockX() == location.getBlockX()
+                && bankLocation.getBlockY() == location.getBlockY()
+                && bankLocation.getBlockZ() == location.getBlockZ()
+                && Objects.equals(bankLocation.getWorld(), location.getWorld());
     }
 
     /**

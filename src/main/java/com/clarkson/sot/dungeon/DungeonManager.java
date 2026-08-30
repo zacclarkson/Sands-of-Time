@@ -17,6 +17,9 @@ import org.bukkit.Material;
 import org.bukkit.NamespacedKey;
 import org.bukkit.World;
 import org.bukkit.block.Block;
+import org.bukkit.block.BlockFace;
+import org.bukkit.block.data.BlockData;
+import org.bukkit.block.data.Directional;
 import org.bukkit.entity.Entity; // Import Entity
 import org.bukkit.entity.Player; // Import Player
 import org.bukkit.persistence.PersistentDataType;
@@ -68,7 +71,12 @@ public class DungeonManager {
     private final VaultManager vaultManager;
     private final FloorItemManager floorItemManager;
     private final DoorManager doorManager;
-    private final Random random; // Added for probabilities
+    /**
+     * Rusty-key and sand rolls, seeded from the round seed so a seed reproduces what is on the floor
+     * and not merely the shape of the rooms. Every team derives the same value, so every team's
+     * dungeon populates identically -- which is also the fairer behaviour for a race.
+     */
+    private final Random random;
 
     // --- Instance State ---
     private final UUID teamId;
@@ -88,9 +96,17 @@ public class DungeonManager {
      */
     private static final double RUSTY_KEY_SPAWN_CHANCE = 0.20;
 
+    /**
+     * Mixed into the round seed for this instance's RNG. Population uses a salted sub-seed rather
+     * than continuing the generator's own stream so that it cannot be perturbed by how many draws
+     * layout generation happened to consume (a validation retry changes that count).
+     */
+    private static final long POPULATION_SEED_SALT = 0xA5A5F100D5EEDL;
+
     // The consolidated data object with ABSOLUTE locations for this instance
     private Dungeon dungeonData;
     private Location timerBaseLocation; // Absolute base of the visual sand timer; null if no TIMER marker
+    private Location bankLocation; // Absolute cell holding the coin bank; null if no BANK marker
 
     /**
      * Constructor for a team's specific DungeonManager instance.
@@ -117,7 +133,19 @@ public class DungeonManager {
 
         this.placedSegmentsInWorld = new ArrayList<>();
         this.dungeonData = null;
-        this.random = new Random(); // Initialize Random
+        this.random = populationRandom(gameManager.getRoundSeed());
+    }
+
+    /**
+     * The RNG that populates a dungeon instance, derived from the seed its layout was generated
+     * from. Deliberately takes no account of the team: every team is populated from the same
+     * sub-seed and walks the same blueprint-ordered spawn lists, so every team's dungeon ends up
+     * identical. Falls back to an unseeded RNG only when no layout has been generated, which in
+     * practice means a caller constructed a DungeonManager outside {@code GameManager.startGame}.
+     */
+    @NotNull
+    static Random populationRandom(@Nullable Long roundSeed) {
+        return roundSeed != null ? new Random(roundSeed ^ POPULATION_SEED_SALT) : new Random();
     }
     /**
      * Initializes the dungeon instance in the world.
@@ -144,6 +172,8 @@ public class DungeonManager {
         Location absSafeExitLocation = (safeExitRelative != null) ? dungeonOrigin.clone().add(safeExitRelative) : null;
         Vector timerBaseRelative = blueprintData.getTimerBaseRelativeLocation();
         this.timerBaseLocation = (timerBaseRelative != null) ? dungeonOrigin.clone().add(timerBaseRelative) : null;
+        Vector bankRelative = blueprintData.getBankRelativeLocation();
+        this.bankLocation = (bankRelative != null) ? dungeonOrigin.clone().add(bankRelative) : null;
         List<EntryPoint> absDoorways = calculateAbsoluteDoorways(blueprintData.getDoorways());
         List<EntryPoint> absUnusedOpenings = calculateAbsoluteDoorways(blueprintData.getUnusedOpenings());
 
@@ -183,7 +213,7 @@ public class DungeonManager {
                 teamId, world, dungeonOrigin, blueprintData,
                 absHubLocation, absVaultMarkers, absKeySpawns,
                 absSandSpawns, absCoinSpawns, absItemSpawns,
-                deathCages, absSafeExitLocation, absPlayerSpawns, absSandTimers,
+                deathCages, absSafeExitLocation, this.bankLocation, absPlayerSpawns, absSandTimers,
                 absDoorways, absUnusedOpenings
             );
              plugin.getLogger().info("Created Dungeon data object for team " + teamId);
@@ -197,6 +227,7 @@ public class DungeonManager {
         // These managers use the absolute locations stored in dungeonData
         try {
             vaultManager.initializeForInstance(this.dungeonData);
+            placeBankBlock(); // Must run after the paste: a schematic would overwrite the chest
             doorManager.initializeDoorsForInstance(this.dungeonData); // Initialize doors
             // After the doors, so a gate overlapping an opening sealUnusedOpenings just walled off
             // wins -- the interactive thing should.
@@ -410,7 +441,7 @@ public class DungeonManager {
                          floorItemManager.spawnRustyKey(absLoc, teamId, instanceUUID, depth);
                          rustyKeyCount++;
                      } else {
-                         floorItemManager.spawnGenericItem(absLoc, teamId, instanceUUID, depth);
+                         floorItemManager.spawnGenericItem(absLoc, teamId, instanceUUID, depth, random);
                      }
                  } catch (Exception e) {
                      plugin.getLogger().log(Level.WARNING, "Error processing item spawn at " + absLoc + " for team " + teamId, e);
@@ -474,6 +505,8 @@ public class DungeonManager {
 
     /** Absolute base of this instance's visual sand-timer column, or null if the hub has no TIMER marker. */
     @Nullable public Location getTimerBaseLocation() { return (timerBaseLocation != null) ? timerBaseLocation.clone() : null; }
+    /** Absolute cell the coin bank stands in; null when no segment template defined a BANK marker. */
+    @Nullable public Location getBankLocation() { return (bankLocation != null) ? bankLocation.clone() : null; }
     @NotNull public List<PlacedSegment> getPlacedSegmentsInWorld() { return Collections.unmodifiableList(this.placedSegmentsInWorld); }
 
     /**
@@ -567,6 +600,51 @@ public class DungeonManager {
             }
         }
         return null;
+    }
+
+    /**
+     * Writes the coin bank into the world: an ender chest in the cell the BANK marker named.
+     *
+     * <p>The block is what makes the bank exist — the same lesson as {@link com.clarkson.sot.entities.Door},
+     * where registering the object without writing blocks left nothing to click. Must be called after
+     * {@link #pasteSegmentSchematics()}, which would otherwise paint over the chest.
+     *
+     * <p>Nothing is needed at teardown: {@link #cleanupInstance()} clears the whole blueprint region.
+     */
+    private void placeBankBlock() {
+        if (bankLocation == null) {
+            plugin.getLogger().warning("No BANK marker for team " + teamId
+                    + "; this dungeon has no coin bank. Add a BANK marker to the HUB segment and re-save it.");
+            return;
+        }
+
+        Block bankBlock = world.getBlockAt(bankLocation);
+        bankBlock.setType(Material.ENDER_CHEST, false);
+
+        // Face the chest at the hub so it does not render staring into a wall.
+        BlockData data = bankBlock.getBlockData();
+        if (data instanceof Directional directional) {
+            BlockFace facing = facingTowardsHub();
+            if (directional.getFaces().contains(facing)) {
+                directional.setFacing(facing);
+                bankBlock.setBlockData(directional, false);
+            }
+        }
+
+        plugin.getLogger().info("Placed the coin bank for team " + teamId + " at " + bankLocation.toVector());
+    }
+
+    /** The cardinal direction from the bank cell towards the hub, defaulting to NORTH. */
+    private BlockFace facingTowardsHub() {
+        Location hub = (dungeonData != null) ? dungeonData.getHubLocation() : null;
+        if (hub == null || bankLocation == null) return BlockFace.NORTH;
+
+        double dx = hub.getX() - bankLocation.getX();
+        double dz = hub.getZ() - bankLocation.getZ();
+        if (Math.abs(dx) >= Math.abs(dz)) {
+            return dx >= 0 ? BlockFace.EAST : BlockFace.WEST;
+        }
+        return dz >= 0 ? BlockFace.SOUTH : BlockFace.NORTH;
     }
 
     /**

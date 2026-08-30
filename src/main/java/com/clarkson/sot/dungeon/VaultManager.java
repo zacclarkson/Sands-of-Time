@@ -350,6 +350,7 @@ public class VaultManager implements Listener {
     }
 
 
+
     /**
      * Clears the vault open state for ALL teams.
      * Should be called by GameManager when the game ends or resets.

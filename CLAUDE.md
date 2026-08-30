@@ -44,13 +44,26 @@ A heavier, on-demand tier: a real Paper server (Docker, `itzg/minecraft-server`)
 plugin, driven by a headless Mineflayer bot. WorldEdit is installed via `MODRINTH_PROJECTS`. Run it
 manually (see `integration-test/README.md`); it is **not** part of CI.
 
+## Incidental findings
+
+Work here turns up unrelated defects fairly often; most of the architecture notes below are scar
+tissue from exactly that. When you find one while doing something else, **open a GitHub issue and
+carry on with the task in hand.** Do not widen the current change to fix it, and do not leave it only
+in a commit message or a PR comment — both are lost once the PR merges.
+
+File one for a real defect with a correctness or user-visible consequence: a wrong calculation, a
+stub returning null that callers trust, a silent failure an operator cannot diagnose. Style nits and
+speculative refactors are not worth an issue. Say what is wrong, what it breaks, and where — file and
+line — so it is actionable without rediscovering it.
+
 ## Commands
 
 - **Builder tools** (perm `sot.admin.builder` / `sot.admin.savesegment`): `/sotbuilder` (gives the
   BLAZE_ROD tool), `/sotmode <mode> [arg]` (switch placement mode), `/sotsavesegment <name> <type>`
   (save the WorldEdit selection + placed markers as a segment template).
-- **Game control** (perm `sot.admin.control`): `/sot setup [numTeams] | start | end | reset | set <lobby|trapped>`,
-  wired to `GameManager.setupGame/startGame/endGame/resetGame` and the location setters.
+- **Game control** (perm `sot.admin.control`): `/sot setup [numTeams] | start | end | reset | set <lobby|trapped> | seed [<value>|random]`,
+  wired to `GameManager.setupGame/startGame/endGame/resetGame`, the location setters and
+  `setDungeonSeed`.
 
 ## Architecture notes & gotchas
 
@@ -124,7 +137,8 @@ manually (see `integration-test/README.md`); it is **not** part of CI.
   at open time, so `buildClosed()` never paints over it). Nothing spawns coins at the marker any more —
   the reward is what the segment puts *behind* the door, which is the only place a wall can reveal
   anything; scattering it around the marker put it in front of the wall and left the marker standing
-  as glass. **A vault door must live in the same
+  as glass. Gates and levers need no protection code of their own: `BreakableBlocks.BREAKABLE` is a
+  whitelist of `SAND` and `SPAWNER`, so `IRON_BARS` and `LEVER` are already refused during a round. **A vault door must live in the same
   segment as its vault marker**: `SaveSegmentCommand` sets `containedVault` from the `VAULT_DOOR` marker, so
   a segment claiming a vault with no `VAULT_MARKER` makes the DFS count that colour as placed while
   `consolidateFeatureLocations` emits no marker, and all 20 generation attempts then fail on the missing
@@ -158,6 +172,27 @@ manually (see `integration-test/README.md`); it is **not** part of CI.
   assignments it is about to read. A missing HUB template is deliberately **not** a game state
   (it used to latch `ENDED` at boot); `setupGame`/`startGame` check `hasHubTemplate()` instead, so
   `/sotreloadsegments` fixes it live.
+- **Dungeon generation is seeded, and the reseed is per call, not per attempt.** `dungeon.seed` in
+  `config.yml` (read by `SoTConfig.readSeed`, applied via `GameManager.setDungeonSeed`, editable live
+  with `/sot seed`) fixes the layout; blank means each round rolls its own.
+  `DungeonGenerator.generateDungeonLayout` reseeds `random` once at the **top of the call** and logs
+  the seed either way, so an unseeded round can be replayed from `getLastUsedSeed()`. Reseeding
+  inside the 20-attempt retry loop instead would be a real bug: the attempts share one RNG stream on
+  purpose — each retry consuming fresh draws is exactly what lets a layout that failed validation
+  succeed on the next try — so a per-attempt reseed would make all 20 attempts byte-identical and
+  turn one validation failure into twenty copies of itself. Two supporting pieces are easy to miss.
+  **(a)** `StructureLoader` sorts `listFiles()` by name, because `File.listFiles` has no defined order
+  and the seed indexes into `availableSegments` (and `findHubTemplate` takes the first HUB); unsorted,
+  the same seed silently produced a different dungeon on a different machine. **(b)** Population is
+  seeded too, via *salted sub-seeds* off `GameManager.getRoundSeed()` rather than a continuation of
+  the generator's stream — `DungeonManager.populationRandom` for the rusty-key/sand rolls (identical
+  for every team, so team dungeons match item-for-item) and `VaultManager.vaultRewardSeed(seed, color)`
+  for reward scatter, which must be a pure function of seed and colour since it is drawn when a
+  player opens a vault and would otherwise depend on which team got there first. `FloorItemManager`'s
+  loot RNG is therefore a *parameter* of `spawnGenericItem`, not a field: one manager serves every
+  team, so a shared instance RNG would interleave their draws beyond any seed's reach. The
+  `UUID.randomUUID()` calls next to all this stay random — they are identity tokens for tracked
+  entities and never affect what spawns.
 - **Generation retries must not multiply the log.** `DungeonGenerator.generateDungeonLayout` retries
   `attemptGeneration` up to 20 times, so any warning inside an attempt is a candidate for being
   printed 20 times per `/sot setup`. Conditions that describe the *templates on disk* — no
@@ -172,6 +207,24 @@ manually (see `integration-test/README.md`); it is **not** part of CI.
 - **Countdown tasks are epoch-guarded.** The ticker only re-checks the state once a second, so
   `roundEpoch` (bumped on every start and end) is what stops a round aborted mid-countdown from
   having its stale task finish the *next* round's countdown early.
+- **The coin bank is an ender chest built at the `BANK` marker.** Banking is what turns collected
+  coins into score, so without it a round ends 0-0. The chain mirrors `TIMER`:
+  `Segment.getBankOffset()` (JSON key `bankLocationOffset`) -> `DungeonGenerator.selectBankRelativeLocation`
+  (a HUB's marker wins outright) -> `DungeonBlueprint.getBankRelativeLocation` ->
+  `Dungeon.isBankAt` -> `GameManager.isTeamBankAt`. Three things matter here. **(a)** The block is
+  what makes the bank exist: `DungeonManager.placeBankBlock()` writes the `ENDER_CHEST` (facing the
+  hub) *after* `pasteSegmentSchematics()`, since a paste would paint over it — the same lesson as
+  `Door.buildClosed()`. Teardown needs nothing, because `cleanupInstance()` clears the whole
+  blueprint region. **(b)** Like the sand deposit and unlike the safe exit, the match is an *exact*
+  block match: the builder tool records the marker at the air cell the chest occupies, so there is
+  no +/-1 Y fudge. **(c)** `BankingManager.onPlayerInteract` must ignore the off-hand pass
+  (`event.getHand() != EquipmentSlot.HAND`) — `PlayerInteractEvent` fires once per hand, and the
+  second pass would overwrite the confirmation with "You have no coins to bank!" — and must cancel
+  the event, or the vanilla ender chest inventory opens over the bank. `BankingManager` holds no
+  per-team state (the cell is looked up through `GameManager` each click), so there is nothing to
+  clear between rounds; it also cancels `BlockBreakEvent` on the bank cell, since an ender chest
+  mined without silk touch drops 8 obsidian and takes the team's bank out of the hub. A hub with no
+  `BANK` marker simply plays with no bank, warned once per `/sot setup` via `warnOncePerGeneration`.
 - **Sand is an item; only a deposit point converts it to time.** Breaking a dungeon sand block hands the
   player a plain `Material.SAND` item and adds *no* time — `SandManager.onBlockPlace` does that, when the
   sand is placed on one of the team's `TIMER_DEPOSIT` marker cells. The chain mirrors `PLAYER_SPAWN`:
@@ -189,9 +242,13 @@ manually (see `integration-test/README.md`); it is **not** part of CI.
   drift out of sync. That is why escaping wipes the inventory (`GameManager.handlePlayerLeave`) and why
   `tearDownRound()` strips sand from every team member in its per-team pass, before
   `activeTeamsInGame.clear()` — that map is the only source of member lists: players who are trapped, dead, or still exploring never pass through the
-  escape path, and their sand would otherwise buy free time next round. Breaking a block of the team's own
-  visual timer column is refused for the same reason — the column is sand, and a mined block is restored
-  by the next `syncVisualState()`, which the resulting deposit itself triggers.
+  escape path, and their sand would otherwise buy free time next round. Breaking a block of a visual
+  timer column is refused for the same reason — the column is sand, and a mined block is restored by
+  the next `syncVisualState()`, which the resulting deposit itself triggers — but that refusal lives
+  in `BlockProtectionListener`, **not** here. `SandManager.onBlockBreak` used to re-check the
+  breaker's own column; the listener subsumes it (every team's column, the whole live round) and the
+  duplicate contradicted the Creative bypass, so it was removed along with the team lookup that only
+  existed to serve it.
 - **Dying drops carried sand on the floor.** Nearly all of that is vanilla: `DeathListener` never
   touches `event.getDrops()`, so a death that drops the inventory scatters the sand with everything
   else and it lands, merges and despawns by the server's own rules. `SandManager.dropCarriedSandOnDeath`
@@ -210,6 +267,21 @@ manually (see `integration-test/README.md`); it is **not** part of CI.
   lobby teleport off `TRAPPED_TIMER_OUT` players; without it a single-team round (the `/sot setup`
   default) never shows the trapped box at all. The status has to be read *outside* the scheduled
   task, since `clearAllStates()` runs later in the same tick.
+- **During a round, players may break only sand and spawners — and never the timer column.**
+  `BlockProtectionListener` (in `events`) cancels every other block break, and every block placement
+  except depositing sand on the team's own `TIMER_DEPOSIT` cell (which has to reach
+  `SandManager.onBlockPlace` at `NORMAL`, so it is let through — gated on `RUNNING` to mirror that
+  handler exactly), while `GameManager.isRoundLive` is true (COUNTDOWN/RUNNING/PAUSED, so the hub's baked sand shaft is
+  covered before the round even starts). `BreakableBlocks.BREAKABLE` is the whitelist and the
+  documented home for the not-yet-implemented money blocks. **The `LOW` priority is load-bearing:**
+  `SandManager.onBlockBreak` sits at `NORMAL, ignoreCancelled = true`, so cancelling at `LOW` makes
+  Bukkit skip it and a denied break pays out nothing — raise the priority and the sand-timer exploit
+  comes back (mining a column block credited +10s, and `TeamTimer.addSeconds` → `syncVisualState` →
+  `addSandToTop` put the block straight back, pinning the timer at its maximum forever). The column
+  guard runs *before* the `isParticipant` check so nobody, operators included, can mine a team's
+  clock, and `VisualSandTimerDisplay.isColumnBlock` is deliberately **not** gated on `armed` —
+  the unarmed window is exactly the countdown, when the baked shaft is minable. Creative/Spectator
+  bypasses everything; there is no bypass permission.
 - **The visual sand column lives in the hub, never at the lobby.** Its base comes from a `TIMER`
   marker on a segment template (HUB wins), via `DungeonGenerator.selectTimerBaseRelativeLocation` →
   `DungeonBlueprint.getTimerBaseRelativeLocation` → `DungeonManager.getTimerBaseLocation`.
@@ -220,6 +292,16 @@ manually (see `integration-test/README.md`); it is **not** part of CI.
   `startVisualUpdates()`, so no sand can be placed before the column is anchored (that gate is what
   stopped a 15-block pillar appearing at the lobby spawn at `/sot setup`). The bundled hub's marker
   sits at segment-relative `(21, 1, 18)`, the pedestal under the sand column baked into `hub.schem`.
+  **The hub must declare itself tall enough to hold the column it anchors.** The column occupies
+  relative Y `timerLocationOffset.y + 1` through `+ VisualTimerLayout.COLUMN_HEIGHT_BLOCKS`, but the
+  blueprint bounds come from the template's declared `size` (`DungeonGenerator.calculateRelativeMaxBounds`),
+  and those bounds are exactly what `DungeonManager.cleanupInstance()` air-fills between rounds.
+  `hub.json` therefore declares `size.y = 17` while `hub.schem` is only 15 tall — the two extra
+  layers are air, `ignoreAirBlocks` means they cost nothing to paste, and nothing cross-checks the
+  declared size against the schematic. Under-declare it and the top of every team's column is left
+  standing for the next round, which cannot clear it either. This is easy to lose: re-saving the hub
+  in game rewrites `size` from the WorldEdit selection, so **select at least 17 blocks of height** or
+  the gap reopens. `StructureLoaderHubFeaturesTest` pins it, deriving the bound from the constants.
 - **Game locations come from `config.yml`.** `locations.lobby` and `locations.trapped` are stored as
   plain `world/x/y/z/yaw/pitch` scalars and read by `SoTConfig` (deliberately *not* Bukkit's
   `config.getLocation()`, whose serialized form needs a `==: org.bukkit.Location` marker and is not
