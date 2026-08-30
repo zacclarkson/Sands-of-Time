@@ -44,6 +44,18 @@ A heavier, on-demand tier: a real Paper server (Docker, `itzg/minecraft-server`)
 plugin, driven by a headless Mineflayer bot. WorldEdit is installed via `MODRINTH_PROJECTS`. Run it
 manually (see `integration-test/README.md`); it is **not** part of CI.
 
+## Incidental findings
+
+Work here turns up unrelated defects fairly often; most of the architecture notes below are scar
+tissue from exactly that. When you find one while doing something else, **open a GitHub issue and
+carry on with the task in hand.** Do not widen the current change to fix it, and do not leave it only
+in a commit message or a PR comment — both are lost once the PR merges.
+
+File one for a real defect with a correctness or user-visible consequence: a wrong calculation, a
+stub returning null that callers trust, a silent failure an operator cannot diagnose. Style nits and
+speculative refactors are not worth an issue. Say what is wrong, what it breaks, and where — file and
+line — so it is actionable without rediscovering it.
+
 ## Commands
 
 - **Builder tools** (perm `sot.admin.builder` / `sot.admin.savesegment`): `/sotbuilder` (gives the
@@ -205,6 +217,16 @@ manually (see `integration-test/README.md`); it is **not** part of CI.
   `startVisualUpdates()`, so no sand can be placed before the column is anchored (that gate is what
   stopped a 15-block pillar appearing at the lobby spawn at `/sot setup`). The bundled hub's marker
   sits at segment-relative `(21, 1, 18)`, the pedestal under the sand column baked into `hub.schem`.
+  **The hub must declare itself tall enough to hold the column it anchors.** The column occupies
+  relative Y `timerLocationOffset.y + 1` through `+ VisualTimerLayout.COLUMN_HEIGHT_BLOCKS`, but the
+  blueprint bounds come from the template's declared `size` (`DungeonGenerator.calculateRelativeMaxBounds`),
+  and those bounds are exactly what `DungeonManager.cleanupInstance()` air-fills between rounds.
+  `hub.json` therefore declares `size.y = 17` while `hub.schem` is only 15 tall — the two extra
+  layers are air, `ignoreAirBlocks` means they cost nothing to paste, and nothing cross-checks the
+  declared size against the schematic. Under-declare it and the top of every team's column is left
+  standing for the next round, which cannot clear it either. This is easy to lose: re-saving the hub
+  in game rewrites `size` from the WorldEdit selection, so **select at least 17 blocks of height** or
+  the gap reopens. `StructureLoaderHubFeaturesTest` pins it, deriving the bound from the constants.
 - **Game locations come from `config.yml`.** `locations.lobby` and `locations.trapped` are stored as
   plain `world/x/y/z/yaw/pitch` scalars and read by `SoTConfig` (deliberately *not* Bukkit's
   `config.getLocation()`, whose serialized form needs a `==: org.bukkit.Location` marker and is not

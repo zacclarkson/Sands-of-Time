@@ -2,6 +2,7 @@ package com.clarkson.sot.utils;
 
 import com.clarkson.sot.dungeon.segment.Segment;
 import com.clarkson.sot.dungeon.segment.SegmentBound;
+import com.clarkson.sot.timer.VisualTimerLayout;
 
 import com.sk89q.worldedit.math.BlockVector3;
 import org.bukkit.plugin.Plugin;
@@ -120,5 +121,48 @@ class StructureLoaderHubFeaturesTest {
         assertEquals(1, segments.size(), "the bundled hub should load");
         assertNotNull(segments.get(0).getTimerOffset(),
                 "the bundled hub must carry a TIMER marker so the sand column stands in the hub");
+    }
+
+    /**
+     * The hub must declare itself tall enough to contain the sand column it anchors.
+     *
+     * <p>{@code GameManager.startGame} puts the column at relative Y {@code timerOffset.y + 1} up to
+     * {@code timerOffset.y + COLUMN_HEIGHT_BLOCKS}, but the blueprint's bounds come from the declared
+     * {@code size} ({@code DungeonGenerator.calculateRelativeMaxBounds}), and those bounds are what
+     * {@code DungeonManager.cleanupInstance()} air-fills between rounds. Under-declare the height and
+     * the top of every team's column falls outside the wipe, left standing for the next round — which
+     * cannot clear it either, because the paste uses {@code ignoreAirBlocks}.
+     *
+     * <p>The bundled hub's {@code size.y} is deliberately larger than {@code hub.schem}'s own height
+     * for this reason; the extra layers are air and cost nothing to paste. It is easy to lose: a
+     * re-save in game rewrites {@code size} from the WorldEdit selection
+     * ({@code SaveSegmentCommand}), so selecting the schematic's height would silently reopen the
+     * gap. Hence this test rather than a comment.
+     *
+     * <p>The bound is derived from the constants, so raising {@code DEFAULT_MAX_TIMER_SECONDS} fails
+     * here too instead of quietly outgrowing the hub.
+     */
+    @Test
+    void theBundledHubDeclaresEnoughHeightToContainItsTimerColumn() throws Exception {
+        try (InputStream bundled = getClass().getClassLoader().getResourceAsStream("bundled_segments/hub.json")) {
+            assertNotNull(bundled, "bundled_segments/hub.json should be on the classpath");
+            Files.copy(bundled, new File(dataDir.toFile(), "hub.json").toPath());
+        }
+
+        List<Segment> segments = loader.loadSegmentTemplates(dataDir.toFile());
+        assertEquals(1, segments.size(), "the bundled hub should load");
+        Segment hub = segments.get(0);
+
+        BlockVector3 timerOffset = hub.getTimerOffset();
+        assertNotNull(timerOffset, "the bundled hub must carry a TIMER marker");
+
+        int topColumnCell = timerOffset.y() + VisualTimerLayout.COLUMN_HEIGHT_BLOCKS;
+        assertTrue(hub.getSize().y() > topColumnCell,
+                "the bundled hub declares size.y=" + hub.getSize().y() + ", but its sand column reaches"
+                        + " relative Y " + topColumnCell + " (TIMER marker at y=" + timerOffset.y()
+                        + " plus " + VisualTimerLayout.COLUMN_HEIGHT_BLOCKS + " blocks). Cleanup"
+                        + " air-fills only the declared bounds, so the top of the column would be left"
+                        + " standing between rounds. Re-save the hub from a WorldEdit selection at"
+                        + " least " + (topColumnCell + 1) + " blocks tall.");
     }
 }
