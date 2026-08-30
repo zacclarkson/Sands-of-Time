@@ -46,6 +46,16 @@ public class DungeonGenerator {
     // Track placed vaults/keys during generation
     private Set<VaultColor> keysPlacedInDFS;
     private Set<VaultColor> vaultsPlacedInDFS;
+    // --- Per-generateDungeonLayout warning state ---
+    // generateDungeonLayout retries attemptGeneration many times, and every attempt re-checks the
+    // same loaded templates. Warnings that describe the templates on disk rather than the individual
+    // attempt are byte-identical on every retry, so they are keyed here and logged once per
+    // generateDungeonLayout call (this set is cleared at the top of it).
+    private final Set<String> warnedOncePerGeneration = new HashSet<>();
+    // Unmet layout requirement -> how many attempts it was missing from. Unlike the above, these are
+    // genuinely per-attempt (a layout can fail validation on one attempt and pass on the next), so
+    // they are logged at fine level and summarised once if every attempt fails.
+    private final Map<String, Integer> validationFailureCounts = new LinkedHashMap<>();
 
     // --- Generation Configuration ---
     // Depth ranges (min/max inclusive) for vaults. Every max MUST be < MAX_DEPTH so the forced
@@ -168,17 +178,41 @@ public class DungeonGenerator {
     @Nullable
     public DungeonBlueprint generateDungeonLayout() {
         int maxRetries = 20; // Blueprint stage does no world I/O, so retries are cheap.
+        // Fresh warning state per call: template-level warnings fire once, and the validation
+        // tally starts from zero so the failure summary describes this call only.
+        warnedOncePerGeneration.clear();
+        validationFailureCounts.clear();
         for (int attempt = 1; attempt <= maxRetries; attempt++) {
-            plugin.getLogger().info("Starting dungeon layout generation attempt " + attempt + "/" + maxRetries + "...");
+            plugin.getLogger().fine("Starting dungeon layout generation attempt " + attempt + "/" + maxRetries + "...");
             DungeonBlueprint blueprint = attemptGeneration();
             if (blueprint != null) {
-                plugin.getLogger().info("Dungeon layout generated successfully on attempt " + attempt);
+                plugin.getLogger().info("Dungeon layout generated successfully on attempt " + attempt + "/" + maxRetries);
                 return blueprint; // Success
             }
-            plugin.getLogger().warning("Dungeon generation attempt " + attempt + " failed validation or generation. Retrying...");
+            plugin.getLogger().fine("Dungeon generation attempt " + attempt + " failed validation or generation. Retrying...");
         }
         plugin.getLogger().severe("Failed to generate a valid dungeon layout after " + maxRetries + " attempts.");
+        if (!validationFailureCounts.isEmpty()) {
+            String summary = validationFailureCounts.entrySet().stream()
+                    .map(entry -> entry.getKey() + " (missing on " + entry.getValue() + "/" + maxRetries + " attempts)")
+                    .collect(Collectors.joining(", "));
+            plugin.getLogger().severe("Unmet layout requirements across all attempts: " + summary);
+        }
         return null; // Failed after all retries
+    }
+
+    /**
+     * Logs a warning the first time the given key is seen within one generateDungeonLayout call.
+     * Used for conditions that are a property of the loaded segment templates rather than of an
+     * individual attempt, which would otherwise be repeated verbatim once per retry.
+     *
+     * @param key     Identity of the condition; repeats within a call are suppressed.
+     * @param message The warning text to log on the first occurrence.
+     */
+    private void warnOncePerGeneration(@NotNull String key, @NotNull String message) {
+        if (warnedOncePerGeneration.add(key)) {
+            plugin.getLogger().warning(message);
+        }
     }
 
     /**
@@ -237,7 +271,8 @@ public class DungeonGenerator {
 
         Vector safeExitRelativeLocation = selectSafeExitRelativeLocation(placedSegments);
         if (safeExitRelativeLocation == null) {
-            plugin.getLogger().warning("No SAFE_EXIT marker in any segment template; escaping will fall back to "
+            warnOncePerGeneration("no-safe-exit",
+                    "No SAFE_EXIT marker in any segment template; escaping will fall back to "
                     + "the hub location. Add a SAFE_EXIT marker to your HUB segment and re-save it.");
         }
 
@@ -250,33 +285,36 @@ public class DungeonGenerator {
 
         // --- Validate Required Vaults & Keys ---
         // Validation relies on consolidateFeatureLocations having correctly populated the maps
-        boolean valid = true;
         // BLUE is checked separately below: it lives on the hub, and a hub template saved before the
         // KEY_SPAWN marker existed should still generate a (partly incomplete) dungeon.
         VaultColor[] requiredKeys = {VaultColor.RED, VaultColor.GREEN, VaultColor.GOLD};
         VaultColor[] requiredVaults = {VaultColor.BLUE, VaultColor.RED, VaultColor.GREEN, VaultColor.GOLD}; // All 4 vaults must be placed by DFS
 
+        List<String> missingRequirements = new ArrayList<>();
         for (VaultColor requiredColor : requiredVaults) {
             if (!vaultMarkerRelativeLocations.containsKey(requiredColor)) {
-                plugin.getLogger().warning("Validation Failed: Missing vault marker location for color: " + requiredColor);
-                valid = false;
+                missingRequirements.add("vault marker for " + requiredColor);
             }
         }
         for (VaultColor requiredColor : requiredKeys) {
             if (!keySpawnRelativeLocations.containsKey(requiredColor)) {
-                plugin.getLogger().warning("Validation Failed: Missing key spawn location for color: " + requiredColor);
-                valid = false;
+                missingRequirements.add("key spawn for " + requiredColor);
             }
         }
         // The blue key belongs on the hub (see GAME_RULES.md), but a hub template saved without a
         // KEY_SPAWN marker carries none. Warn rather than fail: a dungeon missing one vault beats
         // no dungeon at all. Add a BLUE KEY_SPAWN marker to the hub and re-save it to fix.
         if (!keySpawnRelativeLocations.containsKey(VaultColor.BLUE)) {
-            plugin.getLogger().warning("No BLUE key spawn in any segment template; the blue vault will "
+            warnOncePerGeneration("no-blue-key",
+                    "No BLUE key spawn in any segment template; the blue vault will "
                     + "not be openable. Add a BLUE KEY_SPAWN marker to your HUB segment and re-save it.");
         }
 
-        if (!valid) {
+        if (!missingRequirements.isEmpty()) {
+            // Per-attempt, so kept off the console: a layout can fail validation on one attempt and
+            // pass on the next. generateDungeonLayout logs one summary if every attempt fails.
+            plugin.getLogger().fine("Validation failed for this attempt; missing " + String.join(", ", missingRequirements));
+            missingRequirements.forEach(requirement -> validationFailureCounts.merge(requirement, 1, Integer::sum));
             return null; // Validation failed for this attempt
         }
 
@@ -815,7 +853,8 @@ public class DungeonGenerator {
                 if (vaultMarkerRelativeLocations.putIfAbsent(vaultColor, vaultRelativePos) == null) {
                      plugin.getLogger().finer("Consolidated " + vaultColor + " vault marker location: " + vaultRelativePos);
                 } else {
-                     plugin.getLogger().warning("Duplicate vault marker found for color " + vaultColor + " in segment " + template.getName() + ". Keeping first one found.");
+                     warnOncePerGeneration("dup-vault:" + vaultColor + ":" + template.getName(),
+                             "Duplicate vault marker found for color " + vaultColor + " in segment " + template.getName() + ". Keeping first one found.");
                 }
             }
 
@@ -833,7 +872,8 @@ public class DungeonGenerator {
                 if (keySpawnRelativeLocations.putIfAbsent(keyColor, keyRelativePos) == null) {
                     plugin.getLogger().finer("Consolidated " + keyColor + " key spawn location: " + keyRelativePos);
                 } else {
-                     plugin.getLogger().warning("Duplicate key spawn found for color " + keyColor + " in segment " + template.getName() + ". Keeping first one found.");
+                     warnOncePerGeneration("dup-key:" + keyColor + ":" + template.getName(),
+                             "Duplicate key spawn found for color " + keyColor + " in segment " + template.getName() + ". Keeping first one found.");
                 }
             }
 
