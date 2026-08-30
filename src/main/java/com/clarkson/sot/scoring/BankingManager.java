@@ -16,7 +16,6 @@ import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.block.Action;
-import org.bukkit.event.block.BlockBreakEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.inventory.EquipmentSlot;
 import org.bukkit.plugin.Plugin;
@@ -31,6 +30,14 @@ import java.util.UUID;
  * <p>Holds no per-team state: the bank cell is looked up through
  * {@link GameManager#isTeamBankAt(UUID, Location)} against the team's live dungeon, so there is
  * nothing to clear between rounds.
+ *
+ * <p><b>Keeping the bank in the hub is not this class's job.</b> An ender chest mined without silk
+ * touch drops 8 obsidian and takes the team's only banking point with it, but
+ * {@code BlockProtectionListener} already refuses it: {@code ENDER_CHEST} is not on the
+ * {@code BreakableBlocks} whitelist, so the break is cancelled at {@code LOW} for every participant
+ * while a round is live. A second guard here would double up the refusal message and — worse —
+ * cancel for an admin in Creative, whom the listener deliberately waves through. That is the same
+ * reasoning that removed {@code SandManager}'s timer-column guard.
  */
 public class BankingManager implements Listener {
     private final ScoreManager scoreManager;
@@ -117,21 +124,5 @@ public class BankingManager implements Listener {
         }
 
         attemptBanking(player);
-    }
-
-    /**
-     * Keeps the bank in the hub. An ender chest mined without silk touch drops 8 obsidian and takes
-     * the team's only banking point out of the round with it.
-     */
-    @EventHandler(priority = EventPriority.NORMAL)
-    public void onBlockBreak(BlockBreakEvent event) {
-        if (gameManager.getCurrentState() != GameState.RUNNING) return;
-
-        UUID teamId = gameManager.getTeamManager().getPlayerTeamId(event.getPlayer());
-        if (teamId == null) return;
-        if (!gameManager.isTeamBankAt(teamId, event.getBlock().getLocation())) return;
-
-        event.setCancelled(true);
-        event.getPlayer().sendMessage(Component.text("You cannot break the bank!", NamedTextColor.RED));
     }
 }
