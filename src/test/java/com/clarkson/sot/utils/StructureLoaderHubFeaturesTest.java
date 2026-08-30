@@ -121,4 +121,23 @@ class StructureLoaderHubFeaturesTest {
         assertNotNull(segments.get(0).getTimerOffset(),
                 "the bundled hub must carry a TIMER marker so the sand column stands in the hub");
     }
+
+    /**
+     * The shipped hub must also define a BANK marker. Without one the generator has nowhere to build
+     * the ender chest, and a fresh server plays a whole round with no way to convert collected coins
+     * into score — every team finishes on zero.
+     */
+    @Test
+    void theBundledHubDefinesABankMarker() throws Exception {
+        try (InputStream bundled = getClass().getClassLoader().getResourceAsStream("bundled_segments/hub.json")) {
+            assertNotNull(bundled, "bundled_segments/hub.json should be on the classpath");
+            Files.copy(bundled, new File(dataDir.toFile(), "hub.json").toPath());
+        }
+
+        List<Segment> segments = loader.loadSegmentTemplates(dataDir.toFile());
+
+        assertEquals(1, segments.size(), "the bundled hub should load");
+        assertNotNull(segments.get(0).getBankOffset(),
+                "the bundled hub must carry a BANK marker so players have somewhere to bank coins");
+    }
 }

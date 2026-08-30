@@ -59,7 +59,7 @@ public class Segment {
     @Nullable private final SegmentBound safeExitBound;
 
     // --- Hub features ---
-    /** Coin-bank interact point (Sphinx / bank spot); null if this segment has no bank. */
+    /** Coin-bank cell (an ENDER_CHEST is built here at runtime); null if this segment has no bank. */
     @Nullable private final BlockVector3 bankOffset;
     /** Death/respawn cage positions (max 4; revive points auto-derived at runtime). */
     private final List<BlockVector3> deathCageOffsets;
