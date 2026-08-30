@@ -164,8 +164,19 @@ The hub has approximately **10 exits** leading into the dungeon. These exits fal
 - Dungeons are procedurally generated using a **depth-first search (DFS)** algorithm
 - Each team gets their own copy of the same dungeon layout (blueprint)
 - Maximum dungeon depth: **`MAX_DEPTH` segments** from the hub (currently 12; the deepest vault, gold, maxes at depth 10)
-- Maximum total segments per dungeon: **50**
-- Generation attempts up to **5 retries** if validation fails
+- Maximum total segments per dungeon: **120**
+- Generation attempts up to **20 retries** if validation fails
+
+#### Seeding
+
+- Generation is **seeded**, so a given seed always produces the same dungeon — the same rooms, vaults
+  and keys, and the same loot and sand on the floor. Every team is populated from that one seed too,
+  so team dungeons are identical rather than merely the same shape
+- By default each round rolls its own seed. The seed used is always logged at generation, so a layout
+  worth keeping can be captured and replayed afterwards
+- Set a fixed seed with `dungeon.seed` in `config.yml`, or in-game with `/sot seed <value>`; a whole
+  number is used directly and anything else is hashed, so `mcc-finals` is a valid seed. `/sot seed`
+  on its own reports both the configured seed and the one the last round generated from
 
 ### Segment Types
 

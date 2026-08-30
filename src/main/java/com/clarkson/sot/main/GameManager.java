@@ -1068,4 +1068,32 @@ public class GameManager {
         return names;
     }
 
+    // --- Dungeon seed (see /sot seed and config.yml) ---
+
+    /**
+     * Fixes the seed future rounds generate from, or clears it with {@code null} so each round rolls
+     * its own. Only read when {@link #startGame} generates a layout, so this is safe to change
+     * between rounds; changing it mid-round has no effect on the dungeon already standing, which is
+     * why {@code /sot seed} refuses it rather than silently doing nothing.
+     */
+    public void setDungeonSeed(@Nullable Long seed) {
+        dungeonGenerator.setSeed(seed);
+    }
+
+    /** The configured fixed seed, or null when each round rolls its own. */
+    @Nullable
+    public Long getConfiguredDungeonSeed() {
+        return dungeonGenerator.getSeed();
+    }
+
+    /**
+     * The seed the current (or most recent) round's dungeon was generated from, or null before any
+     * round has generated one. This is what the population RNGs derive from, so that every team's
+     * dungeon is populated identically, and what an operator reads back to replay a random layout.
+     */
+    @Nullable
+    public Long getRoundSeed() {
+        return dungeonGenerator.getLastUsedSeed();
+    }
+
 }

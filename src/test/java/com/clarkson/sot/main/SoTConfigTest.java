@@ -206,4 +206,129 @@ class SoTConfigTest {
         assertThrows(NullPointerException.class,
                 () -> SoTConfig.writeLocation(config, SoTConfig.LOBBY_PATH, new Location(null, 1, 2, 3)));
     }
+
+    // --- Dungeon seed (issue #49) ---
+
+    @Test
+    void readsANumericSeed() {
+        YamlConfiguration config = config("""
+                dungeon:
+                  seed: 4815162342
+                """);
+
+        assertEquals(4815162342L, SoTConfig.readSeed(config, SoTConfig.SEED_PATH, LOG));
+    }
+
+    @Test
+    void readsANegativeSeed() {
+        YamlConfiguration config = config("""
+                dungeon:
+                  seed: -99
+                """);
+
+        assertEquals(-99L, SoTConfig.readSeed(config, SoTConfig.SEED_PATH, LOG));
+    }
+
+    @Test
+    void readsANumericSeedWrittenAsText() {
+        // YAML quoting is the operator's business, not ours: '12345' must mean the number 12345 and
+        // not its hash, or a quoted seed would silently generate a different dungeon.
+        YamlConfiguration config = config("""
+                dungeon:
+                  seed: '12345'
+                """);
+
+        assertEquals(12345L, SoTConfig.readSeed(config, SoTConfig.SEED_PATH, LOG));
+    }
+
+    @Test
+    void hashesANonNumericSeedTheWayMinecraftDoes() {
+        YamlConfiguration config = config("""
+                dungeon:
+                  seed: 'mcc-finals'
+                """);
+
+        assertEquals("mcc-finals".hashCode(), SoTConfig.readSeed(config, SoTConfig.SEED_PATH, LOG));
+    }
+
+    @Test
+    void treatsABlankSeedAsUnset() {
+        YamlConfiguration config = config("""
+                dungeon:
+                  seed: ''
+                """);
+
+        assertNull(SoTConfig.readSeed(config, SoTConfig.SEED_PATH, LOG),
+                "the shipped blank value means 'roll a fresh seed each round'");
+    }
+
+    @Test
+    void treatsTheWordRandomAsUnset() {
+        YamlConfiguration config = config("""
+                dungeon:
+                  seed: Random
+                """);
+
+        assertNull(SoTConfig.readSeed(config, SoTConfig.SEED_PATH, LOG),
+                "'random' is the spelled-out form of blank, case-insensitively");
+    }
+
+    @Test
+    void treatsAMissingSeedAsUnset() {
+        assertNull(SoTConfig.readSeed(config(""), SoTConfig.SEED_PATH, LOG),
+                "a config with no dungeon section is not an error; a seedless server is normal");
+    }
+
+    @Test
+    void rejectsASeedThatIsNeitherNumberNorText() {
+        YamlConfiguration config = config("""
+                dungeon:
+                  seed:
+                    - 1
+                    - 2
+                """);
+
+        assertNull(SoTConfig.readSeed(config, SoTConfig.SEED_PATH, LOG),
+                "an unusable seed falls back to random rather than failing the load");
+    }
+
+    @Test
+    void parseSeedUsesWholeNumbersDirectlyAndHashesTheRest() {
+        assertEquals(42L, SoTConfig.parseSeed("42"));
+        assertEquals(42L, SoTConfig.parseSeed("  42  "), "surrounding whitespace is trimmed");
+        assertEquals(-7L, SoTConfig.parseSeed("-7"));
+        assertEquals("hello".hashCode(), SoTConfig.parseSeed("hello"));
+        // A value too large for a long is a name, not a number, and must still be usable.
+        assertEquals("99999999999999999999".hashCode(), SoTConfig.parseSeed("99999999999999999999"));
+    }
+
+    @Test
+    void parseSeedIsStableForTheSameInput() {
+        assertEquals(SoTConfig.parseSeed("mcc-finals"), SoTConfig.parseSeed("mcc-finals"),
+                "the same name must always mean the same dungeon");
+    }
+
+    @Test
+    void writesAndReadsBackASeed() {
+        YamlConfiguration config = new YamlConfiguration();
+
+        SoTConfig.writeSeed(config, SoTConfig.SEED_PATH, 4815162342L);
+
+        assertEquals(4815162342L, config.getLong(SoTConfig.SEED_PATH));
+        assertEquals(4815162342L, SoTConfig.readSeed(config, SoTConfig.SEED_PATH, LOG),
+                "a written seed round-trips");
+    }
+
+    @Test
+    void clearingASeedLeavesTheKeyInPlace() {
+        YamlConfiguration config = new YamlConfiguration();
+        SoTConfig.writeSeed(config, SoTConfig.SEED_PATH, 7L);
+
+        SoTConfig.writeSeed(config, SoTConfig.SEED_PATH, null);
+
+        assertTrue(config.contains(SoTConfig.SEED_PATH),
+                "the key stays so its explanatory comment in config.yml still has a subject");
+        assertNull(SoTConfig.readSeed(config, SoTConfig.SEED_PATH, LOG),
+                "a cleared seed reads back as 'random each round'");
+    }
 }

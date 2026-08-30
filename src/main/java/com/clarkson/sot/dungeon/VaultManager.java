@@ -46,6 +46,9 @@ public class VaultManager implements Listener {
     // Key: Team UUID, Value: Set of VaultColors opened by that team
     private final Map<UUID, Set<VaultColor>> openVaultsByTeam;
 
+    /** Mixed into the round seed so vault rewards draw from a different stream to floor population. */
+    private static final long VAULT_REWARD_SEED_SALT = 0xDEFACEDBEEFL;
+
     // Constructor remains the same...
     public VaultManager(SoT plugin, GameManager gameManager) {
         this.plugin = Objects.requireNonNull(plugin, "Plugin cannot be null");
@@ -353,9 +356,13 @@ public class VaultManager implements Listener {
             return;
         }
 
-        // Spawn coins in a small area around the vault
-        Random random = new Random();
-        UUID instanceId = UUID.randomUUID(); // Use a dummy segment ID for vault rewards
+        // Spawn coins in a small area around the vault. The RNG is derived from the round seed and
+        // the vault colour rather than carried between calls, because this runs when a player opens
+        // a vault: any shared stream would make the reward depend on which team got there first.
+        Random random = new Random(vaultRewardSeed(gameManager.getRoundSeed(), color));
+        // Identity token for the tracked items only -- it never affects what spawns, so it stays
+        // random rather than being derived from the seed.
+        UUID instanceId = UUID.randomUUID();
         for (int i = 0; i < coinCount; i++) {
             double offsetX = (random.nextDouble() - 0.5) * 4; // Spread within 4 blocks
             double offsetZ = (random.nextDouble() - 0.5) * 4;
@@ -365,6 +372,19 @@ public class VaultManager implements Listener {
         }
 
         plugin.getLogger().info("Spawned " + coinCount + " reward coins for " + color + " vault (team " + teamId + ")");
+    }
+
+    /**
+     * The seed a vault's coin scatter is drawn from: a function of the round seed and the vault
+     * colour alone, so every team opening the same vault finds the same reward laid out the same
+     * way, whatever order they open them in. Falls back to a colour-only value when no seeded round
+     * is in progress.
+     */
+    static long vaultRewardSeed(@Nullable Long roundSeed, @Nonnull VaultColor color) {
+        // Golden-ratio odd constant: spreads adjacent ordinals across the whole long range, so
+        // neighbouring colours do not produce correlated streams.
+        long colorSalt = (color.ordinal() + 1) * 0x9E3779B97F4A7C15L;
+        return (roundSeed != null ? roundSeed : 0L) ^ VAULT_REWARD_SEED_SALT ^ colorSalt;
     }
 
     /**

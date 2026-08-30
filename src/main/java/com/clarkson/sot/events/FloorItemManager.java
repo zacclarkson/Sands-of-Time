@@ -113,16 +113,7 @@ public class FloorItemManager implements Listener {
         return key;
     }
 
-    /**
-     * Spawns a generic loot item (e.g., torch, armor, sword) at the location.
-     * Incorporates spawn rates and loot tables.
-     * @param location Absolute world location.
-     * @param teamId Owning team.
-     * @param segmentInstanceId Owning segment instance.
-     * @param depth Dungeon depth.
-     */
     private static final double ITEM_SPAWN_CHANCE = 0.30; // 30% chance per location
-    private static final Random random = new Random();
     private static final Material[] LOOT_TABLE = {
         Material.TORCH, Material.TORCH, Material.TORCH,           // Common
         Material.ARROW, Material.ARROW,                            // Common
@@ -132,13 +123,26 @@ public class FloorItemManager implements Listener {
         Material.SHIELD,                                           // Rare
     };
 
-    public void spawnGenericItem(@NotNull Location location, @NotNull UUID teamId, @NotNull UUID segmentInstanceId, int depth) {
+    /**
+     * Spawns a generic loot item (e.g., torch, armor, sword) at the location.
+     * Incorporates spawn rates and loot tables.
+     *
+     * @param location Absolute world location.
+     * @param teamId Owning team.
+     * @param segmentInstanceId Owning segment instance.
+     * @param depth Dungeon depth.
+     * @param rng The caller's seeded RNG. Supplied rather than held as a field because one
+     *            FloorItemManager serves every team: a shared instance RNG would interleave their
+     *            draws and no seed could reproduce the result.
+     */
+    public void spawnGenericItem(@NotNull Location location, @NotNull UUID teamId,
+                                 @NotNull UUID segmentInstanceId, int depth, @NotNull Random rng) {
         // 30% chance to spawn anything at this location
-        if (random.nextDouble() > ITEM_SPAWN_CHANCE) return;
+        if (rng.nextDouble() > ITEM_SPAWN_CHANCE) return;
 
         // Pick a random item from the loot table
-        Material lootMaterial = LOOT_TABLE[random.nextInt(LOOT_TABLE.length)];
-        int amount = (lootMaterial == Material.TORCH || lootMaterial == Material.ARROW) ? 2 + random.nextInt(3) : 1;
+        Material lootMaterial = LOOT_TABLE[rng.nextInt(LOOT_TABLE.length)];
+        int amount = (lootMaterial == Material.TORCH || lootMaterial == Material.ARROW) ? 2 + rng.nextInt(3) : 1;
         ItemStack itemToSpawn = new ItemStack(lootMaterial, amount);
 
         FloorLoot floorLoot = new FloorLoot(plugin, location, itemToSpawn, teamId, segmentInstanceId, depth);
