@@ -84,6 +84,15 @@ public class DungeonManager {
     private final Location dungeonOrigin; // Absolute world origin for this instance
     private final World world;
     private final DungeonBlueprint blueprintData; // The relative blueprint used
+    /**
+     * The absolute world region this instance owns: the blueprint's relative bounds translated by
+     * {@link #dungeonOrigin}. Computed once, since both inputs are final.
+     *
+     * <p>This is exactly the region {@link #cleanupInstance()} air-fills between rounds, which is
+     * what makes it the right answer to "whose dungeon is this location in?" -- see
+     * {@link #containsLocation(Location)}.
+     */
+    private final Area absoluteBounds;
     private final List<PlacedSegment> placedSegmentsInWorld; // Actual segments placed in the world
     // --- Constants ---
     private static final double SAND_SPAWN_CHANCE = 0.4; // Example: 40% chance for sand to spawn at a location
@@ -132,6 +141,7 @@ public class DungeonManager {
         this.dungeonOrigin = Objects.requireNonNull(dungeonOrigin, "Dungeon origin cannot be null");
         this.world = Objects.requireNonNull(dungeonOrigin.getWorld(), "Dungeon origin must have a valid world");
         this.blueprintData = Objects.requireNonNull(blueprintData, "Dungeon blueprint cannot be null");
+        this.absoluteBounds = toAbsoluteBounds(this.dungeonOrigin, this.blueprintData.getRelativeBounds());
 
         this.placedSegmentsInWorld = new ArrayList<>();
         this.dungeonData = null;
@@ -671,6 +681,50 @@ public class DungeonManager {
         return doors;
     }
 
+    /**
+     * Translates a blueprint's relative bounds by a dungeon origin, giving the absolute region an
+     * instance placed at that origin occupies.
+     *
+     * <p>Static and pure so the coordinate maths can be pinned without a server; the relative
+     * points carry a null world, and the returned Area's do not.
+     */
+    @NotNull
+    static Area toAbsoluteBounds(@NotNull Location origin, @NotNull Area relativeBounds) {
+        return new Area(origin.clone().add(relativeBounds.getMinPoint().toVector()),
+                        origin.clone().add(relativeBounds.getMaxPoint().toVector()));
+    }
+
+    /** The absolute world region this dungeon instance occupies -- the region cleanup clears. */
+    @NotNull
+    public Area getAbsoluteBounds() { return absoluteBounds; }
+
+    /**
+     * Whether a region in the given world holds the location.
+     *
+     * <p>The world test lives here rather than in {@link Area}, which compares coordinates only:
+     * two worlds share a coordinate space, so a region check without it would claim a location in
+     * the overworld for a dungeon in the nether. Static and pure so that is pinnable.
+     */
+    static boolean regionContains(@NotNull World world, @NotNull Area bounds, @Nullable Location location) {
+        if (location == null || !world.equals(location.getWorld())) return false;
+        return bounds.contains(location);
+    }
+
+    /**
+     * True if the location lies inside this instance's dungeon region.
+     *
+     * <p>Region, not segment: a location in the air between two placed rooms is still inside this
+     * team's dungeon and answers true here. Use {@link #getSegmentAtLocation(Location)} when you
+     * need to know that a segment is actually there. The region is fixed at construction, so this
+     * also answers correctly for an instance whose paste has not run (or failed part-way) -- the
+     * space is allocated to the team either way.
+     *
+     * <p>Six coordinate comparisons and a world check, so callers can afford it per event.
+     */
+    public boolean containsLocation(@Nullable Location location) {
+        return regionContains(world, absoluteBounds, location);
+    }
+
     /** Finds the PlacedSegment (with absolute world coords) at a given absolute world location within this instance. */
     @Nullable
     public PlacedSegment getSegmentAtLocation(@NotNull Location location) {
@@ -785,10 +839,9 @@ public class DungeonManager {
                      + "; clearing the blueprint bounds anyway.");
          }
 
-         // --- 1. Calculate Absolute Bounds ---
-         Area relativeBounds = blueprintData.getRelativeBounds();
-         Location absMinLoc = dungeonOrigin.clone().add(relativeBounds.getMinPoint().toVector());
-         Location absMaxLoc = dungeonOrigin.clone().add(relativeBounds.getMaxPoint().toVector());
+         // --- 1. Absolute Bounds (the same region getTeamIdForLocation resolves a team from) ---
+         Location absMinLoc = absoluteBounds.getMinPoint();
+         Location absMaxLoc = absoluteBounds.getMaxPoint();
          plugin.getLogger().fine("Calculated absolute cleanup bounds: " + absMinLoc.toVector() + " to " + absMaxLoc.toVector());
 
          // Adapt world and create WorldEdit region
