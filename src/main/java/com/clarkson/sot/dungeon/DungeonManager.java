@@ -226,6 +226,7 @@ public class DungeonManager {
         try {
             vaultManager.initializeForInstance(this.dungeonData);
             placeBankBlock(); // Must run after the paste: a schematic would overwrite the chest
+            placeBranchSignifiers(); // Likewise: coloured wall markings written over the pasted wall
             doorManager.initializeDoorsForInstance(this.dungeonData); // Initialize doors
             // After the doors, so a gate overlapping an opening sealUnusedOpenings just walled off
             // wins -- the interactive thing should.
@@ -717,6 +718,45 @@ public class DungeonManager {
         }
 
         plugin.getLogger().info("Placed the coin bank for team " + teamId + " at " + bankLocation.toVector());
+    }
+
+    /**
+     * Writes the coloured wall markings that tell players which vault colour lies down a branch.
+     *
+     * <p>The colour is already decided: {@link DungeonGenerator#resolveBranchSignifiers} paired each
+     * template placeholder with the branch beside it when the blueprint was generated, and dropped
+     * any placeholder whose branch reaches no vault. All that is left here is writing the block.
+     *
+     * <p>Must run after {@link #pasteSegmentSchematics()}, which would otherwise paint over them,
+     * and needs nothing at teardown: {@link #cleanupInstance()} clears the whole blueprint region.
+     */
+    private void placeBranchSignifiers() {
+        List<BranchSignifier> signifiers = blueprintData.getBranchSignifiers();
+        if (signifiers.isEmpty()) return;
+
+        int placed = 0, skipped = 0;
+        for (BranchSignifier signifier : signifiers) {
+            Location loc = dungeonOrigin.clone().add(signifier.getRelativePosition());
+            try {
+                Block block = world.getBlockAt(loc);
+                // The marker records an air cell against a wall, so anything solid here means the
+                // template moved on since it was placed. Leave the segment's own geometry alone.
+                if (!(block.isPassable() || block.getType().isAir() || block.isLiquid())) {
+                    plugin.getLogger().fine("Skipped branch signifier at " + loc.toVector()
+                            + " for team " + teamId + ": cell holds " + block.getType());
+                    skipped++;
+                    continue;
+                }
+                block.setType(signifier.getColor().getConcreteMaterial(), false);
+                placed++;
+            } catch (Exception e) {
+                plugin.getLogger().log(Level.WARNING,
+                        "Error placing branch signifier at " + loc + " for team " + teamId, e);
+                skipped++;
+            }
+        }
+        plugin.getLogger().info("Placed " + placed + " branch colour marking(s) for team " + teamId
+                + (skipped > 0 ? " (" + skipped + " skipped -- cell not empty)" : ""));
     }
 
     /** The cardinal direction from the bank cell towards the hub, defaulting to NORTH. */

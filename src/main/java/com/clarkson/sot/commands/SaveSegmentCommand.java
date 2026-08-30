@@ -189,6 +189,7 @@ public class SaveSegmentCommand implements CommandExecutor, TabCompleter {
         List<BlockVector3> deathCageOffsets    = new ArrayList<>();
         List<BlockVector3> sandTimerOffsets    = new ArrayList<>();
         List<BlockVector3> playerSpawnOffsets  = new ArrayList<>();
+        List<BlockVector3> branchSignifiers    = new ArrayList<>();
         VaultColor containedVault              = null;
         VaultColor containedVaultKey           = null;
 
@@ -353,6 +354,9 @@ public class SaveSegmentCommand implements CommandExecutor, TabCompleter {
                 case "PLAYER_SPAWN":
                     playerSpawnOffsets.add(relPos);
                     break;
+                case "BRANCH_SIGNIFIER":
+                    branchSignifiers.add(relPos);
+                    break;
                 case "COIN_SPAWN": {
                     coinSpawns.add(relPos);
                     Integer val = pdc.get(COIN_VALUE_KEY, PersistentDataType.INTEGER);
@@ -411,6 +415,11 @@ public class SaveSegmentCommand implements CommandExecutor, TabCompleter {
                     + "in the same segment as the vault it seals.", NamedTextColor.RED));
             return true;
         }
+        if (!entryPoints.isEmpty() && branchSignifiers.isEmpty()) {
+            warn(player, "No BRANCH_SIGNIFIER marker — this segment will show no vault-colour "
+                    + "marking, so players can't tell which branch they are on. Place one beside "
+                    + "each exit that should advertise its branch.");
+        }
         if (deathCageOffsets.size() > 4) {
             warn(player, deathCageOffsets.size() + " DEATH_CAGE markers — the runtime uses at most 4 "
                     + "(one per player); extras will be ignored.");
@@ -451,6 +460,7 @@ public class SaveSegmentCommand implements CommandExecutor, TabCompleter {
         player.sendMessage(info("Death Cages",    deathCageOffsets.size()));
         player.sendMessage(info("Timer Deposits", sandTimerOffsets.size()));
         player.sendMessage(info("Player Spawns",  playerSpawnOffsets.size()));
+        player.sendMessage(info("Branch Signifiers", branchSignifiers.size()));
         player.sendMessage(Component.text("  Timer: ", NamedTextColor.WHITE)
                 .append(Component.text(timerOffset != null ? "yes" : "none",
                         timerOffset != null ? NamedTextColor.GREEN : NamedTextColor.GRAY)));
@@ -475,7 +485,7 @@ public class SaveSegmentCommand implements CommandExecutor, TabCompleter {
                     sandSacrifices, mobSpawners,
                     safeExitOffset,
                     bankOffset, deathCageOffsets, safeExitBound, sandTimerOffsets, timerOffset,
-                    playerSpawnOffsets
+                    playerSpawnOffsets, branchSignifiers
             );
         } catch (Exception e) {
             plugin.getLogger().log(Level.SEVERE, "Error constructing Segment for " + segmentName, e);

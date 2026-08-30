@@ -61,7 +61,7 @@ class DungeonGeneratorDoorwayTest {
                 null, List.of(), null,
                 List.of(), List.of(),
                 null,
-                null, List.of(), null, List.of(), null, List.of());
+                null, List.of(), null, List.of(), null, List.of(), List.of());
     }
 
     private static Segment hub(int exits) {
@@ -77,7 +77,7 @@ class DungeonGeneratorDoorwayTest {
                 null, List.of(), null,
                 List.of(), List.of(),
                 null,
-                null, List.of(), null, List.of(), null, List.of());
+                null, List.of(), null, List.of(), null, List.of(), List.of());
     }
 
     private List<Segment> fullSet() {
