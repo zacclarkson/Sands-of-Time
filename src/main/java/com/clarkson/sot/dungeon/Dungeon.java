@@ -6,6 +6,7 @@ import org.bukkit.World;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable; // For hubLocation potentially
 
+import com.clarkson.sot.dungeon.segment.EntryPoint;
 import com.clarkson.sot.dungeon.segment.PlacedSegment;
 
 import java.util.*;
@@ -35,6 +36,11 @@ public class Dungeon {
     private final List<Location> playerSpawnLocations; // Absolute per-player start points (may be empty)
     private final List<Location> sandTimerLocations; // Absolute sand deposit cells (may be empty)
 
+    // Absolute openings between segments. Doorways get a rusty-key door; unused openings are the
+    // entry points generation never attached a neighbour to and are sealed as plain wall.
+    private final List<EntryPoint> doorways;
+    private final List<EntryPoint> unusedOpenings;
+
     /**
      * Constructor for the Dungeon data object.
      * Should be called by the DungeonManager instance after calculating absolute locations.
@@ -53,6 +59,8 @@ public class Dungeon {
      * @param safeExitLocation The absolute location players interact with to escape, or null if undefined.
      * @param playerSpawnLocations List of absolute per-player spawn points (may be empty).
      * @param sandTimerLocations List of absolute cells where carried sand is deposited onto the timer.
+     * @param doorways Absolute doorways between connected segments (one rusty-key door each).
+     * @param unusedOpenings Absolute entry points with no neighbour attached, to be sealed.
      */
     public Dungeon(@NotNull UUID teamId, @NotNull World world, @NotNull Location origin, @NotNull DungeonBlueprint blueprint,
                    @Nullable Location hubLocation,
@@ -64,7 +72,9 @@ public class Dungeon {
                    @NotNull List<DeathCage> deathCages,
                    @Nullable Location safeExitLocation,
                    @NotNull List<Location> playerSpawnLocations,
-                   @NotNull List<Location> sandTimerLocations) {
+                   @NotNull List<Location> sandTimerLocations,
+                   @NotNull List<EntryPoint> doorways,
+                   @NotNull List<EntryPoint> unusedOpenings) {
 
         this.instanceId = UUID.randomUUID();
         this.teamId = Objects.requireNonNull(teamId, "Team ID cannot be null");
@@ -83,6 +93,8 @@ public class Dungeon {
         this.deathCages = Collections.unmodifiableList(new ArrayList<>(deathCages));
         this.playerSpawnLocations = Collections.unmodifiableList(new ArrayList<>(playerSpawnLocations));
         this.sandTimerLocations = Collections.unmodifiableList(new ArrayList<>(sandTimerLocations));
+        this.doorways = Collections.unmodifiableList(new ArrayList<>(doorways));
+        this.unusedOpenings = Collections.unmodifiableList(new ArrayList<>(unusedOpenings));
     }
 
     // --- Getters ---
@@ -102,6 +114,12 @@ public class Dungeon {
     @NotNull public List<DeathCage> getDeathCages() {
         return deathCages; // Already unmodifiable
     }
+
+    /** Absolute doorways between connected segments; DoorManager builds a rusty-key door at each. */
+    @NotNull public List<EntryPoint> getDoorways() { return doorways; }
+
+    /** Absolute entry points with no neighbour attached; DoorManager seals these as plain wall. */
+    @NotNull public List<EntryPoint> getUnusedOpenings() { return unusedOpenings; }
 
     /** Absolute per-player spawn points (empty if no PLAYER_SPAWN markers were defined). */
     @NotNull public List<Location> getPlayerSpawnLocations() { return playerSpawnLocations; } // Already unmodifiable

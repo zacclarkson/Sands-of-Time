@@ -87,14 +87,34 @@ manually (see `integration-test/README.md`); it is **not** part of CI.
   Maven resource filtering (`pom.xml`). After saving a new segment on a running server, `/sotreloadsegments`
   (refused while a game is RUNNING) loads it without a restart; templates are otherwise read only at
   startup. Until a HUB exists, the plugin enables fine but `/sot start` aborts.
+- **Segment doors are generated, not derived at paste time.** `DungeonGenerator` records each
+  connection its DFS actually makes as a `Doorway` (blueprint-relative cell + direction), plus the
+  entry points it attached no neighbour to. Both lists ride the blueprint into `Dungeon` as absolute
+  `EntryPoint`s, and `DoorManager.initializeDoorsForInstance` builds a `SegmentDoor` at every
+  doorway and seals the leftovers as plain wall. Deriving doors by walking every placed segment's
+  entry points instead (what it used to do) put a locked door on openings that led nowhere — the
+  bundled hub alone declares nine. **`Door.buildClosed()` is what makes a door exist**: templates
+  carve their doorways as open 3x4 holes, so registering the `SegmentDoor` object without writing
+  blocks left the passage walkable and the lock location as air, which never fires
+  `RIGHT_CLICK_BLOCK`. The door body is `DARK_OAK_PLANKS` with an `OXIDIZED_CUT_COPPER` keyhole one
+  block above the entry marker; opening clears layers top-first so the wall sinks into the floor.
+  Vault marker blocks stay out of `DoorManager` — `VaultManager` owns those clicks (bug #65's
+  sibling), and a test pins it.
+- **Rusty keys spawn at `ITEM_SPAWN` markers.** `DungeonManager.populateFloorItems` rolls
+  `RUSTY_KEY_SPAWN_CHANCE` (20%) per item spawn and calls `FloorItemManager.spawnRustyKey`,
+  otherwise falling through to the loot table. Nothing called `spawnRustyKey` at all before, so
+  every segment door was permanently locked. Placement is by chance rather than one-per-room, so a
+  branch can come up with no key and stay shut — raise the constant if that bites; the doorway and
+  key counts are both logged.
 - **The safe exit is a segment marker.** The escape point comes from a `SAFE_EXIT` marker on a
   segment template; a marker on the HUB segment wins over one on any other segment. Templates saved
   before that marker existed carry none, so `GameManager.getTeamSafeExitLocation` falls back to the
   hub and `EscapeListener` falls back to accepting any `END_PORTAL_FRAME` within 30 blocks of the
-  hub. Generation logs a warning once when no template defines an exit. The marker only decides
-  *where you escape from*: escaping teleports the player to the **lobby**, not to the exit block —
-  the round is over for them, `ESCAPED_SAFE` bars them from escaping again (`EscapeListener`) or
-  spending sand (`SandManager`), and the dungeon is torn down moments later.
+  hub. Generation logs a warning once *per `/sot setup`* when no template defines an exit (see the
+  retry-logging note below). The marker only decides *where you escape from*: escaping teleports the
+  player to the **lobby**, not to the exit block — the round is over for them, `ESCAPED_SAFE` bars
+  them from escaping again (`EscapeListener`) or spending sand (`SandManager`), and the dungeon is
+  torn down moments later.
 - **`ENDED` is terminal; `/sot reset` is the only way back to `SETUP`.** A round ends at
   `GameState.ENDED` and nothing rearms it automatically, so the final standings stay readable —
   `GameManager.resetGame()` (guarded by the pure `canResetFrom`, which refuses `COUNTDOWN`/`RUNNING`/
@@ -108,6 +128,17 @@ manually (see `integration-test/README.md`); it is **not** part of CI.
   assignments it is about to read. A missing HUB template is deliberately **not** a game state
   (it used to latch `ENDED` at boot); `setupGame`/`startGame` check `hasHubTemplate()` instead, so
   `/sotreloadsegments` fixes it live.
+- **Generation retries must not multiply the log.** `DungeonGenerator.generateDungeonLayout` retries
+  `attemptGeneration` up to 20 times, so any warning inside an attempt is a candidate for being
+  printed 20 times per `/sot setup`. Conditions that describe the *templates on disk* — no
+  `SAFE_EXIT` marker, no `BLUE` key spawn, a duplicate vault/key marker — go through
+  `warnOncePerGeneration(key, message)`, whose key set is cleared at the top of each
+  `generateDungeonLayout` call, so they warn once per call and again on the next one. The
+  vault/key validation failures are genuinely per-attempt (a layout can fail on one attempt and pass
+  on the next), so they log at `fine` and are tallied instead; if every attempt fails,
+  `generateDungeonLayout` follows the `severe` failure line with one summary naming each unmet
+  requirement and how many attempts it was missing from. Per-attempt progress chatter is `fine` too —
+  only the success line and the failure summary reach the console.
 - **Countdown tasks are epoch-guarded.** The ticker only re-checks the state once a second, so
   `roundEpoch` (bumped on every start and end) is what stops a round aborted mid-countdown from
   having its stale task finish the *next* round's countdown early.

@@ -29,11 +29,12 @@ class DungeonSandTimerTest {
     private Dungeon dungeon(List<Location> deposits) {
         Area bounds = new Area(new Location(null, 0, 0, 0), new Location(null, 15, 7, 15));
         DungeonBlueprint blueprint = new DungeonBlueprint(List.of(), new Vector(0, 0, 0), Map.of(), Map.of(),
-                List.of(), List.of(), List.of(), bounds, null, null, List.of(), List.of());
+                List.of(), List.of(), List.of(), bounds, null, null, List.of(),
+                List.of(), List.of(), List.of());
         Location origin = new Location(world, 100, 64, 100);
         return new Dungeon(UUID.randomUUID(), world, origin, blueprint,
                 origin.clone(), Map.of(), Map.of(), List.of(), List.of(), List.of(), List.of(),
-                null, List.of(), deposits);
+                null, List.of(), deposits, List.of(), List.of());
     }
 
     @Test

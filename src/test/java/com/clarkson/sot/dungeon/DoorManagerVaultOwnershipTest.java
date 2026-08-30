@@ -2,7 +2,6 @@ package com.clarkson.sot.dungeon;
 
 import com.clarkson.sot.dungeon.segment.Direction;
 import com.clarkson.sot.dungeon.segment.EntryPoint;
-import com.clarkson.sot.dungeon.segment.PlacedSegment;
 import com.clarkson.sot.entities.Door;
 import com.clarkson.sot.entities.SegmentDoor;
 import com.clarkson.sot.main.GameManager;
@@ -39,7 +38,6 @@ class DoorManagerVaultOwnershipTest {
     private World world;
     private SoT plugin;
     private GameManager gameManager;
-    private DungeonManager dungeonManager;
     private UUID teamId;
 
     @BeforeEach
@@ -51,9 +49,7 @@ class DoorManagerVaultOwnershipTest {
         plugin = mock(SoT.class);
         when(plugin.getLogger()).thenReturn(Logger.getLogger("DoorManagerVaultOwnershipTest"));
 
-        dungeonManager = mock(DungeonManager.class);
         gameManager = mock(GameManager.class);
-        when(gameManager.getTeamDungeonManager(teamId)).thenReturn(dungeonManager);
     }
 
     @AfterEach
@@ -62,14 +58,22 @@ class DoorManagerVaultOwnershipTest {
     }
 
     private Location at(int x, int y, int z) {
+        // Door only touches blocks in loaded chunks, and initializing a doorway builds its blocks.
+        for (int dx = -1; dx <= 1; dx++) {
+            for (int dz = -1; dz <= 1; dz++) {
+                world.loadChunk((x + dx) >> 4, (z + dz) >> 4);
+            }
+        }
         return new Location(world, x, y, z);
     }
 
-    /** A dungeon with one vault marker per colour and nothing else. */
-    private Dungeon dungeonWithVaultMarkers(Map<VaultColor, Location> markers) {
+    /** A dungeon with the given vault markers and doorways, and nothing else. */
+    private Dungeon dungeon(Map<VaultColor, Location> markers, List<EntryPoint> doorways) {
         Dungeon dungeon = mock(Dungeon.class);
         when(dungeon.getTeamId()).thenReturn(teamId);
         when(dungeon.getVaultMarkerLocations()).thenReturn(markers);
+        when(dungeon.getDoorways()).thenReturn(doorways);
+        when(dungeon.getUnusedOpenings()).thenReturn(List.of());
         return dungeon;
     }
 
@@ -80,10 +84,9 @@ class DoorManagerVaultOwnershipTest {
         markers.put(VaultColor.RED, at(20, 64, 20));
         markers.put(VaultColor.GREEN, at(30, 64, 30));
         markers.put(VaultColor.GOLD, at(40, 64, 40));
-        when(dungeonManager.getPlacedSegmentsInWorld()).thenReturn(List.of());
 
         DoorManager doorManager = new DoorManager(plugin, gameManager);
-        doorManager.initializeDoorsForInstance(dungeonWithVaultMarkers(markers));
+        doorManager.initializeDoorsForInstance(dungeon(markers, List.of()));
 
         for (Map.Entry<VaultColor, Location> entry : markers.entrySet()) {
             assertNull(doorManager.getDoorAt(teamId, entry.getValue()),
@@ -95,12 +98,10 @@ class DoorManagerVaultOwnershipTest {
     @Test
     void segmentConnectionsStillGetADoor() {
         Location entryPointLoc = at(5, 64, 5);
-        PlacedSegment segment = mock(PlacedSegment.class);
-        when(segment.getAbsoluteEntryPoints()).thenReturn(List.of(new EntryPoint(entryPointLoc, Direction.NORTH)));
-        when(dungeonManager.getPlacedSegmentsInWorld()).thenReturn(List.of(segment));
 
         DoorManager doorManager = new DoorManager(plugin, gameManager);
-        doorManager.initializeDoorsForInstance(dungeonWithVaultMarkers(Map.of()));
+        doorManager.initializeDoorsForInstance(
+                dungeon(Map.of(), List.of(new EntryPoint(entryPointLoc, Direction.NORTH))));
 
         // The lock sits one block above the entry point marker (eye level).
         Door door = doorManager.getDoorAt(teamId, entryPointLoc.clone().add(0, 1, 0));
