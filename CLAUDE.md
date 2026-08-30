@@ -131,6 +131,17 @@ manually (see `integration-test/README.md`); it is **not** part of CI.
   escape path, and their sand would otherwise buy free time next round. Breaking a block of the team's own
   visual timer column is refused for the same reason — the column is sand, and a mined block is restored
   by the next `syncVisualState()`, which the resulting deposit itself triggers.
+- **Dying drops carried sand on the floor.** Nearly all of that is vanilla: `DeathListener` never
+  touches `event.getDrops()`, so a death that drops the inventory scatters the sand with everything
+  else and it lands, merges and despawns by the server's own rules. `SandManager.dropCarriedSandOnDeath`
+  is only the backstop for a death that *keeps* the inventory (the `keepInventory` gamerule, or another
+  plugin) — it pulls the sand out and drops it at the death location itself, because sand is the round's
+  currency for both timer seconds and revives and losing it on death is a rule of the game, not a server
+  setting. It is called from `DeathListener` **before** `handlePlayerDeath`, which queues the death-cage
+  teleport. Unbanked coins are different and deliberately so: they are a number in `ScoreManager`, so
+  `applyDeathPenalty` clears them and there is nothing on the floor to recover. Nothing extra is needed to
+  keep death drops out of the next round — `DungeonManager.cleanupInstance()` already removes every
+  non-player entity inside the dungeon bounds at teardown.
 - **The end-of-round teleport must skip trapped players.** `handleTeamTimerEnd` only *queues* the
   trapped teleport (`runTask` = next tick) and then calls `checkGameEndCondition` synchronously, so
   when the last team expires `endGameInternal` runs in that same tick and queues its lobby teleport

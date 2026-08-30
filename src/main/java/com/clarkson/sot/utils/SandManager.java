@@ -14,6 +14,7 @@ import org.bukkit.Material;
 import org.bukkit.NamespacedKey;
 import org.bukkit.Sound;
 import org.bukkit.SoundCategory;
+import org.bukkit.World;
 import org.bukkit.block.Block;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
@@ -21,6 +22,7 @@ import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.block.BlockBreakEvent;
 import org.bukkit.event.block.BlockPlaceEvent;
+import org.bukkit.event.entity.PlayerDeathEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.event.block.Action;
 import org.bukkit.inventory.ItemStack;
@@ -41,6 +43,9 @@ import java.util.*;
  *
  * <p>Carried sand lives in the player's inventory and nowhere else; there is no parallel counter to
  * drift out of sync with it. Sacrificing 1 sand at a sacrifice point revives a dead teammate.
+ *
+ * <p>Dying drops undeposited sand on the floor where you fell, like any other item, so the corpse run
+ * can win it back — see {@link #dropCarriedSandOnDeath(PlayerDeathEvent)}.
  */
 public class SandManager implements Listener {
 
@@ -237,6 +242,49 @@ public class SandManager implements Listener {
 
     private static boolean isSand(ItemStack item) {
         return item != null && item.getType() == Material.SAND && item.getAmount() > 0;
+    }
+
+    /**
+     * Puts the sand a player was carrying on the floor at the spot where they died, so a teammate on
+     * the corpse run can recover it.
+     *
+     * <p>Nearly always there is nothing to do: a death that drops the inventory already scatters the
+     * sand with everything else, and that path is deliberately left alone so the pile lands, merges
+     * and despawns by the same vanilla rules as the rest of the corpse. This only steps in when the
+     * death is <em>keeping</em> the inventory — the {@code keepInventory} gamerule, or another plugin
+     * — because sand is the round's currency for both timer seconds and revives, so losing it on
+     * death is a rule of the game rather than a server setting.
+     *
+     * @return how much sand this dropped; 0 when the sand is already going to drop on its own.
+     */
+    public int dropCarriedSandOnDeath(PlayerDeathEvent event) {
+        if (!event.getKeepInventory()) return 0;
+
+        Player player = event.getEntity();
+        int carried = getPlayerSandCount(player);
+        if (carried <= 0) return 0;
+
+        int dropped = removeSand(player, carried);
+        dropSandAt(player.getLocation(), dropped);
+        plugin.getLogger().fine("Dropped " + dropped + " sand carried by " + player.getName()
+                + " at their death location (the death kept their inventory)");
+        return dropped;
+    }
+
+    /**
+     * Drops {@code amount} sand as ground items, split across as many stacks as the material's own
+     * limit needs — a single over-sized ItemStack is not something the world will accept.
+     */
+    private void dropSandAt(Location location, int amount) {
+        World world = location.getWorld();
+        if (world == null || amount <= 0) return;
+
+        int maxStack = Math.max(1, Material.SAND.getMaxStackSize());
+        for (int remaining = amount; remaining > 0; ) {
+            int stack = Math.min(remaining, maxStack);
+            world.dropItemNaturally(location, new ItemStack(Material.SAND, stack));
+            remaining -= stack;
+        }
     }
 
     /**

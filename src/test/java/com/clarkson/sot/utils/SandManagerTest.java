@@ -4,13 +4,17 @@ import com.clarkson.sot.main.GameManager;
 import com.clarkson.sot.main.GameState;
 import com.clarkson.sot.timer.TeamTimer;
 
+import net.kyori.adventure.text.Component;
 import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.World;
 import org.bukkit.block.Block;
 import org.bukkit.block.BlockState;
+import org.bukkit.damage.DamageSource;
+import org.bukkit.entity.Item;
 import org.bukkit.event.block.BlockBreakEvent;
 import org.bukkit.event.block.BlockPlaceEvent;
+import org.bukkit.event.entity.PlayerDeathEvent;
 import org.bukkit.inventory.EquipmentSlot;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.plugin.Plugin;
@@ -21,6 +25,8 @@ import org.mockbukkit.mockbukkit.MockBukkit;
 import org.mockbukkit.mockbukkit.ServerMock;
 import org.mockbukkit.mockbukkit.entity.PlayerMock;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
@@ -122,6 +128,29 @@ class SandManagerTest {
         ItemStack offHand = player.getInventory().getItemInOffHand();
         if (offHand.getType() == Material.SAND) total += offHand.getAmount();
         return total;
+    }
+
+    /**
+     * Builds a real death event for the test player. The trailing boolean is required from Paper 26 —
+     * see the same note in {@link com.clarkson.sot.events.DeathListenerTest}.
+     */
+    private PlayerDeathEvent deathEvent(boolean keepInventory) {
+        PlayerDeathEvent event = new PlayerDeathEvent(player, mock(DamageSource.class),
+                new ArrayList<ItemStack>(), 0, 0, 0, 0, Component.text("died"), true);
+        event.setKeepInventory(keepInventory);
+        return event;
+    }
+
+    /** Every sand stack lying on the ground in the test world. */
+    private List<ItemStack> droppedSandStacks() {
+        return world.getEntitiesByClass(Item.class).stream()
+                .map(Item::getItemStack)
+                .filter(item -> item.getType() == Material.SAND)
+                .toList();
+    }
+
+    private static int totalOf(List<ItemStack> stacks) {
+        return stacks.stream().mapToInt(ItemStack::getAmount).sum();
     }
 
     private Block dungeonSand(int x, int y, int z) {
@@ -295,5 +324,68 @@ class SandManagerTest {
         SandManager sandManager = new SandManager(gameManager, MockBukkit.createMockPlugin());
 
         assertDoesNotThrow(() -> sandManager.clearSandItems(Set.of(UUID.randomUUID())));
+    }
+
+    // --- death ---
+
+    @Test
+    void aDeathThatKeepsTheInventoryStillDropsTheSand() {
+        SandManager sandManager = new SandManager(gameManager, MockBukkit.createMockPlugin());
+        Location deathSpot = new Location(world, 5, 64, 5);
+        player.teleport(deathSpot);
+        player.getInventory().addItem(new ItemStack(Material.SAND, 5));
+        player.getInventory().setItemInOffHand(new ItemStack(Material.SAND, 2));
+
+        int dropped = sandManager.dropCarriedSandOnDeath(deathEvent(true));
+
+        assertEquals(7, dropped);
+        assertEquals(0, sandInInventory(), "keepInventory must not keep the sand — that is a game rule");
+        assertEquals(7, totalOf(droppedSandStacks()), "all of it lands on the floor instead");
+        assertTrue(world.getEntitiesByClass(Item.class).stream()
+                        .allMatch(item -> item.getLocation().distance(deathSpot) < 2),
+                "the pile belongs at the death location, where the corpse run goes");
+    }
+
+    @Test
+    void anOrdinaryDeathLeavesTheSandToVanilla() {
+        SandManager sandManager = new SandManager(gameManager, MockBukkit.createMockPlugin());
+        player.teleport(new Location(world, 5, 64, 5));
+        player.getInventory().addItem(new ItemStack(Material.SAND, 4));
+
+        int dropped = sandManager.dropCarriedSandOnDeath(deathEvent(false));
+
+        assertEquals(0, dropped, "the server is already about to drop the whole inventory");
+        assertEquals(4, sandInInventory(),
+                "taking it here as well would drop each sand twice — the server empties the inventory itself");
+        assertTrue(droppedSandStacks().isEmpty());
+    }
+
+    @Test
+    void aDeathCarryingNoSandDropsNothing() {
+        SandManager sandManager = new SandManager(gameManager, MockBukkit.createMockPlugin());
+        player.teleport(new Location(world, 5, 64, 5));
+        player.getInventory().addItem(new ItemStack(Material.DIAMOND, 1));
+
+        assertEquals(0, sandManager.dropCarriedSandOnDeath(deathEvent(true)));
+
+        assertTrue(droppedSandStacks().isEmpty());
+        assertTrue(player.getInventory().contains(Material.DIAMOND),
+                "the rest of the inventory is the gamerule's business, not ours");
+    }
+
+    @Test
+    void moreSandThanOneStackDropsAsSeveralStacks() {
+        SandManager sandManager = new SandManager(gameManager, MockBukkit.createMockPlugin());
+        player.teleport(new Location(world, 5, 64, 5));
+        player.getInventory().addItem(new ItemStack(Material.SAND, 64));
+        player.getInventory().addItem(new ItemStack(Material.SAND, 30));
+
+        int dropped = sandManager.dropCarriedSandOnDeath(deathEvent(true));
+
+        assertEquals(94, dropped);
+        List<ItemStack> stacks = droppedSandStacks();
+        assertEquals(94, totalOf(stacks));
+        assertTrue(stacks.stream().allMatch(stack -> stack.getAmount() <= Material.SAND.getMaxStackSize()),
+                "an over-sized ItemStack is not something the world will accept");
     }
 }
