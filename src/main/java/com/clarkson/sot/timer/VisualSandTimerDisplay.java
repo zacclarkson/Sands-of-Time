@@ -12,6 +12,7 @@ import org.bukkit.entity.FallingBlock;
 import org.bukkit.plugin.Plugin;
 import org.bukkit.scheduler.BukkitTask;
 import org.bukkit.util.BoundingBox;
+import org.jetbrains.annotations.Nullable;
 
 import java.util.Objects;
 import java.util.logging.Level;
@@ -118,6 +119,40 @@ public class VisualSandTimerDisplay {
         plugin.getLogger().info("Relocated visual timer for team " + team.getTeamName()
                 + " to " + newBottom.toVector() + " (height " + totalHeight + ").");
         return true;
+    }
+
+    /**
+     * Whether the given block location is one of the sand cells this column occupies — the cells
+     * {@code bottomY + 1} through {@code topY} at the column's fixed X/Z, which is exactly the range
+     * every add, remove and count loop in this class walks.
+     *
+     * <p>Used by {@code BlockProtectionListener} to stop players mining their own timer for time.
+     * Two deliberate choices:
+     *
+     * <ul>
+     *   <li>The pedestal at {@link #bottomLocation} is <em>excluded</em>. It is the segment's
+     *       {@code TIMER} marker block itself, is not sand, and is already protected by the
+     *       break whitelist.</li>
+     *   <li>This is <em>not</em> gated on {@link #armed}. The column is anchored by
+     *       {@code GameManager.startGame} but only armed at {@link #startVisualUpdates()}, and the
+     *       gap between the two is the countdown — precisely when the hub segment's baked sand shaft
+     *       is standing in the world waiting to be mined. Coordinates left over after
+     *       {@link #stopAndClear()} are harmless, because callers only ask during a live round.</li>
+     * </ul>
+     *
+     * @param location a block location, or null
+     * @return true if the location is a sand cell of this column
+     */
+    public boolean isColumnBlock(@Nullable Location location) {
+        if (location == null || totalHeight <= 0) return false;
+        World columnWorld = bottomLocation.getWorld();
+        if (columnWorld == null || !Objects.equals(location.getWorld(), columnWorld)) return false;
+        if (location.getBlockX() != bottomLocation.getBlockX()
+                || location.getBlockZ() != bottomLocation.getBlockZ()) {
+            return false;
+        }
+        int y = location.getBlockY();
+        return y > bottomLocation.getBlockY() && y <= topLocation.getBlockY();
     }
 
     /**

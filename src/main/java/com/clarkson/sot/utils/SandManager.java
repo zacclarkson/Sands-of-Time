@@ -185,6 +185,11 @@ public class SandManager implements Listener {
 
     /**
      * Detects when a player breaks a SAND block in a dungeon and collects it.
+     *
+     * <p>Relies on {@code BlockProtectionListener} running at {@code LOW} to have already cancelled
+     * any break it disallows -- the team's own timer column above all, which is also made of SAND.
+     * That is what {@code ignoreCancelled = true} at {@code NORMAL} buys us: a protected block never
+     * reaches this method, so it can pay out unconditionally. Do not raise this priority.
      */
     @EventHandler(priority = EventPriority.NORMAL, ignoreCancelled = true)
     public void onBlockBreak(BlockBreakEvent event) {

@@ -8,6 +8,7 @@ import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.entity.Player;
 import org.bukkit.plugin.Plugin;
+import org.jetbrains.annotations.Nullable;
 
 import java.util.*;
 import java.util.logging.Level;
@@ -106,6 +107,16 @@ public class SoTTeam {
         } else {
             visualTimerDisplay.relocate(bottom, top);
         }
+    }
+
+    /**
+     * Whether this team's visual sand column stands at the given block.
+     *
+     * <p>False when the team has no column this round: a hub segment with no {@code TIMER} marker
+     * never calls {@link #relocateVisualTimer}, so the display is never created.
+     */
+    public boolean isVisualTimerBlock(@Nullable Location location) {
+        return visualTimerDisplay != null && visualTimerDisplay.isColumnBlock(location);
     }
 
     /** Stops the visual timer task and clears its sand column. Used by end-of-game cleanup. */

@@ -118,6 +118,19 @@ manually (see `integration-test/README.md`); it is **not** part of CI.
   lobby teleport off `TRAPPED_TIMER_OUT` players; without it a single-team round (the `/sot setup`
   default) never shows the trapped box at all. The status has to be read *outside* the scheduled
   task, since `clearAllStates()` runs later in the same tick.
+- **During a round, players may break only sand and spawners — and never the timer column.**
+  `BlockProtectionListener` (in `events`) cancels every other block break, and all block placement,
+  while `GameManager.isRoundLive` is true (COUNTDOWN/RUNNING/PAUSED, so the hub's baked sand shaft is
+  covered before the round even starts). `BreakableBlocks.BREAKABLE` is the whitelist and the
+  documented home for the not-yet-implemented money blocks. **The `LOW` priority is load-bearing:**
+  `SandManager.onBlockBreak` sits at `NORMAL, ignoreCancelled = true`, so cancelling at `LOW` makes
+  Bukkit skip it and a denied break pays out nothing — raise the priority and the sand-timer exploit
+  comes back (mining a column block credited +10s, and `TeamTimer.addSeconds` → `syncVisualState` →
+  `addSandToTop` put the block straight back, pinning the timer at its maximum forever). The column
+  guard runs *before* the `isParticipant` check so nobody, operators included, can mine a team's
+  clock, and `VisualSandTimerDisplay.isColumnBlock` is deliberately **not** gated on `armed` —
+  the unarmed window is exactly the countdown, when the baked shaft is minable. Creative/Spectator
+  bypasses everything; there is no bypass permission.
 - **The visual sand column lives in the hub, never at the lobby.** Its base comes from a `TIMER`
   marker on a segment template (HUB wins), via `DungeonGenerator.selectTimerBaseRelativeLocation` →
   `DungeonBlueprint.getTimerBaseRelativeLocation` → `DungeonManager.getTimerBaseLocation`.
