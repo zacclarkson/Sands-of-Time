@@ -135,9 +135,16 @@ The hub has approximately **10 exits** leading into the dungeon. These exits fal
 
 ### Sand Sacrifice
 
-- Dedicated sacrifice points exist in the hub — **one per player** on the team
+- Dedicated sacrifice points exist in the hub — **one per player** on the team, each a **chest**
+  paired with that player's death cage
 - A teammate must sacrifice sand at these points to free a player from the death cage
-- Cost: **1 sand** per revive
+- Cost: the dead player's **death count**, capped at **5 sand** — their first death costs 1, their
+  second 2, and so on, so repeated deaths get progressively expensive for the team
+- Sand is paid **one at a time**, so several teammates can chip in on the same revive
+- An active point is marked by a **block of sand floating above the chest with an arrow pointing
+  down**, showing how much sand is still owed. A chest with nothing above it has nobody to free
+- Sand already paid toward a revive is **spent**: if the timer runs out before the price is met, it
+  is not refunded
 
 ### Block Breaking
 
@@ -202,7 +209,7 @@ Each segment template can contain any combination of:
 - **Sand spawns** — locations where sand items may appear
 - **Item spawns** — locations for generic loot items
 - **Mob spawners** — locations for hostile mob spawning
-- **Sand sacrifice points** — where sand can be sacrificed
+- **Sand sacrifice points** — where sand can be sacrificed to free a caged teammate; rendered as a chest and paired positionally with the `DEATH_CAGE` markers
 - **Vault markers** — activation block for a vault
 - **Key spawns** — where vault keys are placed
 - **Gates** — openings blocked until a lever is pulled
@@ -213,7 +220,7 @@ Each segment template can contain any combination of:
 
 The HUB segment additionally defines these hub-only features (placed in the builder, wired to the live dungeon in a later pass):
 - **Bank** — a single interact point (`BANK` marker) marking where the bank stands. An **ender chest** is built in that cell at runtime; right-clicking it banks everything the player is carrying
-- **Death cages** — 1–4 points (`DEATH_CAGE` markers), one per player, where dead players are held and respawn; each cage's revive/sacrifice point is auto-derived at runtime
+- **Death cages** — 1–4 points (`DEATH_CAGE` markers), one per player, where dead players are held and respawn. Each cage is paired with the sacrifice point of the same index (the first `SAND_SACRIFICE` marker frees the first cage, and so on); a cage the template leaves unpaired gets a chest derived two blocks in front of it, so a hub saved before these markers existed still plays
 - **Timer deposits** — interact points (`TIMER_DEPOSIT` markers) where players place collected sand onto the timer to add time
 - **Timer column** — a single `TIMER` marker at the base of the visual sand-timer column; the draining sand timer stands in the hub at this marker (per team). A HUB with no TIMER marker simply gets no visual column that round (the timer still counts down normally) — the column is never placed anywhere but the hub.
 
@@ -434,14 +441,16 @@ When a player dies while the timer is still active:
    penalty: it is all recoverable if you get back in time)
 3. Player **respawns in the death cage** at the hub
 4. Player is now in the **DEAD_AWAITING_REVIVE** state — they cannot leave the cage on their own
-5. A **teammate must sacrifice 1 sand** at a sacrifice point to free the dead player from the cage
+5. A **teammate must sacrifice sand** at the sacrifice chest to free the dead player from the cage —
+   1 sand for their first death, 2 for their second, up to a cap of 5. It is paid a sand at a time,
+   so the whole team can contribute; a floating sand block above the chest counts down what is left
 6. Once freed, the player is back at the hub and can **run back to their death location** to recover all dropped items — sand recovered this way deposits for time exactly as if it had never been dropped
 7. If no teammate comes to revive, the player stays trapped in the cage until the timer expires, and whatever they dropped is never recovered
 
 ### Death Risk Factors
 
 - Dying deep in the dungeon is extremely punishing — the corpse run back eats valuable timer seconds
-- The sand cost to revive means the team loses 10 seconds of timer per death
+- The sand cost to revive means the team loses 10 seconds of timer for a first death, and up to 50 for a fifth — every death makes the next one dearer
 - Unbanked coins are gone the moment you die — only the items and sand on the floor can be won back
 - Sand left lying at the death location is time the team never gets — and it despawns like any other
   dropped item, so a corpse run that takes too long loses it outright
@@ -553,7 +562,7 @@ Puzzle rooms are accessible from the hub exits (not on the vault branches). They
 | Constant | Value |
 |----------|-------|
 | Timer seconds per sand | 10 |
-| Revive cost | 1 sand |
+| Revive cost | The dead player's death count, capped at 5 sand |
 | Sand spawn chance | 40% per location |
 | Sand collection method | Break with shovel (normal sand blocks) |
 | Sacrifice points per team | 1 per player on the team |
