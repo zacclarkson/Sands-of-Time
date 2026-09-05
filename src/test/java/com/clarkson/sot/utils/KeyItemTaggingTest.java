@@ -139,6 +139,39 @@ class KeyItemTaggingTest {
         }
     }
 
+    /**
+     * Pins the key CustomModelData wiring (issue #89): each vault key carries the CMD id the served
+     * resource pack's {@code items/tripwire_hook.json} range_dispatch maps to that colour's model.
+     * Set via the float-based {@code CustomModelDataComponent} (matching how coins are wired).
+     */
+    @ParameterizedTest
+    @EnumSource(VaultColor.class)
+    void vaultKeyCarriesItsCustomModelData(VaultColor color) {
+        ItemStack key = ItemManager.createVaultKey(color);
+
+        int expected;
+        switch (color) {
+            case BLUE:  expected = ItemManager.VAULT_KEY_BLUE_MODEL_ID;  break;
+            case RED:   expected = ItemManager.VAULT_KEY_RED_MODEL_ID;   break;
+            case GREEN: expected = ItemManager.VAULT_KEY_GREEN_MODEL_ID; break;
+            case GOLD:  expected = ItemManager.VAULT_KEY_GOLD_MODEL_ID;  break;
+            default: throw new IllegalStateException("Unhandled colour " + color);
+        }
+
+        assertEquals(java.util.List.of((float) expected),
+                key.getItemMeta().getCustomModelDataComponent().getFloats(),
+                "The " + color + " vault key should carry CMD " + expected);
+    }
+
+    /** The rusty key has no bespoke texture yet, so it stays vanilla — no CustomModelData applied. */
+    @Test
+    void rustyKeyHasNoCustomModelData() {
+        ItemStack rusty = ItemManager.createRustyKey();
+
+        assertTrue(rusty.getItemMeta().getCustomModelDataComponent().getFloats().isEmpty(),
+                "The rusty key should carry no CustomModelData floats");
+    }
+
     @Test
     void nonKeyItemsAreRejectedByBothDoors() {
         ItemStack plainHook = new ItemStack(Material.TRIPWIRE_HOOK);

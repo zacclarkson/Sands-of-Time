@@ -39,6 +39,11 @@ services:
       OPS: "REPLACE_WITH_MC_USERNAME"
       # A superflat world makes building segments and watching game UX easiest. Remove for normal.
       LEVEL_TYPE: "minecraft:flat"
+      # NOTE: no RESOURCE_PACK / RESOURCE_PACK_SHA1 here on purpose. The SoT plugin offers its own
+      # pack (config.yml -> resource-pack.url, served by the `pack` sidecar below) together with the
+      # zip's current SHA-1, which it hashes at enable. server.properties is only read at startup,
+      # so a pack set here could never change hash without a restart -- and without a hash change
+      # clients keep their cached copy forever. See deploy/sot-test/README.md.
     volumes:
       # World + config + plugins persist here. CI/scp drops the built jar at ./data/plugins/SoT.jar.
       - ./data:/data
@@ -47,3 +52,20 @@ services:
       start_period: 2m
       interval: 10s
       retries: 20
+
+  # Static-file sidecar that serves the SoT resource pack zip over HTTP. The CD job
+  # (.github/workflows/resourcepack-deploy.yml) rebuilds ./pack/sot.zip on resourcepack/** changes,
+  # then `plugman reload SoT` so the plugin re-hashes it and offers the new pack to everyone online.
+  # ./pack is a host dir (gitignored, like ./data); seed it once by running
+  # scripts/build-resourcepack.sh and copying the zip to ./pack/sot.zip. Point the plugin at it with
+  # resource-pack.url: http://<SERVER_HOST>:25701/sot.zip in data/plugins/SoT/config.yml -- the host
+  # address CLIENTS reach (e.g. the Tailscale IP), not this service name.
+  pack:
+    image: nginx:alpine
+    container_name: sot-pack
+    restart: unless-stopped
+    ports:
+      # HTTP. Must match the port in the plugin's resource-pack.url and be reachable by clients.
+      - "25701:80"
+    volumes:
+      - ./pack:/usr/share/nginx/html:ro

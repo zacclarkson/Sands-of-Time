@@ -54,3 +54,32 @@ dungeon:
   # Stand anywhere and run /sot seed <value> to set this without a restart, or
   # /sot seed random to clear it.
   seed: ''
+
+resource-pack:
+
+  # Where players' clients download the Sands of Time texture pack (custom coin
+  # and vault-key art). Leave blank to send no pack; everything still works,
+  # players just see plain gold nuggets and tripwire hooks.
+  #
+  # The URL must be reachable from the PLAYERS' machines -- the server only
+  # relays it. On the dev server this is the `pack` sidecar's published port,
+  # e.g. http://<host>:25701/sot.zip.
+  #
+  # The plugin sends the zip's SHA-1 along with the URL, which is what makes a
+  # client re-download a changed pack. It hashes the zip itself when the plugin
+  # enables, so after replacing the zip a plugin reload (plugman reload SoT) is
+  # all that is needed -- no server restart.
+  url: ''
+
+  # Optional. The zip's SHA-1 as 40 hex characters. Leave blank to have the
+  # plugin download and hash the zip at enable; set it only if the URL above is
+  # not reachable from the server itself.
+  sha1: ''
+
+  # Disconnect players who decline the pack. Off by default so a dev server
+  # stays joinable from a client with packs disabled.
+  required: false
+
+  # Text shown in the client's "this server has a resource pack" prompt. Blank
+  # uses a short default.
+  prompt: ''

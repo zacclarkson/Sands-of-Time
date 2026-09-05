@@ -2,5 +2,8 @@
 *.schem binary
 *.schematic binary
 
+# Resource-pack / icon art is binary — never apply text/EOL normalization.
+*.png binary
+
 # Shell scripts must stay LF so the shebang works when checked out on Linux.
 *.sh text eol=lf

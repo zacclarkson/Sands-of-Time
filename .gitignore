@@ -65,6 +65,8 @@ integration-test/bot/package-lock.json
 
 # Homelab dev-server world/plugins (generated; reference compose.yml is tracked)
 deploy/sot-test/data/
+# Homelab dev-server resource-pack sidecar payload (built by scripts/build-resourcepack.sh + CD)
+deploy/sot-test/pack/
 
 # Other
 .DS_Store

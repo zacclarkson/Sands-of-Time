@@ -1,6 +1,25 @@
 {
   "model": {
-    "type": "minecraft:model",
-    "model": "minecraft:item/tripwire_hook"
+    "type": "minecraft:range_dispatch",
+    "property": "minecraft:custom_model_data",
+    "entries": [
+      {
+        "threshold": 2011.0,
+        "model": { "type": "minecraft:model", "model": "sot:item/key_blue" }
+      },
+      {
+        "threshold": 2012.0,
+        "model": { "type": "minecraft:model", "model": "sot:item/key_red" }
+      },
+      {
+        "threshold": 2013.0,
+        "model": { "type": "minecraft:model", "model": "sot:item/key_green" }
+      },
+      {
+        "threshold": 2014.0,
+        "model": { "type": "minecraft:model", "model": "sot:item/key_gold" }
+      }
+    ],
+    "fallback": { "type": "minecraft:model", "model": "minecraft:item/tripwire_hook" }
   }
 }

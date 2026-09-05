@@ -31,6 +31,7 @@ import com.clarkson.sot.events.DeathListener;
 import com.clarkson.sot.events.EscapeListener;
 import com.clarkson.sot.events.HungerListener;
 import com.clarkson.sot.events.NetherPortalListener;
+import com.clarkson.sot.events.ResourcePackListener;
 import com.clarkson.sot.events.SegmentBuilderKeys;
 import com.clarkson.sot.events.ToolListener;
 // Import Entities if needed for static init
@@ -176,6 +177,13 @@ public class SoT extends JavaPlugin {
         // Nether portals are used as the safe-exit visual; suppress the vanilla teleport so nobody is
         // sent to the Nether when they walk into one.
         getServer().getPluginManager().registerEvents(new NetherPortalListener(), this);
+        // Offers the SoT texture pack (coins, vault keys) with the zip's current SHA-1. The hash is
+        // computed here at enable, so swapping the served zip + a plugin reload is a live texture
+        // update with no server restart. Configured under 'resource-pack' in config.yml; off when blank.
+        ResourcePackListener resourcePackListener = new ResourcePackListener(this,
+                ResourcePackSettings.read(getConfig(), ResourcePackSettings.PATH, getLogger()));
+        getServer().getPluginManager().registerEvents(resourcePackListener, this);
+        resourcePackListener.start();
 
         // Animate spinnable builder markers (e.g. coin markers). Cancelled in onDisable so a
         // plugin hot-reload does not orphan the task.
