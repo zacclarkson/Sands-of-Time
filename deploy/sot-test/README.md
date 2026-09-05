@@ -41,28 +41,39 @@ needed for server/JVM/other-plugin changes (or if PlugManX itself is being insta
 ## Resource pack (custom key/coin textures)
 
 The server serves the SoT resource pack (`resourcepack/`, built into a slim zip) so clients see the
-custom coloured **vault-key** and **coin** textures. Delivery is a small **`pack` nginx sidecar** in
-`compose.yml`: it serves `<server-dir>/pack/sot.zip` over HTTP on port `25701`, and the `sot-test`
-service points `RESOURCE_PACK` at that URL with `RESOURCE_PACK_ENFORCE: TRUE`.
+custom coloured **vault-key** and **coin** textures. Two pieces:
+
+- A small **`pack` nginx sidecar** in `compose.yml` serves `<server-dir>/pack/sot.zip` over HTTP on
+  port `25701`.
+- The **plugin offers the pack** to each player (`resource-pack.url` in `data/plugins/SoT/config.yml`)
+  together with the zip's SHA-1, which it downloads and hashes when it enables. The hash is what makes
+  a client re-download a changed pack, and because it lives in the plugin a `plugman reload SoT` is
+  enough to publish a new one — no server restart.
+
+**Deliberately not `RESOURCE_PACK` / `RESOURCE_PACK_SHA1` in `compose.yml`.** Those land in
+`server.properties`, which is read once at startup. Without a SHA1 Paper warns that clients will only
+re-download "if you change the name of the pack" (they cache by URL), and with one every texture change
+would need a container recreate — which kicks players, the opposite of the plugin hot-reload principle.
 
 **One-time setup:**
 
-1. In `compose.yml`, set `RESOURCE_PACK` to your host address (the same one clients connect to, e.g.
-   the Tailscale IP), keeping port `25701`: `http://<SERVER_HOST>:25701/sot.zip`. The MC server only
-   relays this URL — clients download it themselves — so it must **not** be the `pack` service name.
-2. Seed the zip and start the sidecar:
+1. Seed the zip and start the sidecar:
    ```bash
    # from your dev machine:
    scripts/build-resourcepack.sh                       # -> target/sot-resourcepack.zip
    scp target/sot-resourcepack.zip <user>@<SERVER_HOST>:<server-dir>/pack/sot.zip
-   ssh <user>@<SERVER_HOST> 'cd <server-dir> && docker compose up -d'   # starts sot-pack + applies env
+   ssh <user>@<SERVER_HOST> 'cd <server-dir> && docker compose up -d'   # starts sot-pack
    ```
    (`<server-dir>/pack/` is created on the host; it is not in git — see `.gitignore`.)
+2. In `<server-dir>/data/plugins/SoT/config.yml`, set `resource-pack.url` to the address **clients**
+   use (the same one they connect to, e.g. the Tailscale IP), keeping port `25701`:
+   `http://<SERVER_HOST>:25701/sot.zip`. The plugin only relays this URL — clients download it
+   themselves — so it must **not** be the `pack` service name. Leave `sha1` blank (the plugin hashes
+   the download); `required: true` kicks players who decline.
+3. `docker exec sot-test rcon-cli plugman reload SoT`. The log should show
+   `Resource pack http://...:25701/sot.zip (sha1 ...)`, and everyone online gets the prompt.
 
-**Deliberately no `RESOURCE_PACK_SHA1`.** The CD job hot-swaps `sot.zip` without restarting the MC
-container, so clients simply re-download the current pack on their next join. Setting a SHA1 would
-force a container recreate (and kick players) on every texture change — the opposite of the plugin
-hot-reload principle. See "Auto-deploy from CI" below for the resource-pack CD.
+See "Auto-deploy from CI" below for the resource-pack CD, which does steps 1 and 3 on every change.
 
 ## First game (a HUB segment is bundled)
 
@@ -107,7 +118,8 @@ Manual fallback is the `scp` + `plugman reload` (or `docker restart`) shown abov
 
 `.github/workflows/resourcepack-deploy.yml` is a **separate** gated job that runs on push to `master`
 **only when `resourcepack/**` changes** (plus `workflow_dispatch` for on-demand runs). It rebuilds the
-slim zip with `scripts/build-resourcepack.sh` and copies it to `<server-dir>/pack/sot.zip`. It **never
-touches the MC container** — no restart, no kick; clients pick up the new textures on their next join.
+slim zip with `scripts/build-resourcepack.sh`, copies it to `<server-dir>/pack/sot.zip`, then
+`plugman reload SoT` over RCON so the plugin re-hashes the zip and offers the new pack to everyone
+online. It **never restarts the MC container** — no kick; players just get the pack prompt.
 It reuses the same gating (`self-hosted,linux` runner + `DEPLOY_ENABLED=true`) as the jar deploy above;
 a manual `workflow_dispatch` run is always allowed so you can seed or repair the pack.

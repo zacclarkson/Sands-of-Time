@@ -509,10 +509,14 @@ line — so it is actionable without rediscovering it.
   `ItemManager.getCustomModelDataForKey`) → `tripwire_hook.json`. **Keep the CMD ids in the Java in
   lockstep with the thresholds in those JSONs.** Use the float-based `CustomModelDataComponent`, not
   the deprecated `setCustomModelData(int)`. Keyholes/vault-doors/branch-signifiers are art-only, not
-  wired (they need block overrides / new features). Delivery is a `pack` nginx sidecar in
-  `deploy/sot-test/compose.yml` serving `scripts/build-resourcepack.sh`'s zip; the resource-pack CD
-  (`.github/workflows/resourcepack-deploy.yml`) hot-swaps it on `resourcepack/**` changes with no
-  `RESOURCE_PACK_SHA1`, so no MC restart and clients re-download on next join.
+  wired (they need block overrides / new features). Delivery: a `pack` nginx sidecar in
+  `deploy/sot-test/compose.yml` serves `scripts/build-resourcepack.sh`'s zip, and **the plugin offers
+  the pack** (`ResourcePackListener`, from `resource-pack.url` in `config.yml`) together with the zip's
+  SHA-1, which it downloads and hashes at enable. Not `RESOURCE_PACK` in `server.properties`: that is
+  read once at startup, and without a hash change clients keep their cached pack forever (Paper warns
+  about it). So the resource-pack CD (`.github/workflows/resourcepack-deploy.yml`) swaps the zip and
+  then `plugman reload SoT`; the plugin re-hashes and re-offers, and a player whose client already
+  reports that exact hash loaded is skipped so unrelated reloads don't flash everyone's textures.
 
 ## Dev server
 

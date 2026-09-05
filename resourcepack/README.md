@@ -33,5 +33,7 @@ Keep the CMD ids in `ItemManager` in lockstep with the thresholds in `tripwire_h
 
 `scripts/build-resourcepack.sh` zips this dir (excluding `sot-source-textures/` and READMEs, so
 `pack.mcmeta` is at the zip root) into `target/sot-resourcepack.zip`. The dev server serves it via the
-`pack` nginx sidecar; the resource-pack CD (`.github/workflows/resourcepack-deploy.yml`) rebuilds and
-hot-swaps it on any `resourcepack/**` change. See `deploy/sot-test/README.md`.
+`pack` nginx sidecar, and the plugin offers it to players with its SHA-1 (`resource-pack.url` in
+`config.yml`; see `ResourcePackListener`). The resource-pack CD (`.github/workflows/resourcepack-deploy.yml`)
+rebuilds and hot-swaps the zip on any `resourcepack/**` change, then reloads the plugin so it re-hashes
+and re-offers the pack. See `deploy/sot-test/README.md`.

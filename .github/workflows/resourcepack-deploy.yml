@@ -1,9 +1,10 @@
 # Rebuild the slim SoT resource pack and hot-swap it onto the homelab `pack` sidecar.
 #
-# The MC server (deploy/sot-test/compose.yml) relays a fixed RESOURCE_PACK URL to clients and sets
-# no SHA1, so replacing the served zip needs NO server restart — clients re-download on their next
-# join. This job therefore only rebuilds the zip and copies it into place; it never touches the MC
-# container, so nobody is kicked.
+# The SoT plugin (not server.properties) offers the pack to clients, together with the zip's SHA-1,
+# which it computes when it enables. So after replacing the served zip this job reloads just the SoT
+# plugin over RCON (PlugManX, same as the jar deploy): the plugin re-hashes the new zip and offers it
+# to everyone online, whose clients see a new hash and re-download. The MC container is never
+# restarted, so nobody is kicked.
 name: Deploy Resource Pack
 
 on:
@@ -40,3 +41,17 @@ jobs:
           mkdir -p ~/servers/sot-test/pack
           cp target/sot-resourcepack.zip ~/servers/sot-test/pack/sot.zip
           echo "Published $(du -h target/sot-resourcepack.zip | cut -f1) pack to ~/servers/sot-test/pack/sot.zip"
+          echo "sha1: $(sha1sum target/sot-resourcepack.zip | cut -d' ' -f1)"
+
+      - name: Reload SoT so it re-hashes and re-offers the pack
+        run: |
+          # The plugin hashes the zip at enable and sends that hash with the pack, so a reload is
+          # what turns the new file into a client re-download. rcon-cli exits 0 even on "Unknown
+          # command", so inspect the reply and fail loudly rather than leave the old hash in play.
+          reload_out=$(docker exec sot-test rcon-cli plugman reload SoT 2>&1)
+          echo "plugman reply: $reload_out"
+          if echo "$reload_out" | grep -qiE 'unknown command|not found|not enabled|no plugin|exception|error'; then
+            echo "::error::plugman reload SoT failed (is PlugManX installed and SoT present?)"
+            exit 1
+          fi
+          docker exec sot-test rcon-cli say "[SoT] Resource pack updated (${GITHUB_SHA:0:7}); accept the prompt to reload textures"
