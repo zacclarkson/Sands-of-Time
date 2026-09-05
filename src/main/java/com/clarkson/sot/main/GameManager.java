@@ -4,6 +4,7 @@ package com.clarkson.sot.main;
 import com.clarkson.sot.dungeon.*; // Includes Dungeon, DungeonBlueprint, DeathCage, VaultColor, VaultManager
 import com.clarkson.sot.dungeon.DoorManager;
 import com.clarkson.sot.events.FloorItemManager; // Import FloorItemManager
+import com.clarkson.sot.events.HungerListener;
 import com.clarkson.sot.player.SoTPlayerManager;
 import com.clarkson.sot.scoring.BankingManager;
 import com.clarkson.sot.scoring.ScoreManager;
@@ -362,6 +363,9 @@ public class GameManager {
                 Component.empty(),
                 Title.Times.times(Duration.ZERO, Duration.ofMillis(800), Duration.ofMillis(200)));
         for (Player p : getParticipatingPlayers()) {
+            // Everyone starts the clock on a full hunger bar: HungerListener only stops the bar
+            // going down, so a player who arrived hungry would otherwise stay hungry all round.
+            HungerListener.fillHunger(p);
             p.showTitle(go);
             p.playSound(p.getLocation(), Sound.ENTITY_ENDER_DRAGON_GROWL, 0.6f, 1.2f);
         }
