@@ -1,6 +1,8 @@
 package com.clarkson.sot.utils;
 
 import com.clarkson.sot.dungeon.DeathCage;
+import com.clarkson.sot.dungeon.DoorManager;
+import com.clarkson.sot.dungeon.GateSacrificePoint;
 import com.clarkson.sot.events.BlockProtectionListener;
 import com.clarkson.sot.main.GameManager;
 import com.clarkson.sot.main.GameState;
@@ -65,6 +67,7 @@ class SandManagerTest {
     private SandManager sandManager;
     private SacrificeIndicatorManager indicators;
     private ScoreManager scoreManager;
+    private DoorManager doorManager;
     private final UUID teamId = UUID.randomUUID();
 
     @BeforeEach
@@ -86,6 +89,8 @@ class SandManagerTest {
         when(gameManager.getSacrificeIndicatorManager()).thenReturn(indicators);
         scoreManager = mock(ScoreManager.class);
         when(gameManager.getScoreManager()).thenReturn(scoreManager);
+        doorManager = mock(DoorManager.class);
+        when(gameManager.getDoorManager()).thenReturn(doorManager);
         when(team.getTeamName()).thenReturn("Red Rabbits");
         when(team.getRemainingSeconds()).thenReturn(60);
 
@@ -642,21 +647,25 @@ class SandManagerTest {
         assertTrue(offHand.isCancelled(), "the off-hand pass must still not open the chest");
     }
 
-    // --- sand trade: buying coins with sand out in the branches ---
+    // --- gate sacrifice: paying sand to open the gates in front of the money ---
 
     /**
-     * Registers {@code cell} as this team's only sand trade chest, sitting at {@code depth}, and
-     * builds the block.
+     * Registers a gate sacrifice chest at {@code cell} costing {@code cost} sand as this team's only
+     * one, builds the block, and returns the point so a test can inspect its payment state.
      */
-    private Block tradeChest(Location cell, int depth) {
+    private GateSacrificePoint gateChest(Location cell, int cost) {
         Block block = world.getBlockAt(cell);
         block.setType(Material.CHEST);
-        when(gameManager.isAnySandTradePointAt(any(Location.class))).thenAnswer(invocation ->
+        GateSacrificePoint point = new GateSacrificePoint(cell, cost, List.of(), null, "gated_room");
+        when(gameManager.isAnyGateSacrificePointAt(any(Location.class))).thenAnswer(invocation ->
                 sameBlock(invocation.getArgument(0), cell));
-        when(gameManager.isTeamSandTradePointAt(eq(teamId), any(Location.class))).thenAnswer(invocation ->
-                sameBlock(invocation.getArgument(1), cell));
-        when(gameManager.getTeamDepthAt(eq(teamId), any(Location.class))).thenReturn(depth);
-        return block;
+        when(gameManager.getGateSacrificePointAt(eq(teamId), any(Location.class))).thenAnswer(invocation ->
+                sameBlock(invocation.getArgument(1), cell) ? point : null);
+        return point;
+    }
+
+    private Block blockOf(GateSacrificePoint point) {
+        return world.getBlockAt(point.getLocation());
     }
 
     private static boolean sameBlock(Location queried, Location cell) {
@@ -667,127 +676,166 @@ class SandManagerTest {
     }
 
     @Test
-    void rightClickingATradeChestSpendsOneSandForDepthScaledCoins() {
-        Block chest = tradeChest(new Location(world, 60, 65, 60), 8);
+    void payingTheFullPriceOpensTheGates() {
+        GateSacrificePoint point = gateChest(new Location(world, 60, 65, 60), 1);
         player.getInventory().addItem(new ItemStack(Material.SAND, 3));
 
-        PlayerInteractEvent event = rightClick(player, chest);
+        PlayerInteractEvent event = rightClick(player, blockOf(point));
 
-        assertTrue(event.isCancelled(), "the vanilla chest UI must never open on a trade point");
+        assertTrue(event.isCancelled(), "the vanilla chest UI must never open on a sacrifice point");
         assertEquals(2, sandCount(player), "exactly one sand is spent");
-        verify(scoreManager).awardDepthScaledCoins(player, SandManager.TRADE_COINS_PER_SAND, 8);
+        verify(doorManager).openGatesForSacrifice(teamId, point, player);
+        verify(indicators).update(point);
     }
 
     @Test
-    void aTradeAtTheHubPaysTheUnscaledRate() {
-        Block chest = tradeChest(new Location(world, 60, 65, 60), 0);
+    void partPaymentTakesOneSandAndLeavesTheGatesClosed() {
+        GateSacrificePoint point = gateChest(new Location(world, 60, 65, 60), 3);
+        player.getInventory().addItem(new ItemStack(Material.SAND, 3));
+
+        rightClick(player, blockOf(point));
+
+        assertEquals(2, sandCount(player), "one click, one sand");
+        assertEquals(2, point.getRemainingSand());
+        assertFalse(point.isOpen());
+        verify(doorManager, never()).openGatesForSacrifice(any(), any(), any());
+        verify(indicators).update(point);
+    }
+
+    @Test
+    void teammatesCanChipInAndTheCompletingClickOpensTheGates() {
+        GateSacrificePoint point = gateChest(new Location(world, 60, 65, 60), 2);
+        PlayerMock teammate = server.addPlayer();
+        when(gameManager.getTeamManager().getPlayerTeamId(teammate)).thenReturn(teamId);
+        when(stateManager.getStatus(teammate)).thenReturn(PlayerStatus.ALIVE_IN_DUNGEON);
         player.getInventory().addItem(new ItemStack(Material.SAND, 1));
+        teammate.getInventory().addItem(new ItemStack(Material.SAND, 1));
 
-        rightClick(player, chest);
+        rightClick(player, blockOf(point));
+        verify(doorManager, never()).openGatesForSacrifice(any(), any(), any());
+        rightClick(teammate, blockOf(point));
 
-        verify(scoreManager).awardDepthScaledCoins(player, SandManager.TRADE_COINS_PER_SAND, 0);
+        assertEquals(0, sandCount(player));
+        assertEquals(0, sandCount(teammate));
+        verify(doorManager).openGatesForSacrifice(teamId, point, teammate);
     }
 
     @Test
-    void aTraderWithNoSandPaysNothingAndEarnsNothing() {
-        Block chest = tradeChest(new Location(world, 60, 65, 60), 4);
+    void aPayerWithNoSandPaysNothing() {
+        GateSacrificePoint point = gateChest(new Location(world, 60, 65, 60), 2);
 
-        PlayerInteractEvent event = rightClick(player, chest);
+        PlayerInteractEvent event = rightClick(player, blockOf(point));
 
         assertTrue(event.isCancelled(), "the chest still must not open");
-        assertEquals(0, sandCount(player));
-        verify(scoreManager, never()).awardDepthScaledCoins(any(), anyInt(), anyInt());
+        assertEquals(2, point.getRemainingSand());
+        verify(doorManager, never()).openGatesForSacrifice(any(), any(), any());
     }
 
     @Test
-    void theOffHandPassDoesNotChargeASecondSandAtATradeChest() {
-        // Same trap as the sacrifice chest: PlayerInteractEvent fires once per hand, and cancelling
-        // the main-hand pass does not stop the off-hand one.
-        Block chest = tradeChest(new Location(world, 60, 65, 60), 2);
+    void aChestWhoseGatesAreAlreadyOpenTakesNoSand() {
+        // The segment's lever got there first (or the price was already paid); the chest has nothing
+        // left to sell and must not swallow sand for it.
+        GateSacrificePoint point = gateChest(new Location(world, 60, 65, 60), 2);
+        point.markOpened();
+        player.getInventory().addItem(new ItemStack(Material.SAND, 2));
+
+        PlayerInteractEvent event = rightClick(player, blockOf(point));
+
+        assertTrue(event.isCancelled());
+        assertEquals(2, sandCount(player));
+        verify(doorManager, never()).openGatesForSacrifice(any(), any(), any());
+    }
+
+    @Test
+    void theOffHandPassDoesNotChargeASecondSandAtAGateChest() {
+        // Same trap as the cage chest: PlayerInteractEvent fires once per hand, and cancelling the
+        // main-hand pass does not stop the off-hand one.
+        GateSacrificePoint point = gateChest(new Location(world, 60, 65, 60), 3);
         player.getInventory().addItem(new ItemStack(Material.SAND, 5));
 
-        rightClick(player, chest);
+        rightClick(player, blockOf(point));
         PlayerInteractEvent offHand = new PlayerInteractEvent(
                 player, Action.RIGHT_CLICK_BLOCK, player.getInventory().getItemInOffHand(),
-                chest, BlockFace.UP, EquipmentSlot.OFF_HAND);
+                blockOf(point), BlockFace.UP, EquipmentSlot.OFF_HAND);
         server.getPluginManager().callEvent(offHand);
 
         assertEquals(4, sandCount(player), "one right-click, one sand");
-        verify(scoreManager, times(1)).awardDepthScaledCoins(any(), anyInt(), anyInt());
+        assertEquals(2, point.getRemainingSand());
         assertTrue(offHand.isCancelled(), "the off-hand pass must still not open the chest");
     }
 
     @Test
-    void someoneWithNoTeamCannotOpenATradeChest() {
-        Block chest = tradeChest(new Location(world, 60, 65, 60), 3);
+    void someoneWithNoTeamCannotOpenAGateChest() {
+        GateSacrificePoint point = gateChest(new Location(world, 60, 65, 60), 1);
         PlayerMock outsider = server.addPlayer();
         when(gameManager.getTeamManager().getPlayerTeamId(outsider)).thenReturn(null);
         outsider.getInventory().addItem(new ItemStack(Material.SAND, 2));
 
-        PlayerInteractEvent event = rightClick(outsider, chest);
+        PlayerInteractEvent event = rightClick(outsider, blockOf(point));
 
         assertTrue(event.isCancelled(), "cancelled before the team check, so the chest stays shut");
         assertEquals(2, sandCount(outsider), "and they pay nothing");
-        verify(scoreManager, never()).awardDepthScaledCoins(any(), anyInt(), anyInt());
+        verify(doorManager, never()).openGatesForSacrifice(any(), any(), any());
     }
 
     @Test
-    void anotherTeamsTradeChestTakesNoSand() {
-        // Cancelled for everyone (so it never opens), but only the owning team can actually trade.
-        Block chest = tradeChest(new Location(world, 60, 65, 60), 3);
-        when(gameManager.isTeamSandTradePointAt(eq(teamId), any(Location.class))).thenReturn(false);
+    void anotherTeamsGateChestTakesNoSand() {
+        // Cancelled for everyone (so it never opens), but only the owning team can pay at it.
+        GateSacrificePoint point = gateChest(new Location(world, 60, 65, 60), 1);
+        when(gameManager.getGateSacrificePointAt(eq(teamId), any(Location.class))).thenReturn(null);
         player.getInventory().addItem(new ItemStack(Material.SAND, 2));
 
-        PlayerInteractEvent event = rightClick(player, chest);
+        PlayerInteractEvent event = rightClick(player, blockOf(point));
 
         assertTrue(event.isCancelled());
         assertEquals(2, sandCount(player));
-        verify(scoreManager, never()).awardDepthScaledCoins(any(), anyInt(), anyInt());
+        verify(doorManager, never()).openGatesForSacrifice(any(), any(), any());
     }
 
     @Test
-    void anEscapedPlayerCannotTrade() {
-        Block chest = tradeChest(new Location(world, 60, 65, 60), 3);
+    void anEscapedPlayerCannotPayAtAGateChest() {
+        GateSacrificePoint point = gateChest(new Location(world, 60, 65, 60), 1);
         when(stateManager.getStatus(player)).thenReturn(PlayerStatus.ESCAPED_SAFE);
         player.getInventory().addItem(new ItemStack(Material.SAND, 2));
 
-        rightClick(player, chest);
+        rightClick(player, blockOf(point));
 
         assertEquals(2, sandCount(player), "the round is over for them");
-        verify(scoreManager, never()).awardDepthScaledCoins(any(), anyInt(), anyInt());
+        verify(doorManager, never()).openGatesForSacrifice(any(), any(), any());
     }
 
     @Test
-    void tradeChestsAreInertOutsideARunningGame() {
-        Block chest = tradeChest(new Location(world, 60, 65, 60), 3);
+    void gateChestsAreInertOutsideARunningGame() {
+        GateSacrificePoint point = gateChest(new Location(world, 60, 65, 60), 1);
         when(gameManager.getCurrentState()).thenReturn(GameState.ENDED);
         player.getInventory().addItem(new ItemStack(Material.SAND, 2));
 
-        PlayerInteractEvent event = rightClick(player, chest);
+        PlayerInteractEvent event = rightClick(player, blockOf(point));
 
         assertFalse(event.isCancelled());
         assertEquals(2, sandCount(player));
     }
 
     @Test
-    void aChestThatIsBothWouldBeTreatedAsASacrificePoint() {
-        // The two kinds are the same block, so the handler has to pick one meaning. Reviving a caged
-        // teammate is the one that must win: it is the only one with a deadline.
+    void aChestThatIsBothIsTreatedAsACagePoint() {
+        // The two kinds are the same block and the same marker, so the handler has to pick one
+        // meaning. Reviving a caged teammate is the one that must win: it is the only one with a
+        // deadline.
         PlayerMock caged = server.addPlayer();
         DeathCage cage = cagedTeammate(caged, 1);
         Block chest = sacrificeChest(cage);
-        tradeChest(cage.getSacrificePointLocation(), 5);
+        gateChest(cage.getSacrificePointLocation(), 1);
         player.getInventory().addItem(new ItemStack(Material.SAND, 2));
 
         rightClick(player, chest);
 
         verify(stateManager).updateStatus(caged, PlayerStatus.ALIVE_IN_DUNGEON);
-        verify(scoreManager, never()).awardDepthScaledCoins(any(), anyInt(), anyInt());
+        verify(doorManager, never()).openGatesForSacrifice(any(), any(), any());
     }
 
     @Test
-    void anOrdinaryChestIsStillLeftAloneWhenTradePointsExist() {
-        tradeChest(new Location(world, 60, 65, 60), 3);
+    void anOrdinaryChestIsStillLeftAloneWhenGateChestsExist() {
+        gateChest(new Location(world, 60, 65, 60), 1);
         Block plainChest = world.getBlockAt(new Location(world, 40, 65, 40));
         plainChest.setType(Material.CHEST);
         player.getInventory().addItem(new ItemStack(Material.SAND, 2));

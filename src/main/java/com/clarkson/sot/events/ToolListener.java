@@ -71,6 +71,7 @@ public class ToolListener implements Listener {
     private final NamespacedKey DIRECTION_KEY;
     private final NamespacedKey VAULT_COLOR_KEY;
     private final NamespacedKey COIN_VALUE_KEY;
+    private final NamespacedKey SACRIFICE_COST_KEY;
     private final NamespacedKey BOUND_GROUP_KEY;
     private final NamespacedKey BOUND_MIN_KEY;
     private final NamespacedKey BOUND_MAX_KEY;
@@ -88,7 +89,6 @@ public class ToolListener implements Listener {
     private static final String MT_LEVER            = "LEVER";
     private static final String MT_SAND_SPAWN       = "SAND_SPAWN";
     private static final String MT_SAND_SACRIFICE   = "SAND_SACRIFICE";
-    private static final String MT_SAND_TRADE       = "SAND_TRADE";
     private static final String MT_SAFE_EXIT        = "SAFE_EXIT";
     private static final String MT_COIN_SPAWN       = "COIN_SPAWN";
     private static final String MT_ITEM_SPAWN       = "ITEM_SPAWN";
@@ -139,10 +139,6 @@ public class ToolListener implements Listener {
     private static final double KEY_MARKER_HEIGHT   = 0.5;
     // Sand sacrifice uses soul sand (was gold — gold now reads as coins).
     private static final Material SACRIFICE_MATERIAL = Material.SOUL_SAND;
-    // Sand trade points render as a chest in game, exactly like a sacrifice point. In *build* mode
-    // they must be told apart at a glance, so the marker is gold — what the point pays out — over a
-    // sand icon, what it costs.
-    private static final Material TRADE_MATERIAL = Material.GOLD_BLOCK;
     // Coin custom-model-data thresholds, mirroring CoinStack so the marker matches the real coin.
     private static final int COIN_MODEL_SMALL = 1001, COIN_MODEL_MEDIUM = 1002, COIN_MODEL_LARGE = 1003;
 
@@ -155,6 +151,7 @@ public class ToolListener implements Listener {
         DIRECTION_KEY   = new NamespacedKey(plugin, SegmentBuilderKeys.DIRECTION);
         VAULT_COLOR_KEY = new NamespacedKey(plugin, SegmentBuilderKeys.VAULT_COLOR);
         COIN_VALUE_KEY  = new NamespacedKey(plugin, SegmentBuilderKeys.COIN_VALUE);
+        SACRIFICE_COST_KEY = new NamespacedKey(plugin, SegmentBuilderKeys.SACRIFICE_COST);
         BOUND_GROUP_KEY = new NamespacedKey(plugin, SegmentBuilderKeys.BOUND_GROUP);
         BOUND_MIN_KEY   = new NamespacedKey(plugin, SegmentBuilderKeys.BOUND_MIN);
         BOUND_MAX_KEY   = new NamespacedKey(plugin, SegmentBuilderKeys.BOUND_MAX);
@@ -239,14 +236,18 @@ public class ToolListener implements Listener {
                 placeBlockMarker(event, player, MT_SAND_SPAWN, Material.SAND, 0.5f, null, -1,
                         null, Component.text("Sand", NamedTextColor.YELLOW));
                 break;
-            case SAND_SACRIFICE:
-                placeBlockMarker(event, player, MT_SAND_SACRIFICE, SACRIFICE_MATERIAL, 0.5f, null, -1,
-                        null, Component.text("Sacrifice", NamedTextColor.GOLD));
+            case SAND_SACRIFICE: {
+                // The price only matters for a gate sacrifice (any non-HUB segment); a HUB chest is
+                // priced by the caged player's death count. It is stamped on every marker regardless,
+                // and SaveSegmentCommand warns when a HUB marker carries a non-default one.
+                int cost = session.getSacrificeCost();
+                BlockDisplay anchor = placeBlockMarker(event, player, MT_SAND_SACRIFICE, SACRIFICE_MATERIAL, 0.5f, null, -1,
+                        new ItemStack(Material.SAND), Component.text("Sacrifice (" + cost + " sand)", NamedTextColor.GOLD));
+                if (anchor != null) {
+                    anchor.getPersistentDataContainer().set(SACRIFICE_COST_KEY, PersistentDataType.INTEGER, cost);
+                }
                 break;
-            case SAND_TRADE:
-                placeBlockMarker(event, player, MT_SAND_TRADE, TRADE_MATERIAL, 0.5f, null, -1,
-                        new ItemStack(Material.SAND), Component.text("Sand Trade", NamedTextColor.GOLD));
-                break;
+            }
             case COIN_SPAWN: {
                 int val = session.getCoinValue();
                 placeItemMarker(event, player, MT_COIN_SPAWN, buildCoinItem(val),
@@ -770,13 +771,16 @@ public class ToolListener implements Listener {
      * @param coinValue  Coin value to store (-1 to skip).
      * @param icon       Optional floating icon ItemStack above the marker (null = none).
      * @param label      Floating text label above the marker.
+     * @return the anchor entity that was spawned (so a caller can stamp extra PDC data on it), or
+     *         null when nothing was placed.
      */
-    private void placeBlockMarker(PlayerInteractEvent event, Player player,
-                                  String markerType, Material material, float scale,
-                                  @Nullable VaultColor color, int coinValue,
-                                  @Nullable ItemStack icon, Component label) {
+    @Nullable
+    private BlockDisplay placeBlockMarker(PlayerInteractEvent event, Player player,
+                                          String markerType, Material material, float scale,
+                                          @Nullable VaultColor color, int coinValue,
+                                          @Nullable ItemStack icon, Component label) {
         Location cell = validatedAirCell(event, player);
-        if (cell == null) return;
+        if (cell == null) return null;
 
         World world = player.getWorld();
         double cx = cell.getBlockX() + 0.5, cz = cell.getBlockZ() + 0.5;
@@ -789,7 +793,7 @@ public class ToolListener implements Listener {
         final String groupId = UUID.randomUUID().toString();
 
         try {
-            world.spawn(spawnLoc, BlockDisplay.class, display -> {
+            BlockDisplay anchor = world.spawn(spawnLoc, BlockDisplay.class, display -> {
                 display.setBlock(blockData);
                 display.setGravity(false);
                 display.setInvulnerable(true);
@@ -818,10 +822,12 @@ public class ToolListener implements Listener {
             spawnLabel(world, cx, baseY + MARKER_LABEL_HEIGHT, cz, groupId, label);
             sessionManager.getSession(player).pushUndo(groupId);
             player.sendActionBar(Component.text("Placed ", NamedTextColor.GREEN).append(label));
+            return anchor;
 
         } catch (Exception e) {
             plugin.getLogger().log(Level.SEVERE, "Failed to spawn point marker: " + markerType, e);
             player.sendMessage(Component.text("Error placing marker entity.", NamedTextColor.RED));
+            return null;
         }
     }
 

@@ -19,6 +19,11 @@ import java.util.Objects;
  */
 public class Segment {
 
+    /** Price of a gate sacrifice chest whose template does not say otherwise. */
+    public static final int DEFAULT_SACRIFICE_COST = 1;
+    /** Upper bound on a gate sacrifice price; the builder command and the loader both clamp to it. */
+    public static final int MAX_SACRIFICE_COST = 10;
+
     // --- Core Identification & Structure ---
     private final String name;
     private final SegmentType type;
@@ -30,13 +35,20 @@ public class Segment {
     private final List<BlockVector3> sandSpawnLocations;
     private final List<BlockVector3> itemSpawnLocations;
     private final List<BlockVector3> coinSpawnLocations;
+    /**
+     * Sand sacrifice chests. What one <em>means</em> depends on the segment type: on a HUB it is paired
+     * positionally with a {@link #deathCageOffsets death cage} and frees the caged player for their
+     * death count in sand; on any other segment it is a <em>gate sacrifice</em> that opens this
+     * segment's {@link #gates} once {@link #sandSacrificeCosts its price} has been paid.
+     */
     private final List<BlockVector3> sandSacrificeLocations;
     /**
-     * Sand trade points: chests out in the dungeon that buy depth-scaled coins for sand. Unlike
-     * {@link #sandSacrificeLocations} these are gathered from <em>every</em> segment rather than the
-     * HUB winning outright — being out in the branches is the whole point of them.
+     * Price in sand of each sacrifice chest, index-aligned with {@link #sandSacrificeLocations} and
+     * always the same length (the constructor pads with {@link #DEFAULT_SACRIFICE_COST}, truncates
+     * and clamps to {@code [1, }{@link #MAX_SACRIFICE_COST}{@code ]}). Only read for gate sacrifices —
+     * a HUB chest is priced by the caged player's death count and ignores this.
      */
-    private final List<BlockVector3> sandTradeLocations;
+    private final List<Integer> sandSacrificeCosts;
     private final List<BlockVector3> mobSpawnerLocations;
 
     // --- Vault / Key Metadata ---
@@ -51,7 +63,11 @@ public class Segment {
     @Nullable private final SegmentBound vaultDoorBound;
     /** All gate openings in this segment (may be empty). */
     private final List<SegmentBound> gates;
-    /** Lever position; must be present when {@code gates} is non-empty. */
+    /**
+     * Lever position; null when this segment has no lever. A segment with {@code gates} needs a lever
+     * or (outside the HUB) at least one {@link #sandSacrificeLocations sacrifice chest}, else its gates
+     * are left open at runtime.
+     */
     @Nullable private final BlockVector3 leverOffset;
 
     // --- Safe Exit ---
@@ -117,7 +133,7 @@ public class Segment {
             @Nullable BlockVector3 timerOffset,
             @NotNull  List<BlockVector3> playerSpawnOffsets,
             @NotNull  List<BlockVector3> branchSignifierOffsets,
-            @NotNull  List<BlockVector3> sandTradeLocations
+            @NotNull  List<Integer> sandSacrificeCosts
     ) {
         Objects.requireNonNull(name, "name");
         Objects.requireNonNull(schematicFileName, "schematicFileName");
@@ -151,7 +167,27 @@ public class Segment {
         this.timerOffset            = timerOffset;
         this.playerSpawnOffsets     = new ArrayList<>(playerSpawnOffsets);
         this.branchSignifierOffsets = new ArrayList<>(branchSignifierOffsets);
-        this.sandTradeLocations     = new ArrayList<>(sandTradeLocations);
+        this.sandSacrificeCosts     = normaliseSacrificeCosts(sandSacrificeCosts, sandSacrificeLocations.size());
+    }
+
+    /**
+     * Pads, truncates and clamps a cost list so it is exactly index-aligned with the sacrifice markers.
+     * A missing or null entry is {@link #DEFAULT_SACRIFICE_COST}; an out-of-range one is clamped.
+     */
+    @NotNull
+    static List<Integer> normaliseSacrificeCosts(@NotNull List<Integer> costs, int markerCount) {
+        List<Integer> out = new ArrayList<>(markerCount);
+        for (int i = 0; i < markerCount; i++) {
+            Integer raw = i < costs.size() ? costs.get(i) : null;
+            out.add(clampSacrificeCost(raw));
+        }
+        return out;
+    }
+
+    /** {@link #DEFAULT_SACRIFICE_COST} for null, otherwise the value clamped to {@code [1, MAX_SACRIFICE_COST]}. */
+    public static int clampSacrificeCost(@Nullable Integer cost) {
+        if (cost == null) return DEFAULT_SACRIFICE_COST;
+        return Math.max(1, Math.min(MAX_SACRIFICE_COST, cost));
     }
 
     // --- Core getters ---
@@ -168,7 +204,12 @@ public class Segment {
     @NotNull public List<BlockVector3> getItemSpawnLocations()     { return Collections.unmodifiableList(itemSpawnLocations); }
     @NotNull public List<BlockVector3> getCoinSpawnLocations()     { return Collections.unmodifiableList(coinSpawnLocations); }
     @NotNull public List<BlockVector3> getSandSacrificeLocations() { return Collections.unmodifiableList(sandSacrificeLocations); }
-    @NotNull public List<BlockVector3> getSandTradeLocations()     { return Collections.unmodifiableList(sandTradeLocations); }
+    /** Sand price of each sacrifice chest, index-aligned with {@link #getSandSacrificeLocations()}. */
+    @NotNull public List<Integer> getSandSacrificeCosts()          { return Collections.unmodifiableList(sandSacrificeCosts); }
+    /** Sand price of the sacrifice chest at {@code index}; {@link #DEFAULT_SACRIFICE_COST} when out of range. */
+    public int getSandSacrificeCost(int index) {
+        return (index >= 0 && index < sandSacrificeCosts.size()) ? sandSacrificeCosts.get(index) : DEFAULT_SACRIFICE_COST;
+    }
     @NotNull public List<BlockVector3> getMobSpawnerLocations()    { return Collections.unmodifiableList(mobSpawnerLocations); }
 
     // --- Vault / key getters ---

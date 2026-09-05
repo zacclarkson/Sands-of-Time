@@ -1043,35 +1043,23 @@ public class GameManager {
     }
 
     /**
-     * True if the location is a sand trade chest belonging to <em>any</em> team's dungeon.
+     * True if the location is a gate sacrifice chest belonging to <em>any</em> team's dungeon.
      *
-     * <p>The counterpart of {@link #isAnySacrificePointAt}, and there for the same reason: a trade
-     * point is a real chest, so the vanilla chest UI has to be suppressed on every one of them —
-     * including for a player who is on another team, or on no team, and so cannot trade at it.
+     * <p>The counterpart of {@link #isAnySacrificePointAt}, and there for the same reason: a gate
+     * sacrifice point is a real chest, so the vanilla chest UI has to be suppressed on every one of
+     * them — including for a player who is on another team, or on no team, and so cannot pay at it.
+     * Gate sacrifice points live in {@link DoorManager}, beside the gates they open.
      */
-    public boolean isAnySandTradePointAt(Location location) {
-        if (location == null) return false;
-        for (DungeonManager teamDungeonManager : teamDungeonManagers.values()) {
-            if (teamDungeonManager == null || teamDungeonManager.getDungeonData() == null) continue;
-            if (teamDungeonManager.getDungeonData().isSandTradePointAt(location)) return true;
-        }
-        return false;
+    public boolean isAnyGateSacrificePointAt(Location location) {
+        if (location == null || doorManager == null) return false;
+        return doorManager.isAnyGateSacrificeAt(location);
     }
 
-    /** True if the given block location is one of a team's own sand trade chests. */
-    public boolean isTeamSandTradePointAt(UUID teamId, Location location) {
-        DungeonManager teamDungeonManager = teamDungeonManagers.get(teamId);
-        if (teamDungeonManager == null || teamDungeonManager.getDungeonData() == null) return false;
-        return teamDungeonManager.getDungeonData().isSandTradePointAt(location);
-    }
-
-    /**
-     * The dungeon depth of a location inside a team's instance, or 0 when the team has no dungeon or
-     * the location falls outside it. Used to scale what a sand trade pays out.
-     */
-    public int getTeamDepthAt(UUID teamId, Location location) {
-        DungeonManager teamDungeonManager = teamDungeonManagers.get(teamId);
-        return (teamDungeonManager != null) ? teamDungeonManager.getDepthAt(location) : 0;
+    /** A team's own gate sacrifice chest at the given block, or null when the team has none there. */
+    @Nullable
+    public GateSacrificePoint getGateSacrificePointAt(UUID teamId, Location location) {
+        if (teamId == null || location == null || doorManager == null) return null;
+        return doorManager.getGateSacrificeAt(teamId, location);
     }
 
     /**

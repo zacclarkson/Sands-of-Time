@@ -1,6 +1,7 @@
 package com.clarkson.sot.utils;
 
 import com.clarkson.sot.dungeon.DeathCage;
+import com.clarkson.sot.dungeon.GateSacrificePoint;
 import com.clarkson.sot.main.GameManager;
 import com.clarkson.sot.main.GameState;
 import com.clarkson.sot.timer.TeamTimer;
@@ -46,10 +47,11 @@ import java.util.*;
  * right-clicking their sacrifice chest, one sand per click, until their death count (capped at
  * {@link DeathCage#MAX_REVIVE_COST}) has been paid.
  *
- * <p>Sand also buys coins: a {@code SAND_TRADE} chest out in a branch converts one sand into
- * {@link #TRADE_COINS_PER_SAND} coins scaled by that branch's depth. It is the same chest block as a
- * sacrifice point and is handled by the same interact listener — see
- * {@link #attemptSandTrade(Player, Location)}.
+ * <p>Sand is also how gated coins are bought: a sacrifice chest out in a branch stands in front of a
+ * gate, and paying its price (set by the builder, one sand per click) opens the gate onto whatever the
+ * segment put behind it. It is the same chest block as a cage sacrifice point and is handled by the
+ * same interact listener — see {@link #attemptGateSacrifice(Player, GateSacrificePoint)}. A
+ * sacrifice point never hands out coins itself.
  *
  * <p>Dying drops undeposited sand on the floor where you fell, like any other item, so the corpse run
  * can win it back — see {@link #dropCarriedSandOnDeath(PlayerDeathEvent)}.
@@ -60,16 +62,6 @@ public class SandManager implements Listener {
     private final Plugin plugin;
 
     public static final int SECONDS_PER_SAND = 10;
-
-    /**
-     * Coins a single sand buys at a trade point at depth 0, before the depth multiplier.
-     *
-     * <p>Five ordinary coin stacks' worth ({@code DungeonManager.coinBaseValueForDepth} pays 5 at the
-     * hub), so trading is a real alternative to the {@link #SECONDS_PER_SAND} seconds the same sand
-     * would buy on the timer rather than an obvious trap or an obvious win. Purely a tuning number:
-     * raise it if teams never trade, lower it if they stop feeding the clock.
-     */
-    public static final int TRADE_COINS_PER_SAND = 25;
 
     public SandManager(GameManager gameManager, Plugin plugin) {
         this.gameManager = Objects.requireNonNull(gameManager);
@@ -176,45 +168,56 @@ public class SandManager implements Listener {
     }
 
     /**
-     * Buys depth-scaled coins with one carried sand at a trade point.
+     * Puts one sand toward opening the gates a sacrifice chest fronts, and opens them once the full
+     * price is paid.
      *
-     * <p>The other half of what a sacrifice chest does, and visually identical to one: a trade point
-     * is the same chest block, but out in a branch rather than in front of a cage, and it pays
-     * {@link #TRADE_COINS_PER_SAND} coins scaled by the depth of the segment it stands in — the same
-     * 100%-120% multiplier that makes a deep coin stack worth more than a shallow one. Trading deep
-     * is therefore worth more than trading at the hub, which is the point of putting these in
-     * branches.
+     * <p>This is the sand-for-money trade: the chest hands out nothing itself, the reward is whatever
+     * the segment put behind the gate. The price is per chest, set by the builder, and paid a sand at
+     * a time so any number of teammates can chip in; each accepted click consumes exactly one sand
+     * and the gates open on the click that completes the total. Sand paid into a chest whose gates
+     * then open by lever is spent, not refunded. A chest whose gates are already open refuses without
+     * taking anything.
      *
-     * <p>The coins land <em>unbanked</em>, so they are lost on death and on a timer-out like any
-     * others: a trade converts one risk (a slow clock) into another (coins that still have to be
-     * walked back to the bank). There is no per-point or per-player cap — the sand a team can find is
-     * the cap, and every sand traded is {@link #SECONDS_PER_SAND} seconds not bought.
-     *
-     * @param trader The player right-clicking the trade chest.
-     * @param tradePoint The chest's block location, used to resolve the depth that scales the payout.
-     * @return the coins awarded, or 0 when the trade was refused (no team, not exploring, no sand).
+     * @param payer The player sacrificing sand at the chest.
+     * @param point The gate sacrifice point they clicked.
+     * @return true if this sacrifice completed the price and opened the gates.
      */
-    public int attemptSandTrade(Player trader, Location tradePoint) {
-        UUID teamId = gameManager.getTeamManager().getPlayerTeamId(trader);
-        if (teamId == null) return 0;
+    public boolean attemptGateSacrifice(Player payer, GateSacrificePoint point) {
+        UUID teamId = gameManager.getTeamManager().getPlayerTeamId(payer);
+        if (teamId == null) return false;
 
-        // Trading is an exploring player's move: escaped, trapped and caged players have no business
-        // converting sand, and an escaped player's inventory has already been wiped anyway.
-        if (gameManager.getPlayerStateManager().getStatus(trader) != PlayerStatus.ALIVE_IN_DUNGEON) return 0;
+        // Opening gates is an exploring player's move: escaped, trapped and caged players have no
+        // business spending sand, and an escaped player's inventory has already been wiped anyway.
+        if (gameManager.getPlayerStateManager().getStatus(payer) != PlayerStatus.ALIVE_IN_DUNGEON) return false;
 
-        if (getPlayerSandCount(trader) < 1) {
-            trader.sendMessage(Component.text("You need sand to trade here!", NamedTextColor.RED));
-            return 0;
+        if (point.isOpen()) {
+            payer.sendMessage(Component.text("These gates are already open.", NamedTextColor.YELLOW));
+            return false;
         }
 
-        removeSand(trader, 1);
-        int depth = gameManager.getTeamDepthAt(teamId, tradePoint);
-        int coins = gameManager.getScoreManager().awardDepthScaledCoins(trader, TRADE_COINS_PER_SAND, depth);
+        if (getPlayerSandCount(payer) < 1) {
+            payer.sendMessage(Component.text("You need sand to open these gates! ("
+                    + point.getRemainingSand() + " more)", NamedTextColor.RED));
+            return false;
+        }
 
-        trader.playSound(trader.getLocation(), Sound.ENTITY_ITEM_PICKUP, SoundCategory.PLAYERS, 1.0f, 1.2f);
-        plugin.getLogger().fine(trader.getName() + " traded 1 sand for " + coins
-                + " coins at depth " + depth);
-        return coins;
+        removeSand(payer, 1);
+        boolean complete = point.depositSand();
+        gameManager.getSacrificeIndicatorManager().update(point);
+
+        if (!complete) {
+            payer.sendActionBar(Component.text("Sacrificed 1 sand — " + point.getRemainingSand()
+                    + " more to open the gates", NamedTextColor.YELLOW));
+            payer.playSound(payer.getLocation(), Sound.BLOCK_SAND_PLACE, SoundCategory.BLOCKS, 1.0f, 1.0f);
+            return false;
+        }
+
+        gameManager.getDoorManager().openGatesForSacrifice(teamId, point, payer);
+        payer.sendMessage(Component.text("The gates grind open!", NamedTextColor.GREEN));
+        payer.playSound(payer.getLocation(), Sound.BLOCK_IRON_DOOR_OPEN, SoundCategory.BLOCKS, 1.0f, 0.8f);
+        plugin.getLogger().fine(payer.getName() + " paid the last of " + point.getCost()
+                + " sand at the sacrifice chest in " + point.getSegmentName());
+        return true;
     }
 
     /**
@@ -447,12 +450,12 @@ public class SandManager implements Listener {
     }
 
     /**
-     * Handles a right-click on one of the two chests a sand can be spent at: a <em>sacrifice</em>
-     * point, which pays toward freeing the teammate caged in front of it, or a <em>sand trade</em>
-     * point out in a branch, which buys depth-scaled coins. The two are deliberately identical in
-     * world — which one a chest is comes from the marker the builder placed, not from anything a
-     * player can see — so one handler has to tell them apart and the sacrifice meaning wins where a
-     * cell somehow carries both.
+     * Handles a right-click on one of the two chests a sand can be spent at: a <em>cage</em>
+     * sacrifice point in the hub, which pays toward freeing the teammate caged in front of it, or a
+     * <em>gate</em> sacrifice point out in a branch, which pays toward opening the gates it stands in
+     * front of. The two are the same block and the same marker — which one a chest is comes from the
+     * segment it was saved on — so one handler has to tell them apart, and the cage meaning wins
+     * where a cell somehow carries both (a caged teammate is the meaning with a deadline).
      *
      * <p>The click is cancelled before anything else, because both kinds are real chests and an
      * uncancelled right-click opens the inventory. That has to happen ahead of the team lookup too:
@@ -470,15 +473,15 @@ public class SandManager implements Listener {
         Block clickedBlock = event.getClickedBlock();
         if (clickedBlock == null) return;
 
-        // Both sacrifice points and trade points are CHEST blocks
+        // Both kinds of sacrifice point are CHEST blocks
         if (clickedBlock.getType() != Material.CHEST) return;
 
         Location clicked = clickedBlock.getLocation();
         // Checked against every team's dungeon so a player with no team (or on another team) still
         // cannot open someone's chest, whichever kind it is.
-        boolean sacrificePoint = gameManager.isAnySacrificePointAt(clicked);
-        boolean tradePoint = !sacrificePoint && gameManager.isAnySandTradePointAt(clicked);
-        if (!sacrificePoint && !tradePoint) return;
+        boolean cagePoint = gameManager.isAnySacrificePointAt(clicked);
+        boolean gatePoint = !cagePoint && gameManager.isAnyGateSacrificePointAt(clicked);
+        if (!cagePoint && !gatePoint) return;
 
         event.setCancelled(true);
         // Cancelled above for both hands; only the main hand actually pays.
@@ -488,12 +491,14 @@ public class SandManager implements Listener {
         UUID teamId = gameManager.getTeamManager().getPlayerTeamId(player);
         if (teamId == null) return;
 
-        if (sacrificePoint) {
+        if (cagePoint) {
             DeathCage cage = gameManager.getDeathCageAtSacrificePoint(teamId, clicked);
             if (cage == null) return; // Someone else's team's chest
             attemptRevive(player, cage);
-        } else if (gameManager.isTeamSandTradePointAt(teamId, clicked)) {
-            attemptSandTrade(player, clicked);
+        } else {
+            GateSacrificePoint point = gameManager.getGateSacrificePointAt(teamId, clicked);
+            if (point == null) return; // Someone else's team's chest
+            attemptGateSacrifice(player, point);
         }
     }
 }

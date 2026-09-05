@@ -254,11 +254,11 @@ public class StructureLoader {
                     json.getAsJsonArray("sandSacrificeLocations"), "sandSacrificeLocations", name, sourceFileName);
             List<BlockVector3> mobSpawners = deserializeBlockVectorList(
                     json.getAsJsonArray("mobSpawnerLocations"), "mobSpawnerLocations", name, sourceFileName);
-            // Optional: every template on disk predates the SAND_TRADE marker, so a missing array
-            // just means this segment has no trade points -- not a malformed template.
-            List<BlockVector3> sandTrades = json.has("sandTradeLocations")
-                    ? deserializeBlockVectorList(json.getAsJsonArray("sandTradeLocations"),
-                            "sandTradeLocations", name, sourceFileName)
+            // Optional: templates saved before gate sacrifices had a price carry no array here, and
+            // the Segment constructor pads a short or missing list with the default cost. (A stale
+            // "sandTradeLocations" key from the removed trade chest is simply never read.)
+            List<Integer> sandSacrificeCosts = json.has("sandSacrificeCosts")
+                    ? deserializeSacrificeCosts(json.get("sandSacrificeCosts"), name, sourceFileName)
                     : new ArrayList<>();
 
             // --- Deserialize hub features ---
@@ -317,7 +317,7 @@ public class StructureLoader {
                     timerOffset,
                     playerSpawns != null ? playerSpawns : new ArrayList<>(),
                     branchSignifiers != null ? branchSignifiers : new ArrayList<>(),
-                    sandTrades   != null ? sandTrades   : new ArrayList<>()
+                    sandSacrificeCosts
             );
 
         } catch (JsonParseException | IllegalStateException | ClassCastException | NullPointerException e) {
@@ -427,6 +427,39 @@ public class StructureLoader {
             plugin.getLogger().warning("[StructureLoader] Failed to create BlockVector3 for " + context + " in template '" + segmentName + "' from " + sourceFileName + ": " + e.getMessage());
             return null;
         }
+    }
+
+    /**
+     * Deserializes the {@code sandSacrificeCosts} array. A non-numeric entry is replaced by
+     * {@link Segment#DEFAULT_SACRIFICE_COST} and an out-of-range one is clamped, each with a warning,
+     * so one bad number never costs the whole template.
+     */
+    private List<Integer> deserializeSacrificeCosts(@Nullable JsonElement arrayElement, String segmentName, String sourceFileName) {
+        List<Integer> costs = new ArrayList<>();
+        if (arrayElement == null || !arrayElement.isJsonArray()) {
+            plugin.getLogger().warning("[StructureLoader] 'sandSacrificeCosts' in " + sourceFileName
+                    + " (segment " + segmentName + ") is not an array; using the default cost for every chest.");
+            return costs;
+        }
+        JsonArray array = arrayElement.getAsJsonArray();
+        for (int i = 0; i < array.size(); i++) {
+            JsonElement element = array.get(i);
+            if (element == null || !element.isJsonPrimitive() || !element.getAsJsonPrimitive().isNumber()) {
+                plugin.getLogger().warning("[StructureLoader] sandSacrificeCosts[" + i + "] in " + sourceFileName
+                        + " (segment " + segmentName + ") is not a number; using " + Segment.DEFAULT_SACRIFICE_COST + ".");
+                costs.add(Segment.DEFAULT_SACRIFICE_COST);
+                continue;
+            }
+            int raw = element.getAsInt();
+            int clamped = Segment.clampSacrificeCost(raw);
+            if (clamped != raw) {
+                plugin.getLogger().warning("[StructureLoader] sandSacrificeCosts[" + i + "] in " + sourceFileName
+                        + " (segment " + segmentName + ") is " + raw + "; clamped to " + clamped
+                        + " (valid range 1-" + Segment.MAX_SACRIFICE_COST + ").");
+            }
+            costs.add(clamped);
+        }
+        return costs;
     }
 
     /**

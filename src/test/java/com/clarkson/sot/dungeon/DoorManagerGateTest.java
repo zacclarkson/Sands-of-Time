@@ -4,6 +4,7 @@ import com.clarkson.sot.entities.Area;
 import com.clarkson.sot.entities.Gate;
 import com.clarkson.sot.main.GameManager;
 import com.clarkson.sot.main.GameState;
+import com.clarkson.sot.ui.SacrificeIndicatorManager;
 import com.clarkson.sot.utils.TeamManager;
 
 import org.bukkit.Location;
@@ -13,6 +14,8 @@ import org.bukkit.block.Block;
 import org.bukkit.block.BlockFace;
 import org.bukkit.block.data.BlockData;
 import org.bukkit.block.data.FaceAttachable;
+import org.bukkit.block.data.Powerable;
+import org.bukkit.block.data.type.Chest;
 import org.bukkit.block.data.type.Switch;
 import org.bukkit.entity.Player;
 import org.bukkit.event.block.Action;
@@ -30,6 +33,8 @@ import java.util.UUID;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
@@ -48,6 +53,7 @@ class DoorManagerGateTest {
     private World world;
     private Plugin plugin;
     private GameManager gameManager;
+    private SacrificeIndicatorManager indicators;
     private DoorManager doorManager;
     private Player player;
     private UUID teamId;
@@ -67,6 +73,8 @@ class DoorManagerGateTest {
         gameManager = mock(GameManager.class);
         when(gameManager.getCurrentState()).thenReturn(GameState.RUNNING);
         when(gameManager.getTeamManager()).thenReturn(teamManager);
+        indicators = mock(SacrificeIndicatorManager.class);
+        when(gameManager.getSacrificeIndicatorManager()).thenReturn(indicators);
 
         doorManager = new DoorManager(plugin, gameManager);
     }
@@ -231,6 +239,165 @@ class DoorManagerGateTest {
         assertFilledWith(secondGate, DoorManager.GATE_MATERIAL);
     }
 
+    // --- sacrifice chests: paying sand to open the gates ---
+
+    private GateGroup.SacrificePlacement chest(Location cell, int cost) {
+        return new GateGroup.SacrificePlacement(cell, cost);
+    }
+
+    @Test
+    void aSacrificeChestIsWrittenAtTheMarkerCellAndPricedFromTheStart() {
+        Location chestCell = at(6, 64, 3);
+        Area gate = area(at(7, 64, 5), at(9, 67, 5));
+
+        doorManager.initializeGatesForInstance(teamId,
+                List.of(new GateGroup(null, List.of(gate), List.of(chest(chestCell, 3)), "paywall")), List.of());
+
+        // The marker cell was air; without a real block here the right-click never fires.
+        assertEquals(Material.CHEST, chestCell.getBlock().getType(), "a chest is written at the marker cell");
+        BlockData data = chestCell.getBlock().getBlockData();
+        if (data instanceof Chest chestData) {
+            assertEquals(Chest.Type.SINGLE, chestData.getType(), "never allowed to pair into a double chest");
+        }
+        assertFilledWith(gate, DoorManager.GATE_MATERIAL);
+        GateSacrificePoint point = doorManager.getGateSacrificeAt(teamId, chestCell);
+        assertNotNull(point, "the chest resolves to its point");
+        assertEquals(3, point.getCost());
+        assertEquals(3, point.getRemainingSand());
+        verify(indicators).update(point);
+        assertTrue(doorManager.isAnyGateSacrificeAt(chestCell));
+    }
+
+    @Test
+    void aSacrificeOnlyGroupWritesNoLever() {
+        Location chestCell = at(6, 64, 3);
+
+        doorManager.initializeGatesForInstance(teamId,
+                List.of(new GateGroup(null, List.of(area(at(7, 64, 5), at(9, 67, 5))),
+                        List.of(chest(chestCell, 1)), "paywall")), List.of());
+
+        assertNull(doorManager.getGateSacrificeAt(teamId, chestCell).getLeverLocation());
+        assertFalse(doorManager.pullLever(teamId, at(5, 64, 5), player), "there is no lever to pull");
+    }
+
+    @Test
+    void payingTheFullPriceOpensEveryGateInTheSegment() {
+        Location chestCell = at(6, 64, 3);
+        Area first = area(at(7, 64, 5), at(9, 67, 5));
+        Area second = area(at(7, 64, 9), at(9, 67, 9));
+
+        doorManager.initializeGatesForInstance(teamId,
+                List.of(new GateGroup(null, List.of(first, second), List.of(chest(chestCell, 1)), "paywall")),
+                List.of());
+        GateSacrificePoint point = doorManager.getGateSacrificeAt(teamId, chestCell);
+
+        assertTrue(point.depositSand(), "one sand completes a price of one");
+        int opened = doorManager.openGatesForSacrifice(teamId, point, player);
+        server.getScheduler().performTicks(18L);
+
+        assertEquals(2, opened);
+        assertFilledWith(first, Material.AIR);
+        assertFilledWith(second, Material.AIR);
+        assertTrue(point.isOpen());
+        verify(indicators).hide(point);
+    }
+
+    @Test
+    void partPaymentLeavesTheGatesClosed() {
+        Location chestCell = at(6, 64, 3);
+        Area gate = area(at(7, 64, 5), at(9, 67, 5));
+
+        doorManager.initializeGatesForInstance(teamId,
+                List.of(new GateGroup(null, List.of(gate), List.of(chest(chestCell, 2)), "paywall")), List.of());
+        GateSacrificePoint point = doorManager.getGateSacrificeAt(teamId, chestCell);
+
+        assertFalse(point.depositSand(), "one of two is not enough");
+        server.getScheduler().performTicks(18L);
+
+        assertFilledWith(gate, DoorManager.GATE_MATERIAL);
+        assertFalse(point.isOpen());
+        assertEquals(1, point.getRemainingSand());
+    }
+
+    @Test
+    void aSacrificeOpeningTheGatesFlipsTheLeverAndALaterPullIsRefused() {
+        Location leverCell = at(5, 64, 5);
+        wallNorthOf(leverCell);
+        Location chestCell = at(6, 64, 3);
+        Area gate = area(at(7, 64, 5), at(9, 67, 5));
+
+        doorManager.initializeGatesForInstance(teamId,
+                List.of(new GateGroup(leverCell, List.of(gate), List.of(chest(chestCell, 1)), "either")), List.of());
+        GateSacrificePoint point = doorManager.getGateSacrificeAt(teamId, chestCell);
+        point.depositSand();
+        doorManager.openGatesForSacrifice(teamId, point, player);
+        server.getScheduler().performTicks(18L);
+
+        BlockData data = leverCell.getBlock().getBlockData();
+        assumeTrue(data instanceof Powerable, "this server's LEVER block data is not Powerable");
+        assertTrue(((Powerable) data).isPowered(), "the world records the gates as open, as a pull would");
+
+        PlayerInteractEvent pull = rightClick(leverCell.getBlock());
+        assertTrue(pull.isCancelled(), "a lever over an open gate cannot be flipped back off");
+        assertFilledWith(gate, Material.AIR);
+    }
+
+    @Test
+    void aLeverOpeningTheGatesSpendsTheChestWithoutRefund() {
+        Location leverCell = at(5, 64, 5);
+        wallNorthOf(leverCell);
+        Location chestCell = at(6, 64, 3);
+        Area gate = area(at(7, 64, 5), at(9, 67, 5));
+
+        doorManager.initializeGatesForInstance(teamId,
+                List.of(new GateGroup(leverCell, List.of(gate), List.of(chest(chestCell, 3)), "either")), List.of());
+        GateSacrificePoint point = doorManager.getGateSacrificeAt(teamId, chestCell);
+        point.depositSand(); // one sand in, then a teammate finds the lever
+
+        rightClick(leverCell.getBlock());
+        server.getScheduler().performTicks(18L);
+
+        assertFilledWith(gate, Material.AIR);
+        assertTrue(point.isOpen(), "the chest has nothing left to sell");
+        assertEquals(0, point.getRemainingSand());
+        assertEquals(1, point.getSandDeposited(), "the sand already paid stays spent");
+        verify(indicators).hide(point);
+    }
+
+    @Test
+    void oneSegmentsChestDoesNotOpenAnothersGates() {
+        Location firstChest = at(6, 64, 3);
+        Location secondChest = at(46, 64, 43);
+        Area firstGate = area(at(7, 64, 5), at(9, 67, 5));
+        Area secondGate = area(at(47, 64, 45), at(49, 67, 45));
+
+        doorManager.initializeGatesForInstance(teamId, List.of(
+                new GateGroup(null, List.of(firstGate), List.of(chest(firstChest, 1)), "first"),
+                new GateGroup(null, List.of(secondGate), List.of(chest(secondChest, 1)), "second")), List.of());
+        GateSacrificePoint first = doorManager.getGateSacrificeAt(teamId, firstChest);
+        first.depositSand();
+        doorManager.openGatesForSacrifice(teamId, first, player);
+        server.getScheduler().performTicks(18L);
+
+        assertFilledWith(firstGate, Material.AIR);
+        assertFilledWith(secondGate, DoorManager.GATE_MATERIAL);
+        assertFalse(doorManager.getGateSacrificeAt(teamId, secondChest).isOpen());
+        verify(indicators, never()).hide(doorManager.getGateSacrificeAt(teamId, secondChest));
+    }
+
+    @Test
+    void anotherTeamsChestDoesNotResolveForThisTeam() {
+        Location chestCell = at(6, 64, 3);
+        UUID otherTeam = UUID.randomUUID();
+
+        doorManager.initializeGatesForInstance(otherTeam,
+                List.of(new GateGroup(null, List.of(area(at(7, 64, 5), at(9, 67, 5))),
+                        List.of(chest(chestCell, 1)), "paywall")), List.of());
+
+        assertNull(doorManager.getGateSacrificeAt(teamId, chestCell), "not this team's chest");
+        assertTrue(doorManager.isAnyGateSacrificeAt(chestCell), "but still a chest whose UI must stay shut");
+    }
+
     // --- ownership and teardown ---
 
     @Test
@@ -263,10 +430,23 @@ class DoorManagerGateTest {
     }
 
     @Test
+    void clearTeamStateDropsTheSacrificeChests() {
+        Location chestCell = at(6, 64, 3);
+
+        doorManager.initializeGatesForInstance(teamId,
+                List.of(new GateGroup(null, List.of(area(at(7, 64, 5), at(9, 67, 5))),
+                        List.of(chest(chestCell, 1)), "paywall")), List.of());
+        doorManager.clearTeamState(teamId);
+
+        assertNull(doorManager.getGateSacrificeAt(teamId, chestCell));
+        assertFalse(doorManager.isAnyGateSacrificeAt(chestCell));
+    }
+
+    @Test
     void aGateTakesNoKey() {
         Gate gate = new Gate(plugin, teamId, area(at(7, 64, 5), at(9, 67, 5)));
 
-        assertFalse(gate.isCorrectKey(null), "gates are opened by levers, not keys");
+        assertFalse(gate.isCorrectKey(null), "gates are opened by levers or sand, not keys");
         assertFalse(gate.close(player), "gates are one-way once opened");
     }
 }

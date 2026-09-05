@@ -39,14 +39,28 @@ class DungeonManagerSegmentFeaturesTest {
     private static Segment template(String name, List<SegmentBound> gates, BlockVector3 leverOffset,
                                     SegmentBound vaultDoorBound, VaultColor containedVault,
                                     BlockVector3 vaultOffset) {
+        return template(name, SegmentType.SMALL_ROOM, gates, leverOffset, List.of(), List.of(),
+                vaultDoorBound, containedVault, vaultOffset);
+    }
+
+    /** A template with gates and the sacrifice chests (with costs) that may open them. */
+    private static Segment gated(String name, SegmentType type, List<SegmentBound> gates,
+                                 BlockVector3 leverOffset, List<BlockVector3> sacrifices, List<Integer> costs) {
+        return template(name, type, gates, leverOffset, sacrifices, costs, null, null, null);
+    }
+
+    private static Segment template(String name, SegmentType type, List<SegmentBound> gates,
+                                    BlockVector3 leverOffset, List<BlockVector3> sacrifices,
+                                    List<Integer> costs, SegmentBound vaultDoorBound,
+                                    VaultColor containedVault, BlockVector3 vaultOffset) {
         return new Segment(
-                name, SegmentType.SMALL_ROOM, name + ".schem", SIZE,
+                name, type, name + ".schem", SIZE,
                 List.of(), List.of(), List.of(), List.of(),
                 0, containedVault, null, vaultOffset, null,
                 vaultDoorBound, gates, leverOffset,
-                List.of(), List.of(),
+                sacrifices, List.of(),
                 null,
-                null, List.of(), null, List.of(), null, List.of(), List.of(), List.of());
+                null, List.of(), null, List.of(), null, List.of(), List.of(), costs);
     }
 
     private PlacedSegment placed(Segment segment, int x, int y, int z) {
@@ -111,13 +125,117 @@ class DungeonManagerSegmentFeaturesTest {
     }
 
     @Test
-    void opensGatesWithNoLeverRatherThanSealingThem() {
+    void opensGatesWithNeitherLeverNorSacrificeChestRatherThanSealingThem() {
         // SaveSegmentCommand refuses this, but a hand-edited JSON can still carry it. A gate nothing
         // can raise would lock the loot away for the round, so the gate is simply not built.
         Segment segment = template("broken", List.of(bound(2, 0, 5, 4, 3, 5)), null, null, null, null);
 
         assertTrue(DungeonManager.resolveGateGroups(List.of(placed(segment, 0, 64, 0)), LOG).isEmpty(),
-                "gates with no lever must be left open, not built shut");
+                "gates with nothing to open them must be left open, not built shut");
+    }
+
+    // --- gate sacrifice chests ---
+
+    @Test
+    void aSacrificeChestStandsInForTheLever() {
+        // The sand-for-money trade: no lever at all, the chest in front of the gate is what opens it.
+        Segment segment = gated("paywall", SegmentType.SMALL_ROOM, List.of(bound(2, 0, 5, 4, 3, 5)),
+                null, List.of(BlockVector3.at(3, 0, 3)), List.of(3));
+
+        List<GateGroup> groups = DungeonManager.resolveGateGroups(List.of(placed(segment, 100, 64, 200)), LOG);
+
+        assertEquals(1, groups.size(), "a sacrifice-only segment is still a gate group");
+        GateGroup group = groups.get(0);
+        assertFalse(group.hasLever());
+        assertNull(group.getLeverLocation());
+        assertEquals(1, group.getSacrificePlacements().size());
+        GateGroup.SacrificePlacement chest = group.getSacrificePlacements().get(0);
+        assertEquals(103, chest.location().getBlockX(), "chest x");
+        assertEquals(64, chest.location().getBlockY(), "chest y");
+        assertEquals(203, chest.location().getBlockZ(), "chest z");
+        assertEquals(3, chest.cost(), "the builder's price rides with the marker");
+        assertAreaSpans(group.getGateBounds().get(0), 102, 64, 205, 104, 67, 205);
+    }
+
+    @Test
+    void aLeverAndASacrificeChestCoexistOnTheSameGates() {
+        Segment segment = gated("either", SegmentType.SMALL_ROOM, List.of(bound(2, 0, 5, 4, 3, 5)),
+                BlockVector3.at(1, 1, 5), List.of(BlockVector3.at(3, 0, 3)), List.of(2));
+
+        GateGroup group = DungeonManager.resolveGateGroups(List.of(placed(segment, 0, 64, 0)), LOG).get(0);
+
+        assertTrue(group.hasLever());
+        assertEquals(1, group.getSacrificePlacements().size());
+        assertEquals(2, group.getSacrificePlacements().get(0).cost());
+    }
+
+    @Test
+    void costsRideWithTheirMarkerIndex() {
+        Segment segment = gated("two_chests", SegmentType.SMALL_ROOM, List.of(bound(2, 0, 5, 4, 3, 5)),
+                null, List.of(BlockVector3.at(3, 0, 3), BlockVector3.at(6, 0, 3)), List.of(1, 5));
+
+        GateGroup group = DungeonManager.resolveGateGroups(List.of(placed(segment, 0, 64, 0)), LOG).get(0);
+
+        assertEquals(2, group.getSacrificePlacements().size());
+        assertEquals(3, group.getSacrificePlacements().get(0).location().getBlockX());
+        assertEquals(1, group.getSacrificePlacements().get(0).cost());
+        assertEquals(6, group.getSacrificePlacements().get(1).location().getBlockX());
+        assertEquals(5, group.getSacrificePlacements().get(1).cost());
+    }
+
+    @Test
+    void hubSacrificeMarkersAreNeverGateSacrifices() {
+        // A HUB's SAND_SACRIFICE markers are death-cage points (blueprint data). A hub with gates and
+        // no lever therefore has nothing that could open them, and its gates are left open.
+        Segment hub = gated("hub", SegmentType.HUB, List.of(bound(2, 0, 5, 4, 3, 5)),
+                null, List.of(BlockVector3.at(3, 0, 3)), List.of(1));
+
+        assertTrue(DungeonManager.resolveGateGroups(List.of(placed(hub, 0, 64, 0)), LOG).isEmpty(),
+                "a hub's sacrifice chests must never be registered as gate sacrifices");
+    }
+
+    @Test
+    void aHubWithGatesAndALeverCarriesNoSacrificeChests() {
+        Segment hub = gated("hub", SegmentType.HUB, List.of(bound(2, 0, 5, 4, 3, 5)),
+                BlockVector3.at(1, 1, 5), List.of(BlockVector3.at(3, 0, 3)), List.of(1));
+
+        GateGroup group = DungeonManager.resolveGateGroups(List.of(placed(hub, 0, 64, 0)), LOG).get(0);
+
+        assertTrue(group.hasLever());
+        assertTrue(group.getSacrificePlacements().isEmpty(), "the hub's chests stay cage points");
+    }
+
+    @Test
+    void aSacrificeChestOnASegmentWithNoGatesIsIgnored() {
+        Segment segment = gated("nothing_to_open", SegmentType.SMALL_ROOM, List.of(),
+                null, List.of(BlockVector3.at(3, 0, 3)), List.of(1));
+
+        assertTrue(DungeonManager.resolveGateGroups(List.of(placed(segment, 0, 64, 0)), LOG).isEmpty(),
+                "a chest with no gates to open is not a gate group");
+    }
+
+    @Test
+    void appliesSegmentRotationToSacrificeChests() {
+        // Off the diagonal, so a quarter turn moves X: (x,z) -> (z, sizeX-1-x) gives (7, 12).
+        BlockVector3 chest = BlockVector3.at(3, 0, 7);
+        Segment segment = gated("rotated", SegmentType.SMALL_ROOM, List.of(bound(2, 0, 5, 4, 3, 5)),
+                null, List.of(chest), List.of(1));
+        PlacedSegment rotated = placed(segment, 100, 64, 200, 1);
+
+        GateGroup group = DungeonManager.resolveGateGroups(List.of(rotated), LOG).get(0);
+
+        BlockVector3 expected = rotated.getRotatedOffset(chest);
+        Location actual = group.getSacrificePlacements().get(0).location();
+        assertEquals(100 + expected.x(), actual.getBlockX(), "rotated chest x");
+        assertEquals(200 + expected.z(), actual.getBlockZ(), "rotated chest z");
+        assertNotEquals(103, actual.getBlockX(), "the unrotated offset would make this assertion vacuous");
+    }
+
+    @Test
+    void aGateGroupNeedsSomethingToOpenIt() {
+        assertThrows(IllegalArgumentException.class, () -> new GateGroup(null,
+                List.of(new Area(new Location(world, 0, 0, 0), new Location(world, 1, 1, 1))),
+                List.of(), "nothing"));
     }
 
     @Test

@@ -116,6 +116,7 @@ The hub has approximately **10 exits** leading into the dungeon. These exits fal
 - Breaking sand puts a **sand item in your inventory**. It adds **no time on its own** — carrying it
   back is the whole point
 - Sand is also used to **free teammates** from the death cage (see [Death & Corpse Run](#death--corpse-run))
+  and to **open gates** onto the coins behind them (see [Sand Sacrifice](#sand-sacrifice))
 - Sand spawn locations have a **40% chance** of actually spawning sand per location
 - Finding and returning sand to the timer is essential for survival
 
@@ -135,6 +136,12 @@ The hub has approximately **10 exits** leading into the dungeon. These exits fal
 
 ### Sand Sacrifice
 
+A **sacrifice point** is a chest you feed sand into. It never hands anything out itself: what it
+buys is always something *else* — a teammate's freedom, or a gate opening onto the coins behind it.
+The same `SAND_SACRIFICE` marker means one of two things depending on where the builder put it.
+
+**Freeing a caged teammate** (sacrifice points in the hub):
+
 - Dedicated sacrifice points exist in the hub — **one per player** on the team, each a **chest**
   paired with that player's death cage
 - A teammate must sacrifice sand at these points to free a player from the death cage
@@ -146,19 +153,19 @@ The hub has approximately **10 exits** leading into the dungeon. These exits fal
 - Sand already paid toward a revive is **spent**: if the timer runs out before the price is met, it
   is not refunded
 
-### Sand Trade
+**Opening a gate** (sacrifice points anywhere else — the sand-for-money trade):
 
-- **Sand trade points** are chests out in the dungeon branches that buy coins for sand — the other
-  thing a sand can be spent on besides the timer and a revive
-- They are the **same chest block** as a sacrifice point and look identical in world. Which one a
-  chest is comes from the marker the builder placed: `SAND_SACRIFICE` in front of a cage frees a
-  teammate, `SAND_TRADE` out in a branch buys coins
-- Rate: **25 coins per sand** at the hub, scaled by the same **100%–120% depth multiplier** as coin
-  pickups — so trading deep is worth more than trading shallow, which is why these live in branches
-- Sand is spent **one at a time**, one per right-click. There is **no cap**: the sand your team can
-  find is the limit, and every sand traded is 10 seconds not bought
-- The coins land in your **unbanked** score, so they are lost on death and on a timer-out like any
-  other unbanked coins. A trade swaps one risk (a slow clock) for another (coins still to bank)
+- Out in the dungeon a sacrifice chest stands **in front of a gate**, and the money is **behind the
+  gate**. Paying the chest's price opens that segment's gates, exactly as pulling its lever would
+- The price is set by the builder **per chest** (`/sotmode SAND_SACRIFICE <cost>`, 1–10 sand,
+  default 1) and is shown from the start of the round as the same **floating sand block and count**
+  a cage chest shows, so you can weigh what you see through the bars against what it costs
+- Sand is paid **one at a time**, one per right-click, so several teammates can chip in; the gates
+  open on the click that completes the price
+- Sand already paid is **spent**: if a teammate opens the same gates with the segment's lever first,
+  the chest has nothing left to sell and what went into it is not refunded. A chest whose gates are
+  already open refuses without taking anything
+- Every sand paid here is 10 seconds not bought on the timer — which is the trade
 
 ### Block Breaking
 
@@ -168,8 +175,8 @@ The hub has approximately **10 exits** leading into the dungeon. These exits fal
 - A third kind is planned but **not implemented yet**: blocks with money inside that you break for
   the coins
 - Everything else in the dungeon is protected: walls and floors, vault marker blocks, vault and
-  segment doors, gates and their levers, death cages, and the sand sacrifice and trade points — a
-  gate you could mine through would make the lever pointless
+  segment doors, gates and their levers, death cages, and the sand sacrifice chests — a gate you
+  could mine through would make the lever and the sacrifice pointless
 - The **visual sand timer column is protected too**, even though it is made of sand — mining your
   own timer for sand is not a strategy
 - Players cannot **place** blocks during a round, with one exception: placing carried sand on a
@@ -223,13 +230,12 @@ Each segment template can contain any combination of:
 - **Sand spawns** — locations where sand items may appear
 - **Item spawns** — locations for generic loot items
 - **Mob spawners** — locations for hostile mob spawning
-- **Sand sacrifice points** — where sand can be sacrificed to free a caged teammate; rendered as a chest and paired positionally with the `DEATH_CAGE` markers
-- **Sand trade points** — where sand buys depth-scaled coins (`SAND_TRADE` markers); also rendered as a chest, deliberately indistinguishable from a sacrifice point in world. Unlike every other marker these are gathered from **every** segment rather than the HUB's winning outright, because a trade point is worth more the deeper it sits
+- **Sand sacrifice points** — `SAND_SACRIFICE` markers, rendered as a chest. On the **HUB** a chest frees a caged teammate and is paired positionally with the `DEATH_CAGE` markers; on **any other segment** it is a gate sacrifice that opens that segment's gates for a builder-set price (`/sotmode SAND_SACRIFICE <cost>`, saved per marker as `sandSacrificeCosts`). Put the coins *behind* the gate — the chest itself pays out nothing
 - **Vault markers** — activation block for a vault
 - **Key spawns** — where vault keys are placed
-- **Gates** — openings blocked until a lever is pulled
+- **Gates** — openings blocked until the segment's lever is pulled or its sacrifice chest is paid
 - **Vault doors** — openings blocked until the matching vault is opened
-- **Levers** — interact to open all gates in the segment
+- **Levers** — interact to open all gates in the segment, free of charge; optional when the segment has a sacrifice chest
 - **Branch signifiers** — `BRANCH_SIGNIFIER` markers: placeholder cells for the coloured wall markings that tell players which vault branch they are on. The template says only *where* a marking goes, never which colour: each placeholder is paired with the **nearest entry point of its own segment** — the exit it stands beside — and generation paints it with the vault colour that lies down that branch (the nearest vault, where a branch holds more than one). A placeholder beside an exit the generator attached nothing to, or beside a branch with no vault in it, is simply left unpainted, which is how the hub's ~6 non-vault exits stay unmarked. The same corridor template can therefore read red in one dungeon and gold in the next
 - **Safe exit** — a **2D area (like a door) built as a nether portal** that players walk through to escape. Placed in the builder as a two-click bound (`SAFE_EXIT`), normally in the HUB; one per dungeon, and a HUB marker takes priority over one on any other segment. Vanilla Nether travel is suppressed so the portal never teleports anyone out (`NetherPortalListener`).
 
@@ -245,7 +251,7 @@ The HUB segment additionally defines these hub-only features (placed in the buil
 - Each connected segment increments depth by 1
 - Deeper segments contain slightly more valuable coins
 - Harder vaults (Red, Gold) are placed at greater depths
-- **Depth multiplier**: coins are worth between **100%** (at the hub) and **120%** (at maximum depth) of their base value — a gentle scaling that rewards exploration without making shallow coins worthless. The same multiplier scales what a [sand trade point](#sand-trade) pays out
+- **Depth multiplier**: coins are worth between **100%** (at the hub) and **120%** (at maximum depth) of their base value — a gentle scaling that rewards exploration without making shallow coins worthless
 
 ---
 
@@ -264,8 +270,6 @@ Coins spawn throughout the dungeon as visual displays on the ground. They come i
 - Players collect coins by walking within **1.5 blocks** of them
 - Collected coins are added to the player's **unbanked score**
 - Coin value is scaled by the segment's depth multiplier (100%–120% range)
-- Coins also come from [sand trade points](#sand-trade), on the same multiplier and into the same
-  unbanked score
 - Coins use gold nuggets as their base material with custom model data
 
 ### Unbanked vs. Banked
@@ -409,16 +413,17 @@ and it will naturally prefer a puzzle room once those exist.
 
 - Block walls **local to a segment** that restrict access to areas **within that segment only**
 - Gates do **not** block access to other segments — they only gate off optional areas within their own segment
-- This creates a **choice mechanic**: e.g., "There is a set of coins here but it's guarded by ravagers — do you open the gate?"
-- Opened by pulling the segment's **lever**
-- A segment can have multiple gates, all opened by one lever
-- Every segment with gates **must** have exactly one lever
+- This creates a **choice mechanic**: e.g., "There is a set of coins here but it's guarded by ravagers — do you open the gate?" — or "it costs 3 sand, is it worth 30 seconds?"
+- Opened by pulling the segment's **lever** (free) or by paying its **sacrifice chest** (sand — see [Sand Sacrifice](#sand-sacrifice)). Either opens every gate in the segment; whichever is used first wins and the other then reports the gates already open
+- A segment can have multiple gates, all opened together
+- Every segment with gates **must** have a lever or at least one sacrifice chest; a builder normally uses one or the other, though both are allowed. A HUB's sacrifice chests are cage points, so a HUB with gates needs a lever
 - Built from **iron bars** at runtime — see-through on purpose, so players can size up what is behind
   a gate before deciding whether to open it
 - The lever is a real lever block, written into the world when the dungeon is built. The builder
   marker is an *air* cell, and air never registers a right-click
 - **Pulling the lever is one-way**: the segment's gates open permanently and the lever stays flipped.
-  A second pull is refused with a message
+  A second pull is refused with a message. Gates opened by sacrifice flip the lever too, so the world
+  always shows the same state
 - Rendered as gray stained glass in the builder tool (iron bars in play)
 
 ### Vault Doors
@@ -591,6 +596,7 @@ Puzzle rooms are accessible from the hub exits (not on the vault branches). They
 | Sand spawn chance | 40% per location |
 | Sand collection method | Break with shovel (normal sand blocks) |
 | Sacrifice points per team | 1 per player on the team |
+| Gate sacrifice cost | Builder-set per chest, 1–10 sand (default 1) |
 
 ### Coins
 | Constant | Value |

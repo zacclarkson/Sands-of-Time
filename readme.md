@@ -26,7 +26,7 @@ This plugin implements (or plans to implement) the following core features of th
 - **Collection**: Players find and collect sand within the dungeon.
 - **Timer Extension**: Use collected sand at the central timer mechanism to add seconds to the team's clock (e.g., 1 sand = 10 seconds).
 - **Revival**: Fallen teammates can be revived by sacrificing a specific amount of team sand.
-- **Sand Sacrifices**: Specific points in the dungeon may allow teams to sacrifice sand for rewards or to overcome obstacles *(Planned)*.
+- **Sand Sacrifices**: Sacrifice chests out in the dungeon stand in front of gates; paying their sand price (set per chest by the builder) opens the gate onto whatever the room hides behind it. The chest itself hands out nothing.
 
 ### Coin Collection & Scoring
 - Players collect coins scattered throughout the dungeon.

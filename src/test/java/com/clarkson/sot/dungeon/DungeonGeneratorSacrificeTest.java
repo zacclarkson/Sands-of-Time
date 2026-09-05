@@ -147,6 +147,20 @@ class DungeonGeneratorSacrificeTest {
         assertEquals(List.of(new Vector(1, 1, 1)), points);
     }
 
+    @Test
+    void nonHubSacrificeMarkersAreNeverCagePointsEvenWhenTheHubHasNone() {
+        // Outside the HUB a SAND_SACRIFICE marker is a gate sacrifice (resolved from template geometry
+        // by DungeonManager.resolveGateGroups). The bundled hub declares no sacrifice markers, so a
+        // fallback here would turn the first gate chest in the dungeon into a revive point.
+        Segment hub = template("hub", SegmentType.HUB, List.of(BlockVector3.at(1, 1, 1)), List.of());
+        Segment room = template("room", SegmentType.SMALL_ROOM, List.of(), List.of(BlockVector3.at(2, 2, 2)));
+
+        List<Vector> points = DungeonGenerator.selectSandSacrificeRelativeLocations(
+                List.of(placed(hub, 0, 0, 0), placed(room, 16, 0, 0)));
+
+        assertTrue(points.isEmpty(), "a branch chest must not be paired with a death cage");
+    }
+
     // --- pairing and derivation ---
 
     private static final Vector HUB_CENTRE = new Vector(21, 7, 18);
