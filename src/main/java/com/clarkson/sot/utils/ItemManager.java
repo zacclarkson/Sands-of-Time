@@ -10,6 +10,7 @@ import org.bukkit.Material;
 import org.bukkit.NamespacedKey;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
+import org.bukkit.inventory.meta.components.CustomModelDataComponent;
 import org.bukkit.persistence.PersistentDataContainer;
 import org.bukkit.persistence.PersistentDataType;
 import org.bukkit.plugin.Plugin;
@@ -61,12 +62,16 @@ public final class ItemManager {
     public static final String TOOL_TYPE_ITEM_SPAWN_PLACER = "ITEM_SPAWN_PLACER";
     public static final String TOOL_TYPE_ENTRY_POINT_PLACER = "ENTRY_POINT_PLACER";
 
-    // --- Custom Model Data IDs (Example) ---
-    // Define these centrally if used across items
-    // public static final int RUSTY_KEY_MODEL_ID = 2001;
-    // public static final int VAULT_KEY_BLUE_MODEL_ID = 2011;
-    // public static final int VAULT_KEY_RED_MODEL_ID = 2012;
-    // ... etc ...
+    // --- Custom Model Data IDs ---
+    // These integer values are matched by the served resource pack's item-model overrides
+    // (resourcepack/assets/minecraft/items/tripwire_hook.json, a range_dispatch on custom_model_data).
+    // Keep them in lockstep with that file. The rusty key has no bespoke texture yet, so it keeps its
+    // vanilla TRIPWIRE_HOOK look and no CMD is applied (see createRustyKey).
+    public static final int RUSTY_KEY_MODEL_ID = 2001;
+    public static final int VAULT_KEY_BLUE_MODEL_ID = 2011;
+    public static final int VAULT_KEY_RED_MODEL_ID = 2012;
+    public static final int VAULT_KEY_GREEN_MODEL_ID = 2013;
+    public static final int VAULT_KEY_GOLD_MODEL_ID = 2014;
 
 
     /**
@@ -119,8 +124,9 @@ public final class ItemManager {
             // Set PDC Tag
             PersistentDataContainer pdc = meta.getPersistentDataContainer();
             pdc.set(KEY_TYPE, PersistentDataType.STRING, RUSTY_KEY_VALUE);
-            // Set Custom Model Data if applicable
-            // meta.setCustomModelData(RUSTY_KEY_MODEL_ID);
+            // No CustomModelData: the rusty key has no bespoke texture yet, so it keeps the vanilla
+            // TRIPWIRE_HOOK look. RUSTY_KEY_MODEL_ID (2001) is reserved for when that art exists —
+            // apply it here and add a matching entry to items/tripwire_hook.json at that point.
             key.setItemMeta(meta);
         }
         return key;
@@ -146,8 +152,12 @@ public final class ItemManager {
             PersistentDataContainer pdc = meta.getPersistentDataContainer();
             pdc.set(KEY_TYPE, PersistentDataType.STRING, VAULT_KEY_VALUE);
             pdc.set(VAULT_COLOR, PersistentDataType.STRING, color.name());
-            // Set Custom Model Data if applicable
-            // meta.setCustomModelData(getCustomModelDataForKey(color));
+            // Drive the resource pack's per-colour key model. Uses the CustomModelDataComponent
+            // (floats) API to match how coins are wired (see CoinStack); the legacy
+            // setCustomModelData(int) API is deprecated.
+            CustomModelDataComponent cmd = meta.getCustomModelDataComponent();
+            cmd.setFloats(List.of((float) getCustomModelDataForKey(color)));
+            meta.setCustomModelDataComponent(cmd);
             key.setItemMeta(meta);
         }
         return key;
@@ -320,7 +330,18 @@ public final class ItemManager {
         }
     }
 
-    // TODO: Add method to get CustomModelData for keys if needed
-    // private static int getCustomModelDataForKey(VaultColor color) { ... }
+    /**
+     * Maps a vault colour to the CustomModelData id its key uses. These ids are the thresholds in the
+     * resource pack's {@code items/tripwire_hook.json} range_dispatch; changing one means changing both.
+     */
+    private static int getCustomModelDataForKey(@NotNull VaultColor color) {
+        switch (color) {
+            case BLUE: return VAULT_KEY_BLUE_MODEL_ID;
+            case RED: return VAULT_KEY_RED_MODEL_ID;
+            case GREEN: return VAULT_KEY_GREEN_MODEL_ID;
+            case GOLD: return VAULT_KEY_GOLD_MODEL_ID;
+            default: return VAULT_KEY_BLUE_MODEL_ID;
+        }
+    }
 
 }

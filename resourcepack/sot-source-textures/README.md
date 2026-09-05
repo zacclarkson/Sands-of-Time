@@ -1,8 +1,9 @@
-# Sands of Time — source textures (not yet wired up)
+# Sands of Time — source textures (art master)
 
 Hand-made 16×16 source art for the four **vault colours** (`RED`, `GOLD`, `GREEN`, `BLUE` — see
-`VaultColor.java`). These are the raw texture files only. Nothing in the plugin or the resource pack
-references them yet — they are checked in so the art is version-controlled and ready to wire up.
+`VaultColor.java`). This directory is the **art master**: the working PNGs live here and are **not**
+shipped in the served pack (`scripts/build-resourcepack.sh` excludes `sot-source-textures/`). To use
+a texture in game, copy it into `resourcepack/assets/sot/textures/item/` and wire it (see below).
 
 ```
 sot-source-textures/
@@ -12,15 +13,21 @@ sot-source-textures/
   branch-signifiers/ branch_{red,gold,green,blue}.png    # branch/vault-exit wall markers (base: sandstone)
 ```
 
-## Status / outstanding work
+## Status
 
-These textures are **not** served to clients and are **not** mapped to any model or custom model
-data. Two things are needed before they show up in game (tracked as issues):
+**Keys and coins are wired and served (issue #89 done).** The dev server now serves a slim,
+overrides-only pack via the `pack` sidecar (`deploy/sot-test/compose.yml`), rebuilt and hot-swapped
+by `.github/workflows/resourcepack-deploy.yml` on any `resourcepack/**` change.
 
-1. **Delivery** — the dev server does not serve any resource pack, and `resourcepack/` is currently a
-   full vanilla asset dump rather than a slim overrides-only pack. See issue #89.
-2. **Branch-colour signifier feature** — there is no in-game feature (no placeholder marker, no
-   generation/runtime logic) that signifies which vault colour a branch leads to, so the
-   `branch_*.png` textures have nowhere to attach. See issue #90.
+- **Vault keys** — `keys/key_*.png` are copied to `assets/sot/textures/item/key_*.png`, modelled by
+  `assets/sot/models/item/key_*.json`, and driven by CustomModelData ids `2011–2014` (see
+  `ItemManager.getCustomModelDataForKey`) via the `items/tripwire_hook.json` range_dispatch override.
+- **Coins** — the already-emitted CMD `1001/1002/1003` (from `CoinStack` / `ToolListener`) are mapped
+  by `items/gold_nugget.json` to the `coin_stack_small` model. Only small-coin art exists today, so
+  1002/1003 reuse it as a placeholder until medium/large art is added.
 
-Keys can be wired via the currently commented-out CustomModelData hooks in `ItemManager.java`.
+**Still not wired** — `keyholes/`, `vault-doors/`, and `branch-signifiers/` have no in-game attach
+point yet: their names map to nothing, `VaultDoor` renders concrete/gold blocks (not the intended
+black glazed terracotta), keyholes have no code representation, and branch signifiers depend on the
+signifier feature (issue #90). These need **block-model overrides and/or new gameplay** — tracked
+separately (issue #112, plus #90 for the branch signifier).

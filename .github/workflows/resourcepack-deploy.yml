@@ -1,0 +1,42 @@
+# Rebuild the slim SoT resource pack and hot-swap it onto the homelab `pack` sidecar.
+#
+# The MC server (deploy/sot-test/compose.yml) relays a fixed RESOURCE_PACK URL to clients and sets
+# no SHA1, so replacing the served zip needs NO server restart — clients re-download on their next
+# join. This job therefore only rebuilds the zip and copies it into place; it never touches the MC
+# container, so nobody is kicked.
+name: Deploy Resource Pack
+
+on:
+  push:
+    branches: [ "master" ]
+    paths:
+      - "resourcepack/**"
+      - "scripts/build-resourcepack.sh"
+      - ".github/workflows/resourcepack-deploy.yml"
+  workflow_dispatch:
+
+jobs:
+  # Gated like the jar deploy in maven-publish.yml: on a push it stays skipped until a self-hosted
+  # runner is registered AND repo variable DEPLOY_ENABLED == "true". A manual workflow_dispatch run
+  # is always allowed (so you can seed/repair the pack on demand).
+  deploy-pack:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'push' &&
+       github.ref == 'refs/heads/master' &&
+       vars.DEPLOY_ENABLED == 'true')
+    runs-on: [self-hosted, linux]
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Build slim resource pack zip
+        run: bash scripts/build-resourcepack.sh
+
+      - name: Publish to the pack sidecar
+        run: |
+          # The `pack` nginx sidecar serves ~/servers/sot-test/pack over HTTP (port 25701).
+          # Copy the freshly built zip in place; nginx serves it immediately, no restart.
+          mkdir -p ~/servers/sot-test/pack
+          cp target/sot-resourcepack.zip ~/servers/sot-test/pack/sot.zip
+          echo "Published $(du -h target/sot-resourcepack.zip | cut -f1) pack to ~/servers/sot-test/pack/sot.zip"

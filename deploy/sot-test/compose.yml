@@ -39,6 +39,14 @@ services:
       OPS: "REPLACE_WITH_MC_USERNAME"
       # A superflat world makes building segments and watching game UX easiest. Remove for normal.
       LEVEL_TYPE: "minecraft:flat"
+      # SoT resource pack (custom key/coin textures). Served by the `pack` sidecar below. The MC
+      # server only RELAYS this URL to clients — clients download it themselves — so it must be the
+      # host address reachable BY CLIENTS (the sidecar's published port), NOT the compose service
+      # name. REPLACE with your Docker host (e.g. the Tailscale IP), keeping port 25701.
+      # No RESOURCE_PACK_SHA1 on purpose: the CD hot-swaps ./pack/sot.zip without restarting this
+      # container, so clients just re-download the current pack on their next join.
+      RESOURCE_PACK: "http://REPLACE_WITH_SERVER_HOST:25701/sot.zip"
+      RESOURCE_PACK_ENFORCE: "TRUE"
     volumes:
       # World + config + plugins persist here. CI/scp drops the built jar at ./data/plugins/SoT.jar.
       - ./data:/data
@@ -47,3 +55,17 @@ services:
       start_period: 2m
       interval: 10s
       retries: 20
+
+  # Static-file sidecar that serves the SoT resource pack zip over HTTP. The CD job
+  # (.github/workflows/resourcepack-deploy.yml) rebuilds ./pack/sot.zip on resourcepack/** changes;
+  # nginx serves it with no restart needed. ./pack is a host dir (gitignored, like ./data); seed it
+  # once by running scripts/build-resourcepack.sh and copying the zip to ./pack/sot.zip.
+  pack:
+    image: nginx:alpine
+    container_name: sot-pack
+    restart: unless-stopped
+    ports:
+      # HTTP. Must match the port in RESOURCE_PACK above and be reachable by clients.
+      - "25701:80"
+    volumes:
+      - ./pack:/usr/share/nginx/html:ro

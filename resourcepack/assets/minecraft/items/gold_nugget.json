@@ -1,6 +1,21 @@
 {
   "model": {
-    "type": "minecraft:model",
-    "model": "minecraft:item/gold_nugget"
+    "type": "minecraft:range_dispatch",
+    "property": "minecraft:custom_model_data",
+    "entries": [
+      {
+        "threshold": 1001.0,
+        "model": { "type": "minecraft:model", "model": "sot:item/coin_stack_small" }
+      },
+      {
+        "threshold": 1002.0,
+        "model": { "type": "minecraft:model", "model": "sot:item/coin_stack_small" }
+      },
+      {
+        "threshold": 1003.0,
+        "model": { "type": "minecraft:model", "model": "sot:item/coin_stack_small" }
+      }
+    ],
+    "fallback": { "type": "minecraft:model", "model": "minecraft:item/gold_nugget" }
   }
 }

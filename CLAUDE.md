@@ -94,6 +94,19 @@ manually (see `integration-test/README.md`); it is **not** part of CI.
   position, writes it back to `config.yml` and applies it live; moving the lobby is rejected while a
   game is running, since `startGame` derives the dungeon world and origin from it.
 
+- **The resource pack is slim and overrides-only.** `resourcepack/` ships *only* the SoT custom
+  assets + `pack.mcmeta`/`pack.png` (not a vanilla asset dump); see `resourcepack/README.md`. Item
+  textures are driven by CustomModelData matched by `assets/minecraft/items/*.json` overrides (the
+  1.21.4+ `range_dispatch` format): coins (`GOLD_NUGGET`, CMD `1001/1002/1003`, set in `CoinStack`/
+  `ToolListener`) → `gold_nugget.json`; vault keys (`TRIPWIRE_HOOK`, CMD `2011-2014`, set in
+  `ItemManager.getCustomModelDataForKey`) → `tripwire_hook.json`. **Keep the CMD ids in the Java in
+  lockstep with the thresholds in those JSONs.** Use the float-based `CustomModelDataComponent`, not
+  the deprecated `setCustomModelData(int)`. Keyholes/vault-doors/branch-signifiers are art-only, not
+  wired (they need block overrides / new features). Delivery is a `pack` nginx sidecar in
+  `deploy/sot-test/compose.yml` serving `scripts/build-resourcepack.sh`'s zip; the resource-pack CD
+  (`.github/workflows/resourcepack-deploy.yml`) hot-swaps it on `resourcepack/**` changes with no
+  `RESOURCE_PACK_SHA1`, so no MC restart and clients re-download on next join.
+
 ## Dev server
 
 `deploy/sot-test/` holds a reference Docker Compose for an always-on Paper 26.2 + WorldEdit server

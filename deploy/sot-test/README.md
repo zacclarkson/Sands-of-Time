@@ -38,6 +38,32 @@ Reloading SoT re-runs its `onEnable`, which reloads segment templates from disk 
 `plugman reload SoT` is enough after saving a new segment; a full `docker restart sot-test` is only
 needed for server/JVM/other-plugin changes (or if PlugManX itself is being installed).
 
+## Resource pack (custom key/coin textures)
+
+The server serves the SoT resource pack (`resourcepack/`, built into a slim zip) so clients see the
+custom coloured **vault-key** and **coin** textures. Delivery is a small **`pack` nginx sidecar** in
+`compose.yml`: it serves `<server-dir>/pack/sot.zip` over HTTP on port `25701`, and the `sot-test`
+service points `RESOURCE_PACK` at that URL with `RESOURCE_PACK_ENFORCE: TRUE`.
+
+**One-time setup:**
+
+1. In `compose.yml`, set `RESOURCE_PACK` to your host address (the same one clients connect to, e.g.
+   the Tailscale IP), keeping port `25701`: `http://<SERVER_HOST>:25701/sot.zip`. The MC server only
+   relays this URL — clients download it themselves — so it must **not** be the `pack` service name.
+2. Seed the zip and start the sidecar:
+   ```bash
+   # from your dev machine:
+   scripts/build-resourcepack.sh                       # -> target/sot-resourcepack.zip
+   scp target/sot-resourcepack.zip <user>@<SERVER_HOST>:<server-dir>/pack/sot.zip
+   ssh <user>@<SERVER_HOST> 'cd <server-dir> && docker compose up -d'   # starts sot-pack + applies env
+   ```
+   (`<server-dir>/pack/` is created on the host; it is not in git — see `.gitignore`.)
+
+**Deliberately no `RESOURCE_PACK_SHA1`.** The CD job hot-swaps `sot.zip` without restarting the MC
+container, so clients simply re-download the current pack on their next join. Setting a SHA1 would
+force a container recreate (and kick players) on every texture change — the opposite of the plugin
+hot-reload principle. See "Auto-deploy from CI" below for the resource-pack CD.
+
 ## First game (a HUB segment is bundled)
 
 The plugin **ships a bundled `hub` segment** (see `src/main/resources/bundled_segments/`), which
@@ -76,3 +102,12 @@ recreate the container **once** (`docker compose up -d`) so itzg downloads PlugM
 step fails loudly rather than silently skipping the reload.
 
 Manual fallback is the `scp` + `plugman reload` (or `docker restart`) shown above.
+
+### Resource-pack CD
+
+`.github/workflows/resourcepack-deploy.yml` is a **separate** gated job that runs on push to `master`
+**only when `resourcepack/**` changes** (plus `workflow_dispatch` for on-demand runs). It rebuilds the
+slim zip with `scripts/build-resourcepack.sh` and copies it to `<server-dir>/pack/sot.zip`. It **never
+touches the MC container** — no restart, no kick; clients pick up the new textures on their next join.
+It reuses the same gating (`self-hosted,linux` runner + `DEPLOY_ENABLED=true`) as the jar deploy above;
+a manual `workflow_dispatch` run is always allowed so you can seed or repair the pack.
