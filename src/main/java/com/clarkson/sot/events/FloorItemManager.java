@@ -1,8 +1,10 @@
 package com.clarkson.sot.events; // Or a more suitable package like com.clarkson.sot.items
 
+import com.clarkson.sot.dungeon.VaultColor;
 import com.clarkson.sot.entities.CoinStack;
 import com.clarkson.sot.entities.FloorItem;
 import com.clarkson.sot.entities.FloorLoot;
+import com.clarkson.sot.entities.Key;
 import com.clarkson.sot.main.GameManager;
 import com.clarkson.sot.main.GameState;
 import com.clarkson.sot.main.SoT;
@@ -18,6 +20,8 @@ import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.player.PlayerMoveEvent;
 import org.bukkit.inventory.ItemStack; // If spawning generic loot needs ItemStacks
+import org.bukkit.inventory.meta.PotionMeta;
+import org.bukkit.potion.PotionType;
 import org.jetbrains.annotations.NotNull;
 
 import java.util.*;
@@ -40,6 +44,12 @@ public class FloorItemManager implements Listener {
 
     // Configuration for pickup radius (squared for efficiency)
     private static final double PICKUP_RADIUS_SQUARED = 1.5 * 1.5; // Example: 1.5 blocks
+    // FloorItem.getLocation() is the block corner, but every implementation spawns its ItemDisplay
+    // at the block centre (see CoinStack/FloorLoot/Key.spawnRepresentation). Measure to the visual
+    // so the pickup sphere is centred on what the player can actually see; keep these in step.
+    private static final double DISPLAY_OFFSET_X = 0.5;
+    private static final double DISPLAY_OFFSET_Y = 0.1;
+    private static final double DISPLAY_OFFSET_Z = 0.5;
 
     public FloorItemManager(@NotNull SoT plugin, @NotNull GameManager gameManager, @NotNull ScoreManager scoreManager) {
         this.plugin = plugin;
@@ -47,7 +57,8 @@ public class FloorItemManager implements Listener {
         this.scoreManager = scoreManager;
         this.activeFloorItems = new ConcurrentHashMap<>();
         this.itemsByTeamInstance = new ConcurrentHashMap<>();
-        plugin.getServer().getPluginManager().registerEvents(this, plugin);
+        // Registered as a listener by SoT.onEnable, which is the single registration point for the
+        // GameManager-owned manager instances. Registering here too would double-fire every event.
         plugin.getLogger().info("FloorItemManager initialized.");
     }
 
@@ -71,36 +82,111 @@ public class FloorItemManager implements Listener {
     }
 
     /**
-     * Spawns a generic loot item (e.g., torch, armor, sword) at the location.
-     * Incorporates spawn rates and loot tables.
+     * Spawns a coloured vault key as a tracked floor item.
+     * <p>Unlike the dropped Item entity this replaced, the key stays on the block it was placed on,
+     * never despawns, and can only be collected by the team that owns this dungeon instance.
+     *
      * @param location Absolute world location.
+     * @param color The vault colour this key opens.
      * @param teamId Owning team.
      * @param segmentInstanceId Owning segment instance.
      * @param depth Dungeon depth.
+     * @return the tracked Key.
      */
+    @NotNull
+    public Key spawnKey(@NotNull Location location, @NotNull VaultColor color, @NotNull UUID teamId,
+                        @NotNull UUID segmentInstanceId, int depth) {
+        Key key = new Key(plugin, location, color, teamId, segmentInstanceId, depth);
+        trackItem(key);
+        plugin.getLogger().finer("Spawned " + color + " Key " + key.getUniqueId() + " for team " + teamId);
+        return key;
+    }
+
+    /**
+     * Spawns a rusty (segment door) key as a tracked floor item.
+     * @return the tracked Key.
+     */
+    @NotNull
+    public Key spawnRustyKey(@NotNull Location location, @NotNull UUID teamId,
+                             @NotNull UUID segmentInstanceId, int depth) {
+        Key key = Key.createRustyKey(plugin, location, teamId, segmentInstanceId, depth);
+        trackItem(key);
+        plugin.getLogger().finer("Spawned rusty Key " + key.getUniqueId() + " for team " + teamId);
+        return key;
+    }
+
     private static final double ITEM_SPAWN_CHANCE = 0.30; // 30% chance per location
-    private static final Random random = new Random();
-    private static final Material[] LOOT_TABLE = {
+
+    /**
+     * The generic loot table. Weight is the number of repeated slots, so this is a 10-slot draw.
+     *
+     * <p><b>No food goes in here.</b> Hunger is frozen for the whole round ({@link HungerListener}),
+     * so food would be dead weight; healing is a splash potion of healing instead, which took over
+     * the two slots bread used to hold. The <em>length</em> is part of what a dungeon seed
+     * reproduces — the roll is {@code rng.nextInt(LOOT_TABLE.length)} — so adding or removing a slot
+     * silently changes what every seed yields. Package-private for the loot-table test.
+     */
+    static final Material[] LOOT_TABLE = {
         Material.TORCH, Material.TORCH, Material.TORCH,           // Common
         Material.ARROW, Material.ARROW,                            // Common
-        Material.BREAD, Material.BREAD,                            // Common
+        Material.SPLASH_POTION, Material.SPLASH_POTION,            // Common (healing; replaced bread)
         Material.IRON_SWORD,                                       // Uncommon
         Material.LEATHER_CHESTPLATE,                               // Uncommon
         Material.SHIELD,                                           // Rare
     };
 
-    public void spawnGenericItem(@NotNull Location location, @NotNull UUID teamId, @NotNull UUID segmentInstanceId, int depth) {
+    /**
+     * Spawns a generic loot item (e.g., torch, armor, sword) at the location.
+     * Incorporates spawn rates and loot tables.
+     *
+     * @param location Absolute world location.
+     * @param teamId Owning team.
+     * @param segmentInstanceId Owning segment instance.
+     * @param depth Dungeon depth.
+     * @param rng The caller's seeded RNG. Supplied rather than held as a field because one
+     *            FloorItemManager serves every team: a shared instance RNG would interleave their
+     *            draws and no seed could reproduce the result.
+     */
+    public void spawnGenericItem(@NotNull Location location, @NotNull UUID teamId,
+                                 @NotNull UUID segmentInstanceId, int depth, @NotNull Random rng) {
         // 30% chance to spawn anything at this location
-        if (random.nextDouble() > ITEM_SPAWN_CHANCE) return;
+        if (rng.nextDouble() > ITEM_SPAWN_CHANCE) return;
 
-        // Pick a random item from the loot table
-        Material lootMaterial = LOOT_TABLE[random.nextInt(LOOT_TABLE.length)];
-        int amount = (lootMaterial == Material.TORCH || lootMaterial == Material.ARROW) ? 2 + random.nextInt(3) : 1;
-        ItemStack itemToSpawn = new ItemStack(lootMaterial, amount);
+        ItemStack itemToSpawn = rollLoot(rng);
 
         FloorLoot floorLoot = new FloorLoot(plugin, location, itemToSpawn, teamId, segmentInstanceId, depth);
         trackItem(floorLoot);
-        plugin.getLogger().finer("Spawned FloorLoot " + floorLoot.getUniqueId() + " (" + lootMaterial + ") for team " + teamId);
+        plugin.getLogger().finer("Spawned FloorLoot " + floorLoot.getUniqueId() + " (" + itemToSpawn.getType() + ") for team " + teamId);
+    }
+
+    /**
+     * Rolls one item off {@link #LOOT_TABLE}. Separated from {@link #spawnGenericItem} so the table
+     * can be tested without spawning a {@code FloorLoot} (and its {@code ItemDisplay}) in a world.
+     *
+     * <p>The draw sequence is part of the seed contract: exactly one {@code nextInt(LOOT_TABLE.length)}
+     * for the material, then one {@code nextInt(3)} <em>only</em> for a torch or arrow stack size.
+     * Change it and every seeded dungeon's loot changes with it.
+     */
+    @NotNull
+    static ItemStack rollLoot(@NotNull Random rng) {
+        Material lootMaterial = LOOT_TABLE[rng.nextInt(LOOT_TABLE.length)];
+        int amount = (lootMaterial == Material.TORCH || lootMaterial == Material.ARROW) ? 2 + rng.nextInt(3) : 1;
+        return createLootStack(lootMaterial, amount);
+    }
+
+    /**
+     * Builds the stack for a rolled material. A splash potion is a bare, effect-less bottle until
+     * its base type is set, so it is stamped as a Splash Potion of Healing here; every other
+     * material is the plain stack.
+     */
+    @NotNull
+    static ItemStack createLootStack(@NotNull Material material, int amount) {
+        ItemStack stack = new ItemStack(material, amount);
+        if (material == Material.SPLASH_POTION && stack.getItemMeta() instanceof PotionMeta meta) {
+            meta.setBasePotionType(PotionType.HEALING);
+            stack.setItemMeta(meta);
+        }
+        return stack;
     }
 
      /**
@@ -142,6 +228,16 @@ public class FloorItemManager implements Listener {
         }
     }
 
+    /**
+     * @return A snapshot of the floor items currently tracked for a team. Empty if the team has none.
+     */
+    @NotNull
+    public List<FloorItem> getTrackedItems(@NotNull UUID teamId) {
+        Set<UUID> ids = itemsByTeamInstance.get(teamId);
+        if (ids == null) return List.of();
+        return ids.stream().map(activeFloorItems::get).filter(Objects::nonNull).toList();
+    }
+
     // --- Pickup Detection (Proximity) ---
 
     @EventHandler(priority = EventPriority.NORMAL, ignoreCancelled = true)
@@ -176,7 +272,9 @@ public class FloorItemManager implements Listener {
             FloorItem item = activeFloorItems.get(itemId);
             if (item != null && !item.isPickedUp()) {
                 // Check world first for efficiency
-                Location itemLoc = item.getLocation();
+                // Measure to the item's visual, not to the block corner it is anchored at.
+                Location itemLoc = item.getLocation()
+                        .add(DISPLAY_OFFSET_X, DISPLAY_OFFSET_Y, DISPLAY_OFFSET_Z);
                  if (itemLoc.getWorld().equals(playerLoc.getWorld())) {
                      // Use distance squared for performance
                      if (playerLoc.distanceSquared(itemLoc) <= PICKUP_RADIUS_SQUARED) {

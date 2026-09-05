@@ -2,6 +2,7 @@ package com.clarkson.sot.scoring;
 
 import com.clarkson.sot.entities.CoinStack;
 import com.clarkson.sot.main.GameManager;
+import com.clarkson.sot.ui.CoinPickupNotifier;
 import com.clarkson.sot.utils.TeamManager;
 
 import org.bukkit.entity.Player;
@@ -23,12 +24,16 @@ import static org.mockito.Mockito.*;
 class ScoreManagerTest {
 
     private ScoreManager scoreManager;
+    private CoinPickupNotifier pickupNotifier;
+    private long now;
 
     @BeforeEach
     void setUp() {
         Plugin plugin = mock(Plugin.class);
         when(plugin.getLogger()).thenReturn(Logger.getLogger("ScoreManagerTest"));
-        scoreManager = new ScoreManager(mock(TeamManager.class), mock(GameManager.class), plugin);
+        now = 0L;
+        pickupNotifier = new CoinPickupNotifier(3000L, () -> now);
+        scoreManager = new ScoreManager(mock(TeamManager.class), mock(GameManager.class), plugin, pickupNotifier);
     }
 
     @Test
@@ -76,17 +81,83 @@ class ScoreManagerTest {
         assertEquals(120, collect(100, 50), "depth beyond max should not exceed 120%");
     }
 
+    @Test
+    void coinsCollectedInQuickSuccessionShareOneNotification() {
+        UUID id = UUID.randomUUID();
+        Player player = mock(Player.class);
+        when(player.getUniqueId()).thenReturn(id);
+
+        scoreManager.collectFloorItem(player, coin(5, 0));
+        now += 1000L;
+        scoreManager.collectFloorItem(player, coin(7, 0));
+
+        assertEquals(12, pickupNotifier.getPendingTotal(id), "both coins should be in one message");
+        assertEquals(12, scoreManager.getPlayerUnbankedScore(id));
+    }
+
+    @Test
+    void bankingEndsThePickupBatch() {
+        UUID id = UUID.randomUUID();
+        Player player = mock(Player.class);
+        when(player.getUniqueId()).thenReturn(id);
+
+        scoreManager.collectFloorItem(player, coin(5, 0));
+        scoreManager.clearPlayerUnbankedScore(id);
+
+        assertEquals(0, pickupNotifier.getPendingTotal(id));
+    }
+
+    @Test
+    void awardedCoinsScaleWithDepthAndLandUnbanked() {
+        // The one place the depth multiplier is applied: every coin source lands in the same at-risk
+        // unbanked pot on the same scale.
+        UUID id = UUID.randomUUID();
+        Player player = mock(Player.class);
+        when(player.getUniqueId()).thenReturn(id);
+
+        assertEquals(30, scoreManager.awardDepthScaledCoins(player, 25, 10));
+        assertEquals(30, scoreManager.getPlayerUnbankedScore(id));
+    }
+
+    @Test
+    void awardedCoinsJoinTheRunningPickupMessage() {
+        UUID id = UUID.randomUUID();
+        Player player = mock(Player.class);
+        when(player.getUniqueId()).thenReturn(id);
+
+        scoreManager.collectFloorItem(player, coin(5, 0));
+        scoreManager.awardDepthScaledCoins(player, 25, 0);
+
+        assertEquals(30, pickupNotifier.getPendingTotal(id),
+                "two coin sources in the same burst read as one message");
+    }
+
+    @Test
+    void awardingNothingIsANoOp() {
+        UUID id = UUID.randomUUID();
+        Player player = mock(Player.class);
+        when(player.getUniqueId()).thenReturn(id);
+
+        assertEquals(0, scoreManager.awardDepthScaledCoins(player, 0, 5));
+        assertEquals(0, scoreManager.getPlayerUnbankedScore(id));
+        assertEquals(0, pickupNotifier.getPendingTotal(id), "and sends no empty action bar");
+    }
+
+    /** A mocked coin of the given base value and depth. */
+    private CoinStack coin(int baseValue, int depth) {
+        CoinStack coin = mock(CoinStack.class);
+        when(coin.getBaseValue()).thenReturn(baseValue);
+        when(coin.getDepth()).thenReturn(depth);
+        return coin;
+    }
+
     /** Collects a single mocked coin of the given base value/depth and returns the resulting score. */
     private int collect(int baseValue, int depth) {
         UUID id = UUID.randomUUID();
         Player player = mock(Player.class);
         when(player.getUniqueId()).thenReturn(id);
 
-        CoinStack coin = mock(CoinStack.class);
-        when(coin.getBaseValue()).thenReturn(baseValue);
-        when(coin.getDepth()).thenReturn(depth);
-
-        scoreManager.collectFloorItem(player, coin);
+        scoreManager.collectFloorItem(player, coin(baseValue, depth));
         return scoreManager.getPlayerUnbankedScore(id);
     }
 }

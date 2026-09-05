@@ -301,10 +301,13 @@ public class StructureSaver {
      * Reads directly from the template object's fields/getters.
      * (Reflects changes where boolean flags/multiplier were removed from Segment)
      *
+     * <p>Package-private so the JSON half can be round-tripped through {@code StructureLoader} in a
+     * unit test; {@link #saveStructure} needs a live WorldEdit for the schematic half.
+     *
      * @param segmentTemplate The world-independent Segment template object.
      * @return JsonElement representing the template data, or null on failure.
      */
-    private JsonElement serializeSegmentTemplate(Segment segmentTemplate) {
+    JsonElement serializeSegmentTemplate(Segment segmentTemplate) {
         // This method uses the latest refactored Segment structure
         try {
             JsonObject json = new JsonObject();
@@ -371,6 +374,9 @@ public class StructureSaver {
 
             json.add("sandSacrificeLocations", serializeBlockVectorList(
                     segmentTemplate.getSandSacrificeLocations(), "sandSacrificeLocations", segmentName));
+            JsonArray sacrificeCosts = new JsonArray();
+            for (Integer cost : segmentTemplate.getSandSacrificeCosts()) sacrificeCosts.add(cost);
+            json.add("sandSacrificeCosts", sacrificeCosts);
             json.add("mobSpawnerLocations", serializeBlockVectorList(
                     segmentTemplate.getMobSpawnerLocations(), "mobSpawnerLocations", segmentName));
 
@@ -389,6 +395,8 @@ public class StructureSaver {
             if (timer != null) {
                 json.add("timerLocationOffset", serializeBlockVector3(timer));
             }
+            json.add("branchSignifierLocations", serializeBlockVectorList(
+                    segmentTemplate.getBranchSignifierOffsets(), "branchSignifierLocations", segmentName));
 
             return json;
 

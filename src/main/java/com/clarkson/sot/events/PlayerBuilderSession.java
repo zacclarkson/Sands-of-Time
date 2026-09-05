@@ -21,6 +21,8 @@ public class PlayerBuilderSession {
 
     // Base coin value used when placing COIN_SPAWN markers.
     private int coinValue = 10;
+    /** Sand price stamped on the next SAND_SACRIFICE marker; only meaningful outside the HUB. */
+    private int sacrificeCost = com.clarkson.sot.dungeon.segment.Segment.DEFAULT_SACRIFICE_COST;
 
     // --- Two-click bound selection state (VAULT_DOOR / GATE) ---
     /** Absolute world location of the first corner click (air block in front of face). */
@@ -46,6 +48,13 @@ public class PlayerBuilderSession {
     public int getCoinValue() { return coinValue; }
 
     public void setCoinValue(int coinValue) { this.coinValue = Math.max(1, coinValue); }
+
+    public int getSacrificeCost() { return sacrificeCost; }
+
+    /** Clamped to {@code [1, Segment.MAX_SACRIFICE_COST]}. */
+    public void setSacrificeCost(int sacrificeCost) {
+        this.sacrificeCost = com.clarkson.sot.dungeon.segment.Segment.clampSacrificeCost(sacrificeCost);
+    }
 
     @Nullable public Location getPendingBoundCorner() { return pendingBoundCorner; }
 

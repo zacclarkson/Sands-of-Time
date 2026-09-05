@@ -29,7 +29,7 @@ public enum BuilderMode {
             "Right-click to mark a sand spawn position.",
             false),
     SAND_SACRIFICE("Sand Sacrifice",
-            "Right-click to mark a sand sacrifice block position.",
+            "Right-click to mark a sand sacrifice chest. In the HUB it frees the paired death cage (price = death count). In any other segment it opens that segment's gates for /sotmode SAND_SACRIFICE <cost> sand (default 1, max 10).",
             false),
     SAFE_EXIT("Safe Exit",
             "Click two air blocks to define the safe-exit nether-portal opening (2D, like a door). Build the portal blocks inside it. One per dungeon, normally in the HUB.",
@@ -44,7 +44,7 @@ public enum BuilderMode {
             "Right-click to mark a mob spawner position.",
             false),
     BANK("Bank",
-            "Right-click to mark where players bank coins (the Sphinx / bank spot). One per HUB.",
+            "Right-click to mark where players bank coins (an ender chest is built here). One per HUB.",
             false),
     DEATH_CAGE("Death Cage",
             "Right-click to mark a death/respawn cage. Place 1-4 (one per player). A lodestone 'Revive' preview appears 2 blocks toward your facing — aim before you click.",
@@ -57,6 +57,9 @@ public enum BuilderMode {
             false),
     PLAYER_SPAWN("Player Spawn",
             "Right-click to mark where a player spawns at game start. Place one per player (up to your team size) in the HUB; players are spread across them.",
+            false),
+    BRANCH_SIGNIFIER("Branch Signifier",
+            "Right-click a wall face beside an exit to mark where that branch's vault-colour marking goes. The colour is chosen at generation time from the nearest entry point's branch, so place it next to the exit it advertises.",
             false);
 
     private final String displayName;

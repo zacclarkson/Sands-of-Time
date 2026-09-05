@@ -2,9 +2,10 @@ package com.clarkson.sot.player;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.UUID;
 
 import org.bukkit.entity.Player;
-import org.bukkit.plugin.java.JavaPlugin;
+import org.bukkit.plugin.Plugin;
 
 import java.util.logging.Logger;
 
@@ -19,7 +20,7 @@ public class SoTPlayerManager {
      *
      * @param plugin The plugin instance to associate with this manager.
      */
-    public SoTPlayerManager(JavaPlugin plugin) {
+    public SoTPlayerManager(Plugin plugin) {
         this.logger = plugin.getLogger();
         logger.info("Player manager initialized with plugin: " + plugin.getName());
     }
@@ -44,7 +45,7 @@ public class SoTPlayerManager {
         if (!hasPlayer(player)) {
             players.add(new SoTPlayerData(player));
         }
-        logger.info("Player initialized: " + player.getName());
+        logger.fine("Player initialized: " + player.getName());
     }
 
     /**
@@ -65,8 +66,22 @@ public class SoTPlayerManager {
      * @return The SoTPlayerData object, or null if not found.
      */
     public SoTPlayerData getPlayerData(Player player) {
+        return getPlayerData(player.getUniqueId());
+    }
+
+    /**
+     * Retrieves the player data for a player UUID.
+     *
+     * <p>UUID rather than {@link Player} identity is the lookup key throughout: a player who
+     * reconnects mid-round is handed a fresh {@code Player} instance, and matching on the object
+     * would silently stop finding their data.
+     *
+     * @param playerUUID The player's UUID.
+     * @return The SoTPlayerData object, or null if not found.
+     */
+    public SoTPlayerData getPlayerData(UUID playerUUID) {
         for (SoTPlayerData playerData : players) {
-            if (playerData.getPlayer().equals(player)) {
+            if (playerData.getPlayerUUID().equals(playerUUID)) {
                 return playerData;
             }
         }
@@ -79,7 +94,18 @@ public class SoTPlayerManager {
      * @param player The Player to remove.
      */
     public void removePlayer(Player player) {
-        players.removeIf(playerData -> playerData.getPlayer().equals(player));
+        players.removeIf(playerData -> playerData.getPlayerUUID().equals(player.getUniqueId()));
+    }
+
+    /**
+     * Forgets every player.
+     *
+     * <p>Called by end-of-round teardown: {@link SoTPlayerData} holds a strong reference to the
+     * Bukkit {@link Player}, so carrying the list into the next round would both leak those and
+     * report last round's stats.
+     */
+    public void clearAll() {
+        players.clear();
     }
 
     /**
@@ -89,7 +115,7 @@ public class SoTPlayerManager {
      * @return True if the player exists, false otherwise.
      */
     public boolean hasPlayer(Player player) {
-        return players.stream().anyMatch(playerData -> playerData.getPlayer().equals(player));
+        return players.stream().anyMatch(playerData -> playerData.getPlayerUUID().equals(player.getUniqueId()));
     }
 
     /**

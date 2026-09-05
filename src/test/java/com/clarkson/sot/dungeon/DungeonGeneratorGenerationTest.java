@@ -35,7 +35,7 @@ class DungeonGeneratorGenerationTest {
         Plugin plugin = mock(Plugin.class);
         when(plugin.getLogger()).thenReturn(Logger.getLogger("DungeonGeneratorGenerationTest"));
         generator = new DungeonGenerator(plugin);
-        generator.setRandomSeedForTest(20260829L);
+        generator.setSeed(20260829L);
     }
 
     // --- Segment builders (5x5x5 rooms; entries centred on their face, matching the real convention) ---
@@ -56,24 +56,30 @@ class DungeonGeneratorGenerationTest {
                 null, List.of(), null,
                 List.of(), List.of(),
                 null,
-                null, List.of(), null, List.of(), null, List.of());
+                null, List.of(), null, List.of(), null, List.of(), List.of(), List.of());
     }
 
     /** Hub with `exits` straight SOUTH exits (z=4) spaced 6 apart in x, so branches stay in disjoint columns. */
     private static Segment hub(int exits) {
+        return hub(exits, null);
+    }
+
+    /** As {@link #hub(int)}, but the hub itself carries a key spawn marker of the given colour. */
+    private static Segment hub(int exits, VaultColor key) {
         List<RelativeEntryPoint> entries = new ArrayList<>();
         for (int i = 0; i < exits; i++) {
             entries.add(ep(2 + i * 6, 1, 4, Direction.SOUTH));
         }
         int sizeX = 2 + (exits - 1) * 6 + 3; // cover the furthest exit
+        BlockVector3 keyOffset = (key != null) ? BlockVector3.at(1, 1, 1) : null;
         return new Segment(
                 "hub", SegmentType.HUB, "hub.schem", BlockVector3.at(sizeX, 5, 5),
                 entries, List.of(), List.of(), List.of(),
-                0, null, null, null, null,
+                0, null, key, null, keyOffset,
                 null, List.of(), null,
                 List.of(), List.of(),
                 null,
-                null, List.of(), null, List.of(), null, List.of());
+                null, List.of(), null, List.of(), null, List.of(), List.of(), List.of());
     }
 
     /** Hub whose exits face only WEST (x=0), spaced 6 apart in z. Connecting to NORTH-entry rooms is
@@ -91,7 +97,7 @@ class DungeonGeneratorGenerationTest {
                 null, List.of(), null,
                 List.of(), List.of(),
                 null,
-                null, List.of(), null, List.of(), null, List.of());
+                null, List.of(), null, List.of(), null, List.of(), List.of(), List.of());
     }
 
     private static Segment corridorNS() {
@@ -136,6 +142,46 @@ class DungeonGeneratorGenerationTest {
         assertTrue(bp.getKeySpawnRelativeLocations().keySet()
                         .containsAll(List.of(VaultColor.RED, VaultColor.GREEN, VaultColor.GOLD)),
                 "RED/GREEN/GOLD keys placed, got: " + bp.getKeySpawnRelativeLocations().keySet());
+    }
+
+    /**
+     * The blue key lives on the hub (GAME_RULES.md: every hub must have a blue key spawn), but
+     * {@code consolidateFeatureLocations} used to skip {@code VaultColor.BLUE} entirely, deferring to
+     * a "VaultManager places it relative to the hub" path that never existed. The blue key therefore
+     * never spawned and the blue vault could not be opened. A BLUE marker must consolidate like any
+     * other colour.
+     */
+    @Test
+    void consolidatesTheBlueKeyFromTheHub() {
+        List<Segment> set = fullSet();
+        set.removeIf(s -> s.getType() == SegmentType.HUB);
+        set.add(0, hub(8, VaultColor.BLUE));
+        generator.setAvailableSegmentsForTest(set);
+
+        DungeonBlueprint bp = generator.generateDungeonLayout();
+
+        assertNotNull(bp, "generation should finish with a valid layout");
+        assertTrue(bp.getKeySpawnRelativeLocations().containsKey(VaultColor.BLUE),
+                "a BLUE key marker on the hub should be consolidated, got: "
+                        + bp.getKeySpawnRelativeLocations().keySet());
+        assertTrue(bp.getKeySpawnRelativeLocations().keySet()
+                        .containsAll(List.of(VaultColor.BLUE, VaultColor.RED, VaultColor.GREEN, VaultColor.GOLD)),
+                "all four keys placed, got: " + bp.getKeySpawnRelativeLocations().keySet());
+    }
+
+    /**
+     * A hub saved before the KEY_SPAWN marker existed carries no blue key. That should warn, not fail:
+     * a dungeon missing one vault beats no dungeon at all.
+     */
+    @Test
+    void stillGeneratesWhenNoSegmentDefinesABlueKey() {
+        generator.setAvailableSegmentsForTest(fullSet());
+
+        DungeonBlueprint bp = generator.generateDungeonLayout();
+
+        assertNotNull(bp, "a missing BLUE key should not fail generation");
+        assertFalse(bp.getKeySpawnRelativeLocations().containsKey(VaultColor.BLUE),
+                "no segment defines a BLUE key, so none should be consolidated");
     }
 
     @Test

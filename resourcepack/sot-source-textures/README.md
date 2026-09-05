@@ -10,12 +10,12 @@ sot-source-textures/
   keys/              key_{red,gold,green,blue}.png       # vault keys   (base item: TRIPWIRE_HOOK)
   keyholes/          keyhole_{red,gold,green,blue}.png   # vault keyholes (base: black glazed terracotta)
   vault-doors/       vault_door_{red,gold,green,blue}.png# vault doors  (base: black glazed terracotta)
-  branch-signifiers/ branch_{red,gold,green,blue}.png    # branch/vault-exit wall markers (base: sandstone)
+  branch-signifiers/ branch_{red,gold,green,blue}.png    # branch/vault-exit wall markers (base: the vault-colour block, see below)
 ```
 
 ## Status
 
-**Keys and coins are wired and served (issue #89 done).** The dev server now serves a slim,
+**Keys and coins are wired and served (issue #89 done).** The dev server serves a slim,
 overrides-only pack via the `pack` sidecar (`deploy/sot-test/compose.yml`), rebuilt and hot-swapped
 by `.github/workflows/resourcepack-deploy.yml` on any `resourcepack/**` change.
 
@@ -26,8 +26,14 @@ by `.github/workflows/resourcepack-deploy.yml` on any `resourcepack/**` change.
   by `items/gold_nugget.json` to the `coin_stack_small` model. Only small-coin art exists today, so
   1002/1003 reuse it as a placeholder until medium/large art is added.
 
-**Still not wired** — `keyholes/`, `vault-doors/`, and `branch-signifiers/` have no in-game attach
-point yet: their names map to nothing, `VaultDoor` renders concrete/gold blocks (not the intended
-black glazed terracotta), keyholes have no code representation, and branch signifiers depend on the
-signifier feature (issue #90). These need **block-model overrides and/or new gameplay** — tracked
-separately (issue #112, plus #90 for the branch signifier).
+**Branch signifiers have an attach point but no override yet.** `BRANCH_SIGNIFIER` markers place a
+coloured block beside the exit whose branch they advertise (see
+`DungeonGenerator.resolveBranchSignifiers`). The block written is `VaultColor.getConcreteMaterial()` —
+`red_concrete`, `lime_concrete`, `blue_concrete` and `gold_block` — so each colour is a distinct block
+the pack can override with the matching `branch_*.png`. Until that block override exists, players see
+the plain coloured block, which already reads as the branch's colour.
+
+**Still not wired** — `keyholes/` and `vault-doors/` have no in-game attach point: `VaultDoor` renders
+concrete/gold blocks (not the intended black glazed terracotta) and keyholes have no code
+representation. Those, plus the `branch_*.png` block overrides above, need **block-model overrides
+and/or new gameplay** — tracked in issue #112.

@@ -35,7 +35,36 @@ public class DungeonBlueprint {
 
     // Base of the visual sand-timer column. Null when no segment carries a TIMER marker.
     @Nullable private final Vector timerBaseRelativeLocation;
+
+    // Cell the coin bank (ender chest) is built in. Null when no segment carries a BANK marker.
+    @Nullable private final Vector bankRelativeLocation;
     private final List<Vector> playerSpawnRelativeLocations;
+
+    // Cells where players deposit carried sand onto the timer (TIMER_DEPOSIT markers). Empty when
+    // no segment carries one.
+    private final List<Vector> sandTimerRelativeLocations;
+
+    // Cells where hostile mobs are armed to spawn (MOB_SPAWNER markers). Empty when no segment
+    // carries one -- the bundled hub does not, so a stock server generates no mob encounters.
+    private final List<Vector> mobSpawnerRelativeLocations;
+
+    // Death cages (DEATH_CAGE markers) and the sacrifice points that free them (SAND_SACRIFICE
+    // markers). These two lists are index-aligned and always the same length: DungeonGenerator
+    // reconciles them, deriving a point beside any cage the templates left unpaired, so
+    // DungeonManager can zip them straight into DeathCage objects.
+    private final List<Vector> deathCageRelativeLocations;
+    private final List<Vector> sandSacrificeRelativeLocations;
+
+    // Connections between segments. Each becomes a rusty-key door; the unused openings are the
+    // entry points the generator never attached a neighbour to, and get sealed as plain wall.
+    private final List<Doorway> doorways;
+    private final List<Doorway> unusedOpenings;
+
+    // Coloured wall markings telling players which vault colour lies down each branch. One per
+    // BRANCH_SIGNIFIER placeholder the generator could resolve a colour for -- a placeholder beside
+    // an exit that leads to no vault produces nothing, so this is usually shorter than the number
+    // of placeholders the templates declare.
+    private final List<BranchSignifier> branchSignifiers;
 
     // --- Changed: Use Area for Relative Bounding Box ---
     private final Area relativeBounds; // Represents bounds using relative Locations (null world)
@@ -54,7 +83,15 @@ public class DungeonBlueprint {
                             @NotNull Area relativeBounds, // Changed parameter
                             @Nullable Vector safeExitRelativeLocation,
                             @Nullable Vector timerBaseRelativeLocation,
-                            @NotNull List<Vector> playerSpawnRelativeLocations
+                            @Nullable Vector bankRelativeLocation,
+                            @NotNull List<Vector> playerSpawnRelativeLocations,
+                            @NotNull List<Vector> sandTimerRelativeLocations,
+                            @NotNull List<Vector> deathCageRelativeLocations,
+                            @NotNull List<Vector> sandSacrificeRelativeLocations,
+                            @NotNull List<Doorway> doorways,
+                            @NotNull List<Doorway> unusedOpenings,
+                            @NotNull List<Vector> mobSpawnerRelativeLocations,
+                            @NotNull List<BranchSignifier> branchSignifiers
                            ) {
 
         // Validate inputs
@@ -84,7 +121,15 @@ public class DungeonBlueprint {
         // Deliberately not null-checked: segment templates predating the SAFE_EXIT marker have none.
         this.safeExitRelativeLocation = (safeExitRelativeLocation != null) ? safeExitRelativeLocation.clone() : null;
         this.timerBaseRelativeLocation = (timerBaseRelativeLocation != null) ? timerBaseRelativeLocation.clone() : null;
+        this.bankRelativeLocation = (bankRelativeLocation != null) ? bankRelativeLocation.clone() : null;
         this.playerSpawnRelativeLocations = Collections.unmodifiableList(new ArrayList<>(playerSpawnRelativeLocations));
+        this.sandTimerRelativeLocations = Collections.unmodifiableList(new ArrayList<>(sandTimerRelativeLocations));
+        this.deathCageRelativeLocations = Collections.unmodifiableList(new ArrayList<>(deathCageRelativeLocations));
+        this.sandSacrificeRelativeLocations = Collections.unmodifiableList(new ArrayList<>(sandSacrificeRelativeLocations));
+        this.doorways = Collections.unmodifiableList(new ArrayList<>(doorways));
+        this.unusedOpenings = Collections.unmodifiableList(new ArrayList<>(unusedOpenings));
+        this.mobSpawnerRelativeLocations = Collections.unmodifiableList(new ArrayList<>(mobSpawnerRelativeLocations));
+        this.branchSignifiers = Collections.unmodifiableList(new ArrayList<>(branchSignifiers));
     }
 
     // --- Getters ---
@@ -104,12 +149,48 @@ public class DungeonBlueprint {
         return safeExitRelativeLocation != null ? safeExitRelativeLocation.clone() : null;
     }
 
+    /** Relative doorways between connected segments; each gets a rusty-key door. */
+    @NotNull public List<Doorway> getDoorways() { return doorways; }
+
+    /** Relative entry points no neighbour was attached to; these get sealed as plain wall. */
+    @NotNull public List<Doorway> getUnusedOpenings() { return unusedOpenings; }
+
+    /**
+     * Relative coloured wall markings, each already resolved to the vault colour down its branch.
+     * Empty when no segment declares a BRANCH_SIGNIFIER placeholder.
+     */
+    @NotNull public List<BranchSignifier> getBranchSignifiers() { return branchSignifiers; }
+
     /** Relative per-player spawn points (empty if no segment defines a PLAYER_SPAWN marker). */
     @NotNull public List<Vector> getPlayerSpawnRelativeLocations() { return playerSpawnRelativeLocations; }
+
+    /** Relative mob spawner cells (empty if no segment defines a MOB_SPAWNER marker). */
+    @NotNull public List<Vector> getMobSpawnerRelativeLocations() { return mobSpawnerRelativeLocations; }
+
+    /** Relative sand deposit cells (empty if no segment defines a TIMER_DEPOSIT marker). */
+    @NotNull public List<Vector> getSandTimerRelativeLocations() { return sandTimerRelativeLocations; }
+
+    /**
+     * Relative death cage cells. Index-aligned with {@link #getSandSacrificeRelativeLocations()}:
+     * the cage at index i is freed by the sacrifice point at index i.
+     */
+    @NotNull public List<Vector> getDeathCageRelativeLocations() { return deathCageRelativeLocations; }
+
+    /**
+     * Relative sacrifice point cells, one per death cage and in the same order. Always the same
+     * size as {@link #getDeathCageRelativeLocations()} — the generator derives a point for any cage
+     * the segment templates did not pair one with.
+     */
+    @NotNull public List<Vector> getSandSacrificeRelativeLocations() { return sandSacrificeRelativeLocations; }
 
     /** Relative base of the visual sand-timer column, or null if no segment defines a TIMER marker. */
     @Nullable public Vector getTimerBaseRelativeLocation() {
         return timerBaseRelativeLocation != null ? timerBaseRelativeLocation.clone() : null;
+    }
+
+    /** Relative cell the coin bank stands in, or null if no segment defines a BANK marker. */
+    @Nullable public Vector getBankRelativeLocation() {
+        return bankRelativeLocation != null ? bankRelativeLocation.clone() : null;
     }
 
     // --- Changed: Getter for Relative Bounds ---

@@ -26,7 +26,7 @@ This plugin implements (or plans to implement) the following core features of th
 - **Collection**: Players find and collect sand within the dungeon.
 - **Timer Extension**: Use collected sand at the central timer mechanism to add seconds to the team's clock (e.g., 1 sand = 10 seconds).
 - **Revival**: Fallen teammates can be revived by sacrificing a specific amount of team sand.
-- **Sand Sacrifices**: Specific points in the dungeon may allow teams to sacrifice sand for rewards or to overcome obstacles *(Planned)*.
+- **Sand Sacrifices**: Sacrifice chests out in the dungeon stand in front of gates; paying their sand price (set per chest by the builder) opens the gate onto whatever the room hides behind it. The chest itself hands out nothing.
 
 ### Coin Collection & Scoring
 - Players collect coins scattered throughout the dungeon.
@@ -88,10 +88,22 @@ This plugin implements (or plans to implement) the following core features of th
   Starts the currently configured game instance.
 
 * `/sot end`
-  Forcefully ends the current game instance.
+  Forcefully ends the current game instance. Also works during the pre-game countdown.
+
+* `/sot reset`
+  Clears a finished round so another can be set up. Rounds end in the `ENDED` state and stay there
+  until you run this, so the final standings remain readable; it refuses while a game is live.
 
 * `/sot set <lobby|trapped>`
   (Admin) Stores your current position as one of the two universal game locations, writes it to `config.yml` and applies it immediately. Hub, Exit, and Cage are instance-specific and are not set this way.
+
+* `/sot seed [<value>|random]`
+  (Admin) Shows or fixes the dungeon generation seed, writing it to `config.yml` and applying it
+  immediately. With no argument it reports the configured seed *and* the seed the last round actually
+  generated from - so a good random dungeon can be captured after the fact and replayed with
+  `/sot seed <that number>`. A whole number is used directly; anything else is hashed, so
+  `/sot seed mcc-finals` works. `random` clears it. Refused while a round is live, since that
+  dungeon is already generated.
 
 * `/team assign <Player> <TeamID>`
   (Admin - if using internal `TeamManager`) Assigns a player to a team definition.
@@ -132,13 +144,16 @@ This plugin implements (or plans to implement) the following core features of th
   * Build segments in-game.
   * Use marker tools (`/sotgetcointool`, `/sotgetitemtool`, etc. - *Need implementation for entry points, vaults, keys*) to place markers within the segment build.
   * Take the master builder tool with `/sotbuilder` and switch marker type with `/sotmode <mode>`. `SAFE_EXIT` marks the block players interact with to escape - place one in your HUB segment, clicking its top face.
+  * `TIMER` marks the block *below* the base of the visual sand column - place one in your HUB segment. Without it that hub gets no sand column at all (the timer still counts down); the column is never placed at the lobby.
   * Select the segment region with WorldEdit.
   * Use `/sotsavesegment <name> <type> <filename.schem>` to save both the schematic to `plugins/SoT/schematics/` and the metadata JSON to `plugins/SoT/`.
-  * The plugin will load these templates on startup from the `plugins/SoT/` directory. Default templates can be bundled in `src/main/resources/default_segments/` and copied out on first run.
+  * The plugin will load these templates on startup from the `plugins/SoT/` directory. Default templates are bundled in `src/main/resources/bundled_segments/` and copied out on enable.
+  * That copy is **skip-if-present**, so it never clobbers your in-game edits - which also means a server that already has `plugins/SoT/hub.json` keeps its old copy. To pick up a fixed bundled hub, delete `plugins/SoT/hub.json` and restart (or delete it and run `/sotreloadsegments`).
 * **Game Locations**:
   * Use `/sot set lobby` while standing at the desired main world anchor point (e.g., pre-game lobby).
   * Use `/sot set trapped` while standing at the location where players trapped by the timer should be sent.
   * (Hub, Safe Exit, Death Cage are now generated per-instance based on segment metadata and are not set globally). The safe exit comes from the `SAFE_EXIT` marker; a dungeon with no such marker falls back to accepting any End Portal Frame near the hub.
+  * The lobby anchor is only the dungeon world/origin and the pre-game gathering point - nothing is built there.
   * Both live in `plugins/SoT/config.yml` and can be edited by hand instead, followed by a restart:
 
     ```yaml
@@ -162,6 +177,18 @@ This plugin implements (or plans to implement) the following core features of th
   * Both ship unset. The plugin still enables without them (falling back to the main world's spawn
     and logging a warning) so that `/sot set` is reachable, but `/sot setup` and `/sot start` refuse
     to run until both are configured.
+* **Dungeon Seed**:
+  * `dungeon.seed` in the same `config.yml` fixes dungeon generation, so every round lays out
+    identically - same rooms, same vaults and keys, same loot and floor sand, for every team:
+
+    ```yaml
+    dungeon:
+      seed: 4815162342
+    ```
+
+  * It ships blank, which means each round rolls its own seed. Either way the seed used is printed to
+    the console at generation, so a random layout worth keeping can be captured and replayed.
+  * `/sot seed <value>` sets it without a restart, and `/sot seed random` clears it back.
 * **Visual Timers**:
   * The visual timers are placed relative to the `lobby` location set above. Ensure the surrounding area is suitable.
 

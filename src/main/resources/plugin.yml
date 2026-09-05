@@ -16,7 +16,7 @@ commands:
 
   sotmode:
     description: Switches the segment builder tool mode.
-    usage: /<command> <mode> [color|value]
+    usage: /<command> <mode> [color|value|cost]
     permission: sot.admin.builder
 
   sotsavesegment:
@@ -42,7 +42,7 @@ commands:
   # --- Game Control Commands ---
   sot:
     description: Main command for Sands of Time game control and location setup.
-    usage: /<command> <setup|start|end|set <lobby|trapped>>
+    usage: /<command> <setup|start|end|reset|set <lobby|trapped>|seed [<value>|random]>
     permission: sot.admin.control
 
 permissions:

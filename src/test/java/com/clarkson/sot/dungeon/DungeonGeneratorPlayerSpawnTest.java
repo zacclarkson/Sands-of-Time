@@ -30,7 +30,7 @@ class DungeonGeneratorPlayerSpawnTest {
                 null, List.of(), null,
                 List.of(), List.of(),
                 null,
-                null, List.of(), null, List.of(), null, playerSpawns);
+                null, List.of(), null, List.of(), null, playerSpawns, List.of(), List.of());
     }
 
     private static PlacedSegment placed(Segment segment, int x, int y, int z) {

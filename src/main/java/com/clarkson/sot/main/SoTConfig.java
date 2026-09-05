@@ -28,6 +28,11 @@ public final class SoTConfig {
     public static final String LOBBY_PATH = "locations.lobby";
     /** Config path of the universal location players are sent to when their timer runs out. */
     public static final String TRAPPED_PATH = "locations.trapped";
+    /** Config path of the dungeon generation seed; blank means "roll a fresh one each round". */
+    public static final String SEED_PATH = "dungeon.seed";
+
+    /** The word an operator can write in place of a seed to mean "roll a fresh one each round". */
+    public static final String RANDOM_SEED_KEYWORD = "random";
 
     private SoTConfig() {
         // Static utility.
@@ -110,6 +115,73 @@ public final class SoTConfig {
         section.set("z", location.getZ());
         section.set("yaw", (double) location.getYaw());
         section.set("pitch", (double) location.getPitch());
+    }
+
+    /**
+     * Reads the dungeon generation seed from {@code root} at {@code path}.
+     *
+     * <p>An absent entry, a blank one, or the literal {@code random} all mean "roll a fresh seed
+     * each round" and return {@code null} quietly — a seedless server is the normal case, unlike an
+     * unconfigured location. Anything present but unusable logs a warning naming the problem.
+     *
+     * @param root the configuration to read from (usually {@code plugin.getConfig()}).
+     * @param path the entry path, e.g. {@link #SEED_PATH}.
+     * @param log  where to report malformed entries.
+     * @return the fixed seed, or {@code null} to generate a random one per round.
+     */
+    @Nullable
+    public static Long readSeed(@NotNull ConfigurationSection root, @NotNull String path,
+                                @NotNull Logger log) {
+        Objects.requireNonNull(root, "root configuration cannot be null");
+        Objects.requireNonNull(path, "path cannot be null");
+        Objects.requireNonNull(log, "log cannot be null");
+
+        Object raw = root.get(path);
+        if (raw == null) {
+            return null; // Not configured; not an error.
+        }
+        if (raw instanceof Number number) {
+            return number.longValue();
+        }
+        if (raw instanceof String text) {
+            String trimmed = text.trim();
+            if (trimmed.isEmpty() || trimmed.equalsIgnoreCase(RANDOM_SEED_KEYWORD)) {
+                return null; // The shipped "unset" sentinel; not an error.
+            }
+            return parseSeed(trimmed);
+        }
+        log.warning("config.yml: '" + path + "' is not a number or text (got '" + raw
+                + "'); generating a random seed instead.");
+        return null;
+    }
+
+    /**
+     * Turns operator input into a seed, the way Minecraft's world-seed field does: a value that
+     * parses as a {@code long} is used as-is, and anything else is hashed, so {@code /sot seed
+     * mcc-finals} is a legitimate — and repeatable — way to name a dungeon.
+     */
+    public static long parseSeed(@NotNull String raw) {
+        Objects.requireNonNull(raw, "raw seed cannot be null");
+        String trimmed = raw.trim();
+        try {
+            return Long.parseLong(trimmed);
+        } catch (NumberFormatException e) {
+            return trimmed.hashCode();
+        }
+    }
+
+    /**
+     * Writes the dungeon seed into {@code root} at {@code path}, or clears it back to "random each
+     * round" when {@code seed} is {@code null}. The caller is responsible for persisting the
+     * configuration afterwards (e.g. {@code plugin.saveConfig()}).
+     */
+    public static void writeSeed(@NotNull ConfigurationSection root, @NotNull String path,
+                                 @Nullable Long seed) {
+        Objects.requireNonNull(root, "root configuration cannot be null");
+        Objects.requireNonNull(path, "path cannot be null");
+        // The blank string rather than null: it keeps the key (and its explanatory comment's
+        // subject) in config.yml instead of deleting the entry entirely.
+        root.set(path, seed != null ? seed : "");
     }
 
     /** Formats a location for an operator-facing message or log line. */

@@ -12,7 +12,7 @@ Sands of Time is a team-based dungeon exploration minigame for Minecraft, inspir
 4. [The Timer & Sand](#the-timer--sand)
 5. [Dungeon Structure](#dungeon-structure)
 6. [Coins & Scoring](#coins--scoring)
-7. [Banking at the Sphinx](#banking-at-the-sphinx)
+7. [Banking](#banking)
 8. [Vault System](#vault-system)
 9. [Keys](#keys)
 10. [Doors & Gates](#doors--gates)
@@ -70,7 +70,7 @@ The hub is the central starting area for each team's dungeon. It serves as a saf
 
 The hub has approximately **10 exits** leading into the dungeon. These exits fall into two categories:
 
-**4 Vault Exits** — each marked with a colored indicator on the wall showing which vault color lies down that branch:
+**4 Vault Exits** — each marked with a colored indicator on the wall showing which vault color lies down that branch (a block of that colour, written beside the exit at generation time from the hub's `BRANCH_SIGNIFIER` placeholders — see [Segment Features](#segment-features)):
 
 - Blue vault branch
 - Green vault branch
@@ -82,8 +82,9 @@ The hub has approximately **10 exits** leading into the dungeon. These exits fal
 ### Hub Facilities
 
 - **Sand timer** — a physical column of sand blocks that drains as time passes (each block = 10 seconds visually)
-- **Sphinx** — the banking NPC/location where players deposit coins
+- **Bank** — the ender chest in the hub where players deposit coins
 - **Death cage** — where dead players respawn, awaiting rescue
+- **Timer deposit points** — the cells beside the sand column where carried sand is spent on the timer
 - **Sand sacrifice points** — one per player on the team, used to free teammates from the death cage
 - **Safe exit** — the block players interact with to leave the dungeon permanently
 - **Blue key spawn** — the blue vault key is always available in the hub (every hub must have a blue key spawn location)
@@ -112,16 +113,76 @@ The hub has approximately **10 exits** leading into the dungeon. These exits fal
 
 - Sand spawns throughout the dungeon as **normal sand blocks** placed in the world
 - Players must **break the sand with a shovel** to pick it up (like mining normal sand)
-- Each sand block collected adds **10 seconds** to the team's timer
+- Breaking sand puts a **sand item in your inventory**. It adds **no time on its own** — carrying it
+  back is the whole point
 - Sand is also used to **free teammates** from the death cage (see [Death & Corpse Run](#death--corpse-run))
+  and to **open gates** onto the coins behind them (see [Sand Sacrifice](#sand-sacrifice))
 - Sand spawn locations have a **40% chance** of actually spawning sand per location
 - Finding and returning sand to the timer is essential for survival
 
+### Depositing Sand
+
+- The hub has **timer deposit points** beside the sand column — the cells marked by the builder's
+  `TIMER_DEPOSIT` tool
+- **Place a sand block on a deposit point** to spend it: the block never stands, and the team timer
+  gains **10 seconds**
+- A deposit is **refused** while the timer is at its 150-second cap, and the sand stays in your
+  inventory rather than being spent for nothing
+- You **cannot mine your own team's timer column** for sand
+- Escaping the dungeon **wipes your inventory**, so undeposited sand is lost; any sand still carried
+  when the round ends is cleared too
+- **Dying drops your sand** on the floor where you fell, like any other item — a teammate, or you
+  after being revived, can pick it back up (see [Death & Corpse Run](#death--corpse-run))
+
 ### Sand Sacrifice
 
-- Dedicated sacrifice points exist in the hub — **one per player** on the team
+A **sacrifice point** is a chest you feed sand into. It never hands anything out itself: what it
+buys is always something *else* — a teammate's freedom, or a gate opening onto the coins behind it.
+The same `SAND_SACRIFICE` marker means one of two things depending on where the builder put it.
+
+**Freeing a caged teammate** (sacrifice points in the hub):
+
+- Dedicated sacrifice points exist in the hub — **one per player** on the team, each a **chest**
+  paired with that player's death cage
 - A teammate must sacrifice sand at these points to free a player from the death cage
-- Cost: **1 sand** per revive
+- Cost: the dead player's **death count**, capped at **5 sand** — their first death costs 1, their
+  second 2, and so on, so repeated deaths get progressively expensive for the team
+- Sand is paid **one at a time**, so several teammates can chip in on the same revive
+- An active point is marked by a **block of sand floating above the chest with an arrow pointing
+  down**, showing how much sand is still owed. A chest with nothing above it has nobody to free
+- Sand already paid toward a revive is **spent**: if the timer runs out before the price is met, it
+  is not refunded
+
+**Opening a gate** (sacrifice points anywhere else — the sand-for-money trade):
+
+- Out in the dungeon a sacrifice chest stands **in front of a gate**, and the money is **behind the
+  gate**. Paying the chest's price opens that segment's gates, exactly as pulling its lever would
+- The price is set by the builder **per chest** (`/sotmode SAND_SACRIFICE <cost>`, 1–10 sand,
+  default 1) and is shown from the start of the round as the same **floating sand block and count**
+  a cage chest shows, so you can weigh what you see through the bars against what it costs
+- Sand is paid **one at a time**, one per right-click, so several teammates can chip in; the gates
+  open on the click that completes the price
+- Sand already paid is **spent**: if a teammate opens the same gates with the segment's lever first,
+  the chest has nothing left to sell and what went into it is not refunded. A chest whose gates are
+  already open refuses without taking anything
+- Every sand paid here is 10 seconds not bought on the timer — which is the trade
+
+### Block Breaking
+
+- While a round is live, players may break **only** two kinds of block:
+  - **Sand** — the timer currency (see [Sand Items](#sand-items))
+  - **Mob spawners** — broken to stop the mobs they produce
+- A third kind is planned but **not implemented yet**: blocks with money inside that you break for
+  the coins
+- Everything else in the dungeon is protected: walls and floors, vault marker blocks, vault and
+  segment doors, gates and their levers, death cages, and the sand sacrifice chests — a gate you
+  could mine through would make the lever and the sacrifice pointless
+- The **visual sand timer column is protected too**, even though it is made of sand — mining your
+  own timer for sand is not a strategy
+- Players cannot **place** blocks during a round, with one exception: placing carried sand on a
+  timer deposit point, which is how sand is turned into time
+- The restriction lifts when the round ends, so builders can work between games. Staff who are not
+  playing are unaffected, and Creative/Spectator mode bypasses it entirely
 
 ---
 
@@ -132,8 +193,19 @@ The hub has approximately **10 exits** leading into the dungeon. These exits fal
 - Dungeons are procedurally generated using a **depth-first search (DFS)** algorithm
 - Each team gets their own copy of the same dungeon layout (blueprint)
 - Maximum dungeon depth: **`MAX_DEPTH` segments** from the hub (currently 12; the deepest vault, gold, maxes at depth 10)
-- Maximum total segments per dungeon: **50**
-- Generation attempts up to **5 retries** if validation fails
+- Maximum total segments per dungeon: **120**
+- Generation attempts up to **20 retries** if validation fails
+
+#### Seeding
+
+- Generation is **seeded**, so a given seed always produces the same dungeon — the same rooms, vaults
+  and keys, and the same loot and sand on the floor. Every team is populated from that one seed too,
+  so team dungeons are identical rather than merely the same shape
+- By default each round rolls its own seed. The seed used is always logged at generation, so a layout
+  worth keeping can be captured and replayed afterwards
+- Set a fixed seed with `dungeon.seed` in `config.yml`, or in-game with `/sot seed <value>`; a whole
+  number is used directly and anything else is hashed, so `mcc-finals` is a valid seed. `/sot seed`
+  on its own reports both the configured seed and the one the last round generated from
 
 ### Segment Types
 
@@ -158,20 +230,20 @@ Each segment template can contain any combination of:
 - **Sand spawns** — locations where sand items may appear
 - **Item spawns** — locations for generic loot items
 - **Mob spawners** — locations for hostile mob spawning
-- **Sand sacrifice points** — where sand can be sacrificed
+- **Sand sacrifice points** — `SAND_SACRIFICE` markers, rendered as a chest. On the **HUB** a chest frees a caged teammate and is paired positionally with the `DEATH_CAGE` markers; on **any other segment** it is a gate sacrifice that opens that segment's gates for a builder-set price (`/sotmode SAND_SACRIFICE <cost>`, saved per marker as `sandSacrificeCosts`). Put the coins *behind* the gate — the chest itself pays out nothing
 - **Vault markers** — activation block for a vault
 - **Key spawns** — where vault keys are placed
-- **Gates** — openings blocked until a lever is pulled
+- **Gates** — openings blocked until the segment's lever is pulled or its sacrifice chest is paid
 - **Vault doors** — openings blocked until the matching vault is opened
-- **Levers** — interact to open all gates in the segment
-- **Color marking placeholder** — every segment needs a placeholder location for a color marking on the wall, used to indicate which vault branch the segment belongs to
+- **Levers** — interact to open all gates in the segment, free of charge; optional when the segment has a sacrifice chest
+- **Branch signifiers** — `BRANCH_SIGNIFIER` markers: placeholder cells for the coloured wall markings that tell players which vault branch they are on. The template says only *where* a marking goes, never which colour: each placeholder is paired with the **nearest entry point of its own segment** — the exit it stands beside — and generation paints it with the vault colour that lies down that branch (the nearest vault, where a branch holds more than one). A placeholder beside an exit the generator attached nothing to, or beside a branch with no vault in it, is simply left unpainted, which is how the hub's ~6 non-vault exits stay unmarked. The same corridor template can therefore read red in one dungeon and gold in the next
 - **Safe exit** — a **2D area (like a door) built as a nether portal** that players walk through to escape. Placed in the builder as a two-click bound (`SAFE_EXIT`), normally in the HUB; one per dungeon, and a HUB marker takes priority over one on any other segment. Vanilla Nether travel is suppressed so the portal never teleports anyone out (`NetherPortalListener`).
 
 The HUB segment additionally defines these hub-only features (placed in the builder, wired to the live dungeon in a later pass):
-- **Bank** — a single interact point (`BANK` marker) marking where the banking Sphinx / bank spot lives
-- **Death cages** — 1–4 points (`DEATH_CAGE` markers), one per player, where dead players are held and respawn; each cage's revive/sacrifice point is auto-derived at runtime
+- **Bank** — a single interact point (`BANK` marker) marking where the bank stands. An **ender chest** is built in that cell at runtime; right-clicking it banks everything the player is carrying
+- **Death cages** — 1–4 points (`DEATH_CAGE` markers), one per player, where dead players are held and respawn. Each cage is paired with the sacrifice point of the same index (the first `SAND_SACRIFICE` marker frees the first cage, and so on); a cage the template leaves unpaired gets a chest derived two blocks in front of it, so a hub saved before these markers existed still plays
 - **Timer deposits** — interact points (`TIMER_DEPOSIT` markers) where players place collected sand onto the timer to add time
-- **Timer column** — a single `TIMER` marker at the base of the visual sand-timer column; the draining sand timer stands in the hub at this marker (per team). When a HUB has no TIMER marker the timer falls back to the lobby anchor.
+- **Timer column** — a single `TIMER` marker at the base of the visual sand-timer column; the draining sand timer stands in the hub at this marker (per team). A HUB with no TIMER marker simply gets no visual column that round (the timer still counts down normally) — the column is never placed anywhere but the hub.
 
 ### Depth & Difficulty
 
@@ -201,13 +273,13 @@ Coins spawn throughout the dungeon as visual displays on the ground. They come i
 - Coins use gold nuggets as their base material with custom model data
 
 ### Unbanked vs. Banked
-- **Unbanked coins**: Coins you've collected but haven't deposited at the Sphinx. These are at risk.
-- **Banked coins**: Coins deposited at the Sphinx. These are safe (minus the tax).
+- **Unbanked coins**: Coins you've collected but haven't deposited at the bank. These are at risk.
+- **Banked coins**: Coins deposited at the bank. These are safe (minus the tax).
 - Only banked coins count toward the final team score.
 
 ### Penalties
 
-- **Death**: Drop **all** items and unbanked coins at death location (no percentage penalty — everything can be recovered if you get back in time)
+- **Death**: Drop **all** items, undeposited sand included, at the death location (no percentage penalty — everything dropped can be recovered if you get back in time). Unbanked coins are cleared rather than dropped
 - **Trapped (timer expires)**: Lose **ALL** unbanked coins — total wipeout
 
 ### Live Scoreboard
@@ -226,13 +298,17 @@ scores are broadcast in chat.
 
 ---
 
-## Banking at the Sphinx
+## Banking
 
-- The Sphinx is located in the hub
-- Players must physically return to the hub and interact with the Sphinx to bank coins
+- The bank is an **ender chest** standing in the hub, at the cell the HUB template's `BANK` marker
+  names. Each team has its own, in their own dungeon instance
+- Players must physically return to the hub and **right-click the chest** to bank
+- One click banks **everything** the player is carrying — there is no partial deposit
 - Banking applies a **20% tax** — you keep 80% of what you deposit
 - Formula: `banked_amount = coins_to_bank × 0.80`
 - The taxed 20% is lost (destroyed, not redistributed)
+- The chest never opens as storage, and cannot be broken while the round is running
+- Dead and escaped players cannot bank — banking is something you do before you leave
 - This creates a constant risk/reward decision: bank frequently (lose more to tax but secure coins) vs. bank rarely (keep more but risk losing everything)
 
 ---
@@ -262,7 +338,9 @@ and it will naturally prefer a puzzle room once those exist.
 - Each vault has a **colored marker block** that serves as the activation point
 - Right-click the marker block with the matching colored key to open the vault
 - The key is **consumed** on use
-- Opening a vault changes the marker block to glass and plays sound effects
+- Opening a vault sinks the marker block along with the vault door, and plays sound effects
+- The reward is whatever the segment places **behind** the vault door, revealed as the wall drops —
+  no coins are spawned at the marker, which would put them in front of the wall the vault was sealing
 - Only one of each vault color exists per dungeon
 
 ### Vault Block Materials
@@ -276,7 +354,7 @@ and it will naturally prefer a puzzle room once those exist.
 
 ### Vault Door
 - Each vault may have an associated vault door (a wall of colored blocks)
-- The vault door opens when the vault is opened
+- The vault door opens when the vault is opened — it needs no second key
 - Vault doors animate by removing blocks top-to-bottom with piston sounds
 - Once opened, vault doors cannot be closed again
 
@@ -308,10 +386,13 @@ and it will naturally prefer a puzzle room once those exist.
 
 ### Rusty Keys
 
-- Used to open standard **segment doors** (not vault doors)
+- Used to open standard **segment doors** — vault doors and gates take no key at all
 - Separate from colored vault keys
 - Right-click the door's keyhole block with a rusty key to open
-- Found throughout the dungeon
+- Found throughout the dungeon: each `ITEM_SPAWN` marker has a **20% chance** of yielding a rusty
+  key instead of rolling the loot table
+- Placement is by chance, not one guaranteed key per room, so a branch can come up short and stay
+  shut for the round
 
 ---
 
@@ -320,33 +401,49 @@ and it will naturally prefer a puzzle room once those exist.
 ### Segment Doors (Rusty Doors)
 
 - Block walls between connected segments that block passage
-- Each door has a **keyhole block** — a specific block the player right-clicks with the correct key
+- One door per **connection the generator actually made** — a segment's entry points that no
+  neighbour was attached to are sealed with plain wall instead, so no door opens onto nothing
+- Built from **dark oak planks**, filling the 3-wide x 4-tall opening around the entry point marker
+- Each door has a **keyhole block** — a block of **oxidized cut copper** one block above the entry
+  point marker, at eye level in the middle of the door
 - Opened with **rusty keys**: right-click the keyhole with a rusty key to open
 - The key is consumed on use
-- Can be any solid block material (configurable per segment)
 
 ### Gates
 
 - Block walls **local to a segment** that restrict access to areas **within that segment only**
 - Gates do **not** block access to other segments — they only gate off optional areas within their own segment
-- This creates a **choice mechanic**: e.g., "There is a set of coins here but it's guarded by ravagers — do you open the gate?"
-- Opened by pulling the segment's **lever**
-- A segment can have multiple gates, all opened by one lever
-- Every segment with gates **must** have exactly one lever
-- Rendered as gray stained glass in the builder tool
+- This creates a **choice mechanic**: e.g., "There is a set of coins here but it's guarded by ravagers — do you open the gate?" — or "it costs 3 sand, is it worth 30 seconds?"
+- Opened by pulling the segment's **lever** (free) or by paying its **sacrifice chest** (sand — see [Sand Sacrifice](#sand-sacrifice)). Either opens every gate in the segment; whichever is used first wins and the other then reports the gates already open
+- A segment can have multiple gates, all opened together
+- Every segment with gates **must** have a lever or at least one sacrifice chest; a builder normally uses one or the other, though both are allowed. A HUB's sacrifice chests are cage points, so a HUB with gates needs a lever
+- Built from **iron bars** at runtime — see-through on purpose, so players can size up what is behind
+  a gate before deciding whether to open it
+- The lever is a real lever block, written into the world when the dungeon is built. The builder
+  marker is an *air* cell, and air never registers a right-click
+- **Pulling the lever is one-way**: the segment's gates open permanently and the lever stays flipped.
+  A second pull is refused with a message. Gates opened by sacrifice flip the lever too, so the world
+  always shows the same state
+- Rendered as gray stained glass in the builder tool (iron bars in play)
 
 ### Vault Doors
 
-- Colored block walls associated with a vault
-- Each vault door has a **keyhole block** — right-click with the matching colored key to open
-- The key is consumed on use
+- Colored block walls associated with a vault, built from that vault's own block material
+- **No keyhole and no key of their own.** A vault door opens the moment its team opens the matching
+  **vault** — there is one key per colour and it is consumed at the vault marker, so a second keyhole
+  would mean finding two keys for one reward
+- Geometry comes from the segment template's `VAULT_DOOR` marker, and the colour from the vault that
+  segment contains — so a vault door **must live in the same segment as its vault marker**
+- Animate open like every other door, plus an end-portal-frame fill and a level-up sound
 - Cannot be closed once opened
-- Rendered as purple stained glass in the builder tool
+- Rendered in the builder tool as stained glass in the vault's own colour
 
 ### Door Animation
 
-- When a door is opened, it **slides downward** one block at a time
-- Each layer moves down sequentially until the entire door has descended below the lowest bound, leaving the passage clear for the player
+- When a door is opened it **sinks downward**: its topmost layer of blocks is cleared first, then
+  the next, so the wall visibly drops into the floor
+- Layers clear in sequence until the whole opening is air, leaving the passage clear for the player
+- The keyhole block clears with the layer it sits in
 - Animation tick delay: 3 ticks per layer (configurable, minimum 1)
 - Sounds: piston contract/extend during animation, iron door open/close on completion
 - Vault doors play additional sounds: end portal frame fill + player level up
@@ -357,19 +454,28 @@ and it will naturally prefer a puzzle room once those exist.
 
 When a player dies while the timer is still active:
 
-1. **All items and unbanked coins drop** at the death location as a corpse/loot pile
-2. There is **no percentage penalty** — everything is dropped, nothing is destroyed
+1. **All items drop** at the death location as a corpse/loot pile — **undeposited sand included**.
+   Sand is the round's currency for both timer seconds and revives, so carrying it through the
+   dungeon is a real risk; this holds even on a server running `keepInventory`, because it is a rule
+   of the game rather than a server setting
+2. **Unbanked coins are cleared outright** — they are a score, not an item, so there is nothing on
+   the floor to run back for. Banked coins are safe. (The rest of the pile has no percentage
+   penalty: it is all recoverable if you get back in time)
 3. Player **respawns in the death cage** at the hub
 4. Player is now in the **DEAD_AWAITING_REVIVE** state — they cannot leave the cage on their own
-5. A **teammate must sacrifice 1 sand** at a sacrifice point to free the dead player from the cage
-6. Once freed, the player is back at the hub and can **run back to their death location** to recover all dropped items and coins
-7. If no teammate comes to revive, the player stays trapped in the cage until the timer expires (at which point all unbanked coins are lost)
+5. A **teammate must sacrifice sand** at the sacrifice chest to free the dead player from the cage —
+   1 sand for their first death, 2 for their second, up to a cap of 5. It is paid a sand at a time,
+   so the whole team can contribute; a floating sand block above the chest counts down what is left
+6. Once freed, the player is back at the hub and can **run back to their death location** to recover all dropped items — sand recovered this way deposits for time exactly as if it had never been dropped
+7. If no teammate comes to revive, the player stays trapped in the cage until the timer expires, and whatever they dropped is never recovered
 
 ### Death Risk Factors
 
 - Dying deep in the dungeon is extremely punishing — the corpse run back eats valuable timer seconds
-- The sand cost to revive means the team loses 10 seconds of timer per death
-- Unrecovered coins at the death location are lost if the timer expires
+- The sand cost to revive means the team loses 10 seconds of timer for a first death, and up to 50 for a fifth — every death makes the next one dearer
+- Unbanked coins are gone the moment you die — only the items and sand on the floor can be won back
+- Sand left lying at the death location is time the team never gets — and it despawns like any other
+  dropped item, so a corpse run that takes too long loses it outright
 - While your items sit at the death location, other hazards (mobs, time pressure) make recovery dangerous
 
 ---
@@ -380,7 +486,7 @@ When a team's timer reaches zero:
 
 1. **All players still in the dungeon** (status: ALIVE_IN_DUNGEON or DEAD_AWAITING_REVIVE) are teleported to a public trapped location
 2. Their status changes to **TRAPPED_TIMER_OUT**
-3. **ALL unbanked coins are lost** — complete wipeout of anything not banked at the Sphinx
+3. **ALL unbanked coins are lost** — complete wipeout of anything not banked at the bank
 4. The team's run is over — only banked coins count toward their final score
 
 ### When the Timer is Low
@@ -418,6 +524,14 @@ Items spawn on the dungeon floor as visual displays that players walk over to co
 - Only items belonging to the player's team can be picked up
 - Plays `ENTITY_ITEM_PICKUP` sound on collection (0.7 volume, 1.2 pitch)
 - If inventory is full, overflow items drop at the player's feet
+
+### Hunger & Healing
+- **Hunger never drops while a round is live** — countdown, play and pause — for everyone on a
+  team, caged and trapped players included. The bar is filled the moment play begins, so nobody
+  starts a round unable to sprint
+- **There is no food in the dungeon.** The loot table drops **splash potions of healing** in the
+  slots bread used to hold — the burst heal for a fight, on top of vanilla's slow natural
+  regeneration, which keeps running because the hunger bar stays full
 
 ---
 
@@ -469,7 +583,7 @@ Puzzle rooms are accessible from the hub exits (not on the vault branches). They
 | Constant | Value |
 |----------|-------|
 | Banking tax | 20% |
-| Death penalty | None (drop all items/coins, no percentage destroyed) |
+| Death penalty | Drop all items (sand included); unbanked coins cleared |
 | Timer expiry penalty | 100% (all unbanked) |
 | Live scoreboard refresh interval | 20 ticks (1 second) |
 | Depth multiplier range | 100% (hub) to 120% (max depth) |
@@ -478,10 +592,11 @@ Puzzle rooms are accessible from the hub exits (not on the vault branches). They
 | Constant | Value |
 |----------|-------|
 | Timer seconds per sand | 10 |
-| Revive cost | 1 sand |
+| Revive cost | The dead player's death count, capped at 5 sand |
 | Sand spawn chance | 40% per location |
 | Sand collection method | Break with shovel (normal sand blocks) |
 | Sacrifice points per team | 1 per player on the team |
+| Gate sacrifice cost | Builder-set per chest, 1–10 sand (default 1) |
 
 ### Coins
 | Constant | Value |

@@ -160,6 +160,71 @@ class GameCommandTest {
         verify(gameManager, never()).setupGame(any(), any());
     }
 
+    // --- Consecutive rounds: /sot reset, and the guards that make a second round reachable ---
+
+    @Test
+    void resetClearsAFinishedRoundSoAnotherCanBeSetUp() {
+        when(gameManager.getCurrentState()).thenReturn(GameState.ENDED);
+        when(gameManager.resetGame()).thenReturn(true);
+
+        assertTrue(run(opPlayer(), "reset"));
+
+        verify(gameManager).resetGame();
+    }
+
+    @Test
+    void resetIsRefusedWhileARoundIsStillLive() {
+        // Tearing the round down underneath players would strand them in the dungeon.
+        for (GameState live : List.of(GameState.COUNTDOWN, GameState.RUNNING, GameState.PAUSED)) {
+            when(gameManager.getCurrentState()).thenReturn(live);
+
+            assertTrue(run(opPlayer(), "reset"), "reset should be handled in state " + live);
+        }
+
+        verify(gameManager, never()).resetGame();
+    }
+
+    @Test
+    void endWorksDuringTheCountdown() {
+        // A round started by mistake has to be abortable without waiting out the countdown.
+        when(gameManager.getCurrentState()).thenReturn(GameState.COUNTDOWN);
+
+        assertTrue(run(opPlayer(), "end"));
+
+        verify(gameManager).endGame();
+    }
+
+    @Test
+    void startReportsSuccessOnceTheCountdownBegins() {
+        // startGame() hands off to the countdown, so COUNTDOWN — not RUNNING — is the success state.
+        // Checking for RUNNING made every successful start report "Start failed" instead.
+        when(gameManager.getCurrentState()).thenReturn(GameState.SETUP, GameState.COUNTDOWN);
+
+        assertTrue(run(opPlayer(), "start"));
+
+        verify(gameManager).startGame();
+        // The failure branch is the only thing that inspects the generator, so never touching it
+        // proves the success branch was taken.
+        verify(gameManager, never()).getDungeonGenerator();
+    }
+
+    @Test
+    void startIsRefusedOnceARoundHasEnded() {
+        when(gameManager.getCurrentState()).thenReturn(GameState.ENDED);
+
+        assertTrue(run(opPlayer(), "start"));
+
+        verify(gameManager, never()).startGame();
+    }
+
+    @Test
+    void tabCompleteOffersReset() {
+        List<String> completions =
+                command.onTabComplete(opPlayer(), bukkitCommand, "sot", new String[]{"res"});
+
+        assertEquals(List.of("reset"), completions);
+    }
+
     @Test
     void tabCompleteOffersSetTargets() {
         List<String> completions =
@@ -176,5 +241,98 @@ class GameCommandTest {
         // "setup" shares the prefix, so assert membership rather than the whole list.
         assertTrue(completions.contains("set"));
         assertTrue(completions.contains("setup"));
+    }
+
+    // --- /sot seed (issue #49) ---
+
+    @Test
+    void seedAppliesLiveAndPersists() {
+        assertTrue(run(opPlayer(), "seed", "4815162342"));
+
+        verify(gameManager).setDungeonSeed(4815162342L);
+        verify(plugin).saveConfig();
+        assertEquals(4815162342L, config.getLong(SoTConfig.SEED_PATH));
+    }
+
+    @Test
+    void seedHashesANonNumericValue() {
+        assertTrue(run(opPlayer(), "seed", "mcc-finals"));
+
+        verify(gameManager).setDungeonSeed((long) "mcc-finals".hashCode());
+        assertEquals("mcc-finals".hashCode(), config.getLong(SoTConfig.SEED_PATH));
+    }
+
+    @Test
+    void seedRandomClearsTheSeed() {
+        assertTrue(run(opPlayer(), "seed", "random"));
+
+        verify(gameManager).setDungeonSeed(null);
+        verify(plugin).saveConfig();
+        assertNull(SoTConfig.readSeed(config, SoTConfig.SEED_PATH,
+                java.util.logging.Logger.getLogger(GameCommandTest.class.getName())));
+    }
+
+    @Test
+    void seedIsRefusedWhileAGameIsRunning() {
+        // The round's dungeon is already generated, so accepting the change would be a lie.
+        when(gameManager.getCurrentState()).thenReturn(GameState.RUNNING);
+
+        assertTrue(run(opPlayer(), "seed", "42"));
+
+        verify(gameManager, never()).setDungeonSeed(any());
+        verify(plugin, never()).saveConfig();
+        assertFalse(config.contains(SoTConfig.SEED_PATH));
+    }
+
+    @Test
+    void bareSeedReportsWithoutWriting() {
+        when(gameManager.getConfiguredDungeonSeed()).thenReturn(7L);
+        when(gameManager.getRoundSeed()).thenReturn(7L);
+
+        assertTrue(run(opPlayer(), "seed"));
+
+        verify(gameManager, never()).setDungeonSeed(any());
+        verify(plugin, never()).saveConfig();
+    }
+
+    @Test
+    void bareSeedIsAllowedMidGame() {
+        // Reading the seed of a round in progress is exactly when an operator wants it.
+        when(gameManager.getCurrentState()).thenReturn(GameState.RUNNING);
+        when(gameManager.getRoundSeed()).thenReturn(123L);
+
+        assertTrue(run(opPlayer(), "seed"));
+
+        verify(gameManager).getRoundSeed();
+    }
+
+    @Test
+    void tabCompleteOffersTheLastUsedSeedForReplay() {
+        when(gameManager.getRoundSeed()).thenReturn(4815162342L);
+
+        List<String> completions =
+                command.onTabComplete(opPlayer(), bukkitCommand, "sot", new String[]{"seed", ""});
+
+        assertTrue(completions.contains("4815162342"),
+                "the seed just played should be one keypress away, got: " + completions);
+        assertTrue(completions.contains("random"));
+    }
+
+    @Test
+    void tabCompleteOmitsTheLastUsedSeedBeforeAnyRound() {
+        when(gameManager.getRoundSeed()).thenReturn(null);
+
+        List<String> completions =
+                command.onTabComplete(opPlayer(), bukkitCommand, "sot", new String[]{"seed", ""});
+
+        assertEquals(List.of("random"), completions);
+    }
+
+    @Test
+    void tabCompleteOffersSeedAsASubcommand() {
+        List<String> completions =
+                command.onTabComplete(opPlayer(), bukkitCommand, "sot", new String[]{"see"});
+
+        assertEquals(List.of("seed"), completions);
     }
 }

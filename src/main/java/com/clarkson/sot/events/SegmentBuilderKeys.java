@@ -27,6 +27,8 @@ public final class SegmentBuilderKeys {
     public static final String VAULT_COLOR      = "sot_vault_color";
     /** Integer: base coin value stored on coin-spawn marker entities. */
     public static final String COIN_VALUE       = "sot_coin_value";
+    /** Integer: sand price stored on sand-sacrifice marker entities (read only for gate sacrifices). */
+    public static final String SACRIFICE_COST   = "sot_sacrifice_cost";
 
     // --- Bound group (vault door / gate frames) ---
     /** String UUID: groups anchor + all frame entities for the same bound. */

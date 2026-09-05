@@ -3,6 +3,7 @@ package com.clarkson.sot.scoring;
 import com.clarkson.sot.entities.CoinStack;
 import com.clarkson.sot.entities.FloorItem;
 import com.clarkson.sot.main.GameManager;
+import com.clarkson.sot.ui.CoinPickupNotifier;
 import com.clarkson.sot.utils.TeamManager;
 
 import net.kyori.adventure.text.Component;
@@ -24,15 +25,24 @@ public class ScoreManager {
     private final Plugin plugin;
 
     private final Map<UUID, Integer> playerUnbankedScores = new HashMap<>();
+    /** Combines coins picked up in quick succession into one action-bar message. */
+    private final CoinPickupNotifier pickupNotifier;
 
     // Depth scaling: 100% at depth 0, up to 120% at max depth
     private static final int MAX_DUNGEON_DEPTH = 10;
     private static final double MAX_DEPTH_MULTIPLIER = 1.20;
 
     public ScoreManager(TeamManager teamManager, GameManager gameManager, Plugin plugin) {
+        this(teamManager, gameManager, plugin, new CoinPickupNotifier());
+    }
+
+    /** Constructor for tests, which need to drive the pickup notifier's clock. */
+    public ScoreManager(TeamManager teamManager, GameManager gameManager, Plugin plugin,
+                        CoinPickupNotifier pickupNotifier) {
         this.teamManager = teamManager;
         this.gameManager = gameManager;
         this.plugin = plugin;
+        this.pickupNotifier = pickupNotifier;
     }
 
     /**
@@ -42,13 +52,29 @@ public class ScoreManager {
     public void collectFloorItem(Player player, FloorItem item) {
         if (item instanceof CoinStack) {
             CoinStack coin = (CoinStack) item;
-            int scaledValue = calculateScaledCoinValue(coin.getBaseValue(), coin.getDepth());
-            updatePlayerUnbankedScore(player.getUniqueId(), scaledValue);
-            player.sendActionBar(Component.text("+" + scaledValue + " coins", NamedTextColor.GOLD));
+            int scaledValue = awardDepthScaledCoins(player, coin.getBaseValue(), coin.getDepth());
             plugin.getLogger().fine(player.getName() + " collected coin worth " + scaledValue
                     + " (base: " + coin.getBaseValue() + ", depth: " + coin.getDepth() + ")");
         }
         // Future: handle FloorLoot (add to inventory), SandPile (add sand to team), etc.
+    }
+
+    /**
+     * Adds depth-scaled coins to a player's <em>unbanked</em> score and folds the amount into their
+     * running pickup message.
+     *
+     * <p>The path a coin stack takes, and the single place the depth multiplier is applied, so any
+     * other source of coins (a broken mob spawner, for one) shares it by calling here. The coins land
+     * unbanked on purpose: they are lost on death and on a timer-out like any other unbanked coin.
+     *
+     * @return the scaled amount actually added.
+     */
+    public int awardDepthScaledCoins(Player player, int baseValue, int depth) {
+        if (baseValue <= 0) return 0;
+        int scaledValue = calculateScaledCoinValue(baseValue, depth);
+        updatePlayerUnbankedScore(player.getUniqueId(), scaledValue);
+        pickupNotifier.notifyPickup(player, scaledValue);
+        return scaledValue;
     }
 
     /**
@@ -57,7 +83,7 @@ public class ScoreManager {
     public void playerCollectedCoin(Player player, ItemStack coinItem, int baseCoinValue) {
         // When recovering dropped coins, no depth scaling — use base value directly
         updatePlayerUnbankedScore(player.getUniqueId(), baseCoinValue);
-        player.sendActionBar(Component.text("+" + baseCoinValue + " coins", NamedTextColor.GOLD));
+        pickupNotifier.notifyPickup(player, baseCoinValue);
         plugin.getLogger().fine(player.getName() + " recovered coin worth " + baseCoinValue);
     }
 
@@ -95,18 +121,25 @@ public class ScoreManager {
 
     public void clearPlayerUnbankedScore(UUID playerUUID) {
         playerUnbankedScores.remove(playerUUID);
+        // Banking/death ends the burst: the next coin picked up starts a fresh message.
+        pickupNotifier.reset(playerUUID);
     }
 
     public void clearAllUnbankedScores() {
         playerUnbankedScores.clear();
+        pickupNotifier.resetAll();
     }
 
     // --- Penalty & Escape Methods ---
 
     /**
-     * Death penalty: all unbanked coins are dropped at the death location.
-     * The score is cleared here; the actual item drop is handled by the death event listener.
-     * Returns the amount lost so the caller can create the drop.
+     * Death penalty: the player's unbanked coins are cleared outright.
+     *
+     * <p>Unbanked coins are a number here, not items in an inventory, so unlike the sand and gear that
+     * drop at the death location there is nothing for the corpse run to recover — dying loses them.
+     * Banked coins are untouched.
+     *
+     * @return the amount lost, for the caller to report.
      */
     public int applyDeathPenalty(UUID playerUUID) {
         int lostCoins = getPlayerUnbankedScore(playerUUID);

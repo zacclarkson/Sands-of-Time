@@ -24,10 +24,12 @@ import org.bukkit.plugin.java.JavaPlugin;
 // Import Commands
 import com.clarkson.sot.commands.*;
 // Import Listeners / Session management
+import com.clarkson.sot.events.BlockProtectionListener;
 import com.clarkson.sot.events.BuilderSessionManager;
 import com.clarkson.sot.events.CountdownFreezeListener;
 import com.clarkson.sot.events.DeathListener;
 import com.clarkson.sot.events.EscapeListener;
+import com.clarkson.sot.events.HungerListener;
 import com.clarkson.sot.events.NetherPortalListener;
 import com.clarkson.sot.events.SegmentBuilderKeys;
 import com.clarkson.sot.events.ToolListener;
@@ -64,8 +66,9 @@ public class SoT extends JavaPlugin {
 
         // Install any segment templates bundled in the jar (e.g. the hub) into the data folder so a
         // fresh server has a working HUB. Must run BEFORE GameManager is constructed, since its
-        // constructor loads templates from the data folder. Skips files that already exist so
-        // in-game edits are never clobbered.
+        // constructor loads templates from the data folder. Templates already on disk are kept so
+        // in-game edits are never clobbered -- and the keep is logged, since it means a corrected
+        // bundled template is not in use.
         installBundledSegments();
 
 
@@ -105,6 +108,18 @@ public class SoT extends JavaPlugin {
                     + " unset. /sot setup and /sot start will refuse to run until they are.");
         }
 
+        // 1c. Apply the dungeon seed from config.yml. Unlike the locations, having none is the
+        //     normal case -- it just means every round rolls its own -- so this never blocks a game.
+        Long configuredSeed = SoTConfig.readSeed(getConfig(), SoTConfig.SEED_PATH, getLogger());
+        gameManager.setDungeonSeed(configuredSeed);
+        if (configuredSeed != null) {
+            getLogger().info("Dungeon seed fixed at " + configuredSeed
+                    + " ('" + SoTConfig.SEED_PATH + "' in config.yml); every round will lay out identically.");
+        } else {
+            getLogger().info("No dungeon seed set; each round rolls its own. The seed used is logged"
+                    + " at generation, and /sot seed <value> pins it.");
+        }
+
         // 2. Managers are owned and constructed by GameManager (which also loads the dungeon
         //    segment templates in its constructor). We register GameManager's instances as
         //    listeners below so events act on the objects that hold the live game state.
@@ -140,16 +155,24 @@ public class SoT extends JavaPlugin {
 
         // --- Register Listeners ---
         // All gameplay listeners are the GameManager-owned instances so they operate on the
-        // live game state. FloorItemManager and DoorManager were previously never registered.
+        // live game state, and this is the only place any of them is registered -- the managers
+        // deliberately do not register themselves (that ran every handler twice).
         getServer().getPluginManager().registerEvents(new ToolListener(this, builderSessionManager), this);
         getServer().getPluginManager().registerEvents(gameManager.getVaultManager(), this);
         getServer().getPluginManager().registerEvents(gameManager.getBankingManager(), this);
         getServer().getPluginManager().registerEvents(gameManager.getSandManager(), this);
         getServer().getPluginManager().registerEvents(gameManager.getFloorItemManager(), this);
         getServer().getPluginManager().registerEvents(gameManager.getDoorManager(), this);
+        getServer().getPluginManager().registerEvents(gameManager.getMobManager(), this);
         getServer().getPluginManager().registerEvents(new DeathListener(gameManager), this);
         getServer().getPluginManager().registerEvents(new EscapeListener(gameManager), this);
         getServer().getPluginManager().registerEvents(new CountdownFreezeListener(gameManager), this);
+        // Hunger is frozen for participants while a round is live; healing comes from the floor
+        // potions instead of food.
+        getServer().getPluginManager().registerEvents(new HungerListener(gameManager), this);
+        // Stops players mining the dungeon apart mid-round -- notably their own sand timer column.
+        // Registered at LOW priority inside the listener so a denied break never reaches SandManager.
+        getServer().getPluginManager().registerEvents(new BlockProtectionListener(gameManager), this);
         // Nether portals are used as the safe-exit visual; suppress the vanilla teleport so nobody is
         // sent to the Nether when they walk into one.
         getServer().getPluginManager().registerEvents(new NetherPortalListener(), this);
@@ -216,49 +239,13 @@ public class SoT extends JavaPlugin {
      }
 
     /**
-     * Installs segment templates bundled in the jar (under {@code bundled_segments/}) into the plugin
-     * data folder, so a fresh server ships with a working HUB and {@code /sot start} works without a
-     * hand-built segment. The names come from {@code bundled_segments/manifest.txt}; for each name the
-     * {@code <name>.json} goes to the data folder root and {@code schematics/<name>.schem} to the
-     * schematics sub-dir — the layout {@code StructureLoader} reads. Existing files are left untouched
-     * so in-game edits are never overwritten.
+     * Installs the segment templates bundled in the jar into the data folder, so a fresh server ships
+     * with a working HUB. Delegates to {@link BundledSegmentInstaller}, which documents why an existing
+     * template is kept, why keeping it is reported rather than silent, and why a template's {@code .json}
+     * and {@code .schem} are installed as a unit.
      */
     private void installBundledSegments() {
-        java.io.InputStream manifest = getResource("bundled_segments/manifest.txt");
-        if (manifest == null) {
-            return; // No segments bundled in this build.
-        }
-        File dataFolder = getDataFolder();
-        File schematicsDir = new File(dataFolder, "schematics");
-        try (java.io.BufferedReader reader =
-                     new java.io.BufferedReader(new java.io.InputStreamReader(manifest, java.nio.charset.StandardCharsets.UTF_8))) {
-            String name;
-            while ((name = reader.readLine()) != null) {
-                name = name.trim();
-                if (name.isEmpty() || name.startsWith("#")) continue;
-                copyResourceIfAbsent("bundled_segments/" + name + ".json",
-                        new File(dataFolder, name + ".json"));
-                copyResourceIfAbsent("bundled_segments/schematics/" + name + ".schem",
-                        new File(schematicsDir, name + ".schem"));
-            }
-        } catch (Exception e) {
-            getLogger().log(Level.WARNING, "Failed to install bundled segments", e);
-        }
-    }
-
-    /** Copies a jar resource to {@code target} only if the target does not already exist. */
-    private void copyResourceIfAbsent(String resourcePath, File target) {
-        if (target.exists()) return;
-        try (java.io.InputStream in = getResource(resourcePath)) {
-            if (in == null) {
-                getLogger().warning("Bundled resource missing: " + resourcePath);
-                return;
-            }
-            java.nio.file.Files.copy(in, target.toPath());
-            getLogger().info("Installed bundled segment file: " + target.getName());
-        } catch (java.io.IOException e) {
-            getLogger().log(Level.WARNING, "Failed to install bundled resource " + resourcePath, e);
-        }
+        new BundledSegmentInstaller(this::getResource, getDataFolder(), getLogger()).install();
     }
 
      /**

@@ -2,12 +2,15 @@ package com.clarkson.sot.main;
 
 // Required Imports (ensure all needed imports are present)
 import com.clarkson.sot.dungeon.*; // Includes Dungeon, DungeonBlueprint, DeathCage, VaultColor, VaultManager
-import com.clarkson.sot.dungeon.DoorManager; // Import DoorManager
+import com.clarkson.sot.dungeon.DoorManager;
 import com.clarkson.sot.events.FloorItemManager; // Import FloorItemManager
+import com.clarkson.sot.events.HungerListener;
+import com.clarkson.sot.player.SoTPlayerManager;
 import com.clarkson.sot.scoring.BankingManager;
 import com.clarkson.sot.scoring.ScoreManager;
 import com.clarkson.sot.timer.VisualTimerLayout;
 import com.clarkson.sot.ui.GameScoreboardManager;
+import com.clarkson.sot.ui.SacrificeIndicatorManager;
 import com.clarkson.sot.utils.*; // PlayerStateManager, PlayerStatus, SandManager, SoTTeam, TeamDefinition, TeamManager
 
 import org.bukkit.Bukkit;
@@ -15,6 +18,7 @@ import org.bukkit.Location;
 import org.bukkit.Sound;
 import org.bukkit.World;
 import org.bukkit.entity.Player;
+import org.bukkit.inventory.ItemStack;
 import org.bukkit.plugin.Plugin;
 import org.bukkit.util.Vector;
 
@@ -48,10 +52,21 @@ public class GameManager {
     private final DungeonGenerator dungeonGenerator;
     private final FloorItemManager floorItemManager; // Added
     private final DoorManager doorManager; // Added
+    private final MobManager mobManager;
+    private final SoTPlayerManager playerManager;
     private final GameScoreboardManager scoreboardManager; // Live standings sidebar
+    private final SacrificeIndicatorManager sacrificeIndicatorManager; // Floating sand above active sacrifice chests
     private final Map<UUID, DungeonManager> teamDungeonManagers; // TeamID -> Manager for their instance
     private final Map<UUID, SoTTeam> activeTeamsInGame; // TeamID -> Active team object
     private DungeonBlueprint dungeonLayoutBlueprint; // Shared blueprint for this game run
+    /**
+     * Incremented every time a round starts or ends. The countdown ticker only checks the state once
+     * a second, so without this a round aborted during its countdown leaves a task that can still
+     * see COUNTDOWN when a *new* round starts within that same second — and then finish the new
+     * round's countdown early, off its own stale counter. Tasks capture the epoch and stop when it
+     * moves on.
+     */
+    private int roundEpoch;
 
     // --- Refactored Locations ---
     // Not final: an admin can move these at runtime with /sot set <lobby|trapped>. Both are
@@ -96,8 +111,12 @@ public class GameManager {
         this.vaultManager = new VaultManager((SoT) plugin, this); // Pass SoT plugin, GameManager
         this.floorItemManager = new FloorItemManager((SoT) plugin, this, scoreManager); // Pass SoT plugin, GameManager, ScoreManager
         this.doorManager = new DoorManager((SoT) plugin, this); // Pass SoT plugin, GameManager
+        // playerManager first: MobManager credits kills through getPlayerManager().
+        this.playerManager = new SoTPlayerManager(plugin);
+        this.mobManager = new MobManager(plugin, this);
         this.dungeonGenerator = new DungeonGenerator(plugin);
         this.scoreboardManager = new GameScoreboardManager(plugin, this); // Reads the managers above
+        this.sacrificeIndicatorManager = new SacrificeIndicatorManager(plugin.getLogger());
 
         // Initialize maps
         this.activeTeamsInGame = new ConcurrentHashMap<>(); // Use concurrent maps if accessed by events/tasks
@@ -106,10 +125,15 @@ public class GameManager {
         // Set initial state
         this.currentState = GameState.SETUP;
 
-        // Load dungeon segment templates
+        // Load dungeon segment templates. A template failure is deliberately NOT expressed as a
+        // game state: it used to set ENDED here, conflating "this server cannot play at all" with
+        // "a round just finished". Those need to stay distinct now that /sot reset clears the
+        // latter — otherwise a reset would launder a condition that is still fatal and let
+        // /sot start run with no templates. setupGame()/startGame() check hasHubTemplate() instead,
+        // which is also re-evaluated after /sotreloadsegments rather than latched at boot.
         if (!this.dungeonGenerator.loadSegmentTemplates(plugin.getDataFolder())) {
-            plugin.getLogger().severe("Failed to load dungeon segments into DungeonGenerator. Game cannot start.");
-            this.currentState = GameState.ENDED; // Prevent starting
+            plugin.getLogger().severe("Failed to load dungeon segments into DungeonGenerator."
+                    + " /sot start will refuse until a HUB template exists (see /sotreloadsegments).");
         }
 
         plugin.getLogger().info("GameManager initialized.");
@@ -118,50 +142,54 @@ public class GameManager {
     /**
      * Sets up the participating teams for the current game instance.
      * Creates SoTTeam objects and stores them.
-     * Uses lobbyLocation to determine visual timer placement.
+     *
+     * <p>Teams start without a visual sand column: it is anchored on the hub's TIMER marker in
+     * {@link #startGame()}, once each team's dungeon has been pasted.
      *
      * @param participatingTeamIds List of UUIDs for teams participating.
      * @param allPlayersInGame     List of all players involved in the game.
+     * @return true if teams were set up and the game is ready for {@link #startGame()}. Callers must
+     *         check this rather than assume success — every refusal below leaves the state untouched
+     *         so the operator can fix the cause and try again.
      */
-    public void setupGame(List<UUID> participatingTeamIds, List<Player> allPlayersInGame) {
-        if (currentState != GameState.SETUP) { /* ... warning ... */ return; }
-        // Visual sand timers get anchored on the lobby here, so refuse before placing them at a
-        // fallback location. State is left alone so the admin can fix config and retry.
+    public boolean setupGame(List<UUID> participatingTeamIds, List<Player> allPlayersInGame) {
+        if (currentState != GameState.SETUP) { /* ... warning ... */ return false; }
+        // startGame derives the dungeon world and origin from these, so refuse now rather than
+        // generating a round somewhere nobody chose. State is left alone so the admin can fix config
+        // and retry.
         if (!areLocationsConfigured()) {
             plugin.getLogger().severe("Cannot set up game: unconfigured location(s) "
                     + getUnconfiguredLocationNames() + ". Use /sot set <lobby|trapped>.");
-            return;
+            return false;
         }
-        if (participatingTeamIds == null || participatingTeamIds.isEmpty()) { /* ... warning ... */ return; }
+        // Checked here as well as in startGame so a hub-less server refuses at the first step, rather
+        // than reporting a successful setup for a round that can never actually start.
+        if (!dungeonGenerator.hasHubTemplate()) {
+            plugin.getLogger().severe("Cannot set up game: no HUB segment template loaded."
+                    + " Save one with /sotsavesegment <name> HUB, then /sotreloadsegments.");
+            return false;
+        }
+        if (participatingTeamIds == null || participatingTeamIds.isEmpty()) { /* ... warning ... */ return false; }
         plugin.getLogger().info("Setting up game with " + participatingTeamIds.size() + " teams.");
 
-        // Clear state from previous games (call clear methods on managers)
-        scoreboardManager.stop(); // Defensive: a previous round should already have stopped it
-        activeTeamsInGame.clear();
-        teamDungeonManagers.clear();
-        playerStateManager.clearAllStates();
-        scoreManager.clearAllUnbankedScores();
-        vaultManager.clearAllTeamStates(); // Assuming VaultManager has this
-        doorManager.clearAllTeamStates(); // Assuming DoorManager has this
-        floorItemManager.clearAllTeamStates(); // Assuming FloorItemManager has this
-        dungeonLayoutBlueprint = null;
+        // Clear state from previous games. tearDownRound() is idempotent, so this is a no-op after
+        // a clean /sot end + /sot reset and a genuine rescue after a crash or a failed start — the
+        // important part is that it air-fills any dungeon still standing rather than just dropping
+        // the DungeonManagers that know where it is.
+        tearDownRound();
+
+        // A player who logged out mid-round (or rejoined after a crash) can still be carrying last
+        // round's vault keys, which would open this round's vaults on sight.
+        stripGameKeys(allPlayersInGame);
 
         // ... (Validate player assignments - same as before) ...
 
         // Create SoTTeam instances for each participating team
-        int visualTimerIndex = 0; // Column slot in the lobby, one per participating team
         for (UUID teamId : participatingTeamIds) {
             TeamDefinition definition = teamManager.getTeamDefinition(teamId);
             if (definition == null) { /* ... warning ... */ continue; }
 
-            // Via the getter: it hands out a copy, so the team's timer display cannot end up holding
-            // a reference to the live lobby field.
-            Location anchor = getLobbyLocation();
-            Location visualTimerBottom = determineVisualTimerBottomLocation(definition, anchor, visualTimerIndex);
-            Location visualTimerTop = determineVisualTimerTopLocation(definition, anchor, visualTimerIndex);
-            visualTimerIndex++;
-
-            SoTTeam activeTeam = new SoTTeam(definition, plugin, this, visualTimerBottom, visualTimerTop);
+            SoTTeam activeTeam = new SoTTeam(definition, plugin, this);
             activeTeamsInGame.put(teamId, activeTeam);
             plugin.getLogger().info("Initialized SoTTeam for: " + definition.getName());
 
@@ -172,10 +200,12 @@ public class GameManager {
                  if (p != null && p.isOnline()) {
                      activeTeam.addMember(p);
                      playerStateManager.initializePlayer(p);
+                     playerManager.initializePlayer(p);
                  } else { /* ... warning ... */ }
              }
         }
         plugin.getLogger().info("Game setup complete. " + activeTeamsInGame.size() + " active teams created. Ready to start.");
+        return !activeTeamsInGame.isEmpty();
     }
 
     /**
@@ -193,7 +223,15 @@ public class GameManager {
                     + getUnconfiguredLocationNames() + ". Use /sot set <lobby|trapped>.");
             return;
         }
-        // Removed check for vaultManager/dungeonGenerator null as constructor handles it
+        // Generation needs at least one HUB template on disk. This used to be expressed by the
+        // constructor parking the state at ENDED, which could never be recovered from; checking it
+        // here instead means /sotreloadsegments can fix a hub-less server without a restart. Like
+        // the location check above, this deliberately leaves the state at SETUP.
+        if (!dungeonGenerator.hasHubTemplate()) {
+            plugin.getLogger().severe("Cannot start game: no HUB segment template loaded."
+                    + " Save one with /sotsavesegment <name> HUB, then /sotreloadsegments.");
+            return;
+        }
 
         plugin.getLogger().info("Starting Sands of Time game generation...");
 
@@ -210,9 +248,13 @@ public class GameManager {
         // 2. Create and Initialize Dungeon Instance for Each Team
         int teamIndex = 0;
         Location currentDungeonBase = gameWorld.getSpawnLocation().clone().add(DUNGEON_BASE_OFFSET); // Or use lobbyLocation as base?
-        teamDungeonManagers.clear();
+        cleanupDungeonInstances(); // Never drop a DungeonManager without air-filling what it pasted
 
-        for (SoTTeam team : activeTeamsInGame.values()) {
+        // Sorted so a team lands on the same origin every round; activeTeamsInGame is a
+        // ConcurrentHashMap, whose iteration order is not part of its contract.
+        List<SoTTeam> orderedTeams = new ArrayList<>(activeTeamsInGame.values());
+        orderedTeams.sort(Comparator.comparing(t -> t.getTeamId().toString()));
+        for (SoTTeam team : orderedTeams) {
             UUID teamId = team.getTeamId();
             Location teamOrigin = currentDungeonBase.clone().add(TEAM_DUNGEON_SPACING.clone().multiply(teamIndex));
             plugin.getLogger().info("Creating dungeon instance for team " + team.getTeamName() + " at " + teamOrigin.toVector());
@@ -228,13 +270,16 @@ public class GameManager {
             }
             teamDungeonManagers.put(teamId, teamDungeon); // Store the manager
 
-            // 2b. Move the visual sand timer from its lobby fallback into this team's hub, if the hub
-            //     defines a TIMER marker. Safe here because the display hasn't rendered blocks yet
-            //     (timers start below). Falls back to the lobby column when no marker exists.
+            // 2b. Anchor the team's visual sand column on its hub's TIMER marker. This is the only
+            //     place the column ever gets a location: with no marker the team plays without one
+            //     rather than having a stray pillar of sand appear at the lobby.
             Location timerBase = teamDungeon.getTimerBaseLocation();
             if (timerBase != null) {
                 Location timerTop = timerBase.clone().add(0, VisualTimerLayout.COLUMN_HEIGHT_BLOCKS, 0);
                 team.relocateVisualTimer(timerBase, timerTop);
+            } else {
+                plugin.getLogger().warning("Hub defines no TIMER marker; visual sand column disabled"
+                        + " for team " + team.getTeamName() + " this round.");
             }
 
             // 3. Assign each player to their own death cage
@@ -268,7 +313,8 @@ public class GameManager {
         //    countdown, so team.startTimer() is deferred to beginPlay() when the count hits zero.
         //    The COUNTDOWN state gates the freeze listener (see CountdownFreezeListener).
         this.currentState = GameState.COUNTDOWN;
-        startCountdown();
+        roundEpoch++;
+        startCountdown(roundEpoch);
         plugin.getLogger().info("Sands of Time dungeons generated; countdown started.");
     }
 
@@ -278,12 +324,16 @@ public class GameManager {
     /**
      * Runs a {@value #COUNTDOWN_SECONDS}-second on-screen countdown while players are frozen
      * (movement blocked by CountdownFreezeListener while the state is COUNTDOWN), then calls
-     * {@link #beginPlay()}. Aborts silently if the game is no longer in COUNTDOWN (e.g. force-ended).
+     * {@link #beginPlay(int)}. Aborts silently if the game is no longer in COUNTDOWN (e.g.
+     * force-ended), or if {@code epoch} no longer matches {@link #roundEpoch} because another round
+     * has since started — the state alone is not enough, since the new round is also in COUNTDOWN.
+     *
+     * @param epoch the {@link #roundEpoch} this countdown belongs to.
      */
-    private void startCountdown() {
+    private void startCountdown(final int epoch) {
         final int[] remaining = { COUNTDOWN_SECONDS };
         Bukkit.getScheduler().runTaskTimer(plugin, task -> {
-            if (currentState != GameState.COUNTDOWN) { task.cancel(); return; }
+            if (currentState != GameState.COUNTDOWN || epoch != roundEpoch) { task.cancel(); return; }
             if (remaining[0] > 0) {
                 Title title = Title.title(
                         Component.text(String.valueOf(remaining[0]), NamedTextColor.GOLD, TextDecoration.BOLD),
@@ -296,22 +346,26 @@ public class GameManager {
                 remaining[0]--;
             } else {
                 task.cancel();
-                beginPlay();
+                beginPlay(epoch);
             }
         }, 0L, 20L);
     }
 
     /** Releases the freeze, starts every team timer, and announces the game has begun. */
-    private void beginPlay() {
-        if (currentState != GameState.COUNTDOWN) return;
+    private void beginPlay(int epoch) {
+        if (currentState != GameState.COUNTDOWN || epoch != roundEpoch) return;
         this.currentState = GameState.RUNNING;
         scoreboardManager.start(); // Live standings sidebar, refreshed once a second
+        mobManager.start(); // Mob spawners produce waves while a team member stands near them
         for (SoTTeam team : activeTeamsInGame.values()) { team.startTimer(); }
         Title go = Title.title(
                 Component.text("GO!", NamedTextColor.GREEN, TextDecoration.BOLD),
                 Component.empty(),
                 Title.Times.times(Duration.ZERO, Duration.ofMillis(800), Duration.ofMillis(200)));
         for (Player p : getParticipatingPlayers()) {
+            // Everyone starts the clock on a full hunger bar: HungerListener only stops the bar
+            // going down, so a player who arrived hungry would otherwise stay hungry all round.
+            HungerListener.fillHunger(p);
             p.showTitle(go);
             p.playSound(p.getLocation(), Sound.ENTITY_ENDER_DRAGON_GROWL, 0.6f, 1.2f);
         }
@@ -339,9 +393,17 @@ public class GameManager {
         return players;
     }
 
-    /** Forcefully ends the current Sands of Time game */
+    /**
+     * Forcefully ends the current Sands of Time game.
+     *
+     * <p>COUNTDOWN counts as a live round: a round started by mistake has to be abortable without
+     * waiting out the {@value #COUNTDOWN_SECONDS}-second freeze. No team timer has started yet at
+     * that point, so the stop loop below is simply a no-op, and the countdown ticker cancels itself
+     * on its next tick once the state is no longer COUNTDOWN (see {@link #startCountdown}).
+     */
     public void endGame() {
-        if (currentState != GameState.RUNNING && currentState != GameState.PAUSED) { /* ... warning ... */ return; }
+        if (currentState != GameState.RUNNING && currentState != GameState.PAUSED
+                && currentState != GameState.COUNTDOWN) { /* ... warning ... */ return; }
         plugin.getLogger().info("Forcefully ending Sands of Time game...");
         for (SoTTeam team : activeTeamsInGame.values()) { if (team.isTimerRunning()) team.stopTimer(); }
         endGameInternal("Game forcefully ended.");
@@ -363,6 +425,10 @@ public class GameManager {
                  plugin.getLogger().info("Player " + memberUUID + " trapped due to timer expiry!");
                  playerStateManager.updateStatus(memberUUID, PlayerStatus.TRAPPED_TIMER_OUT);
                  scoreManager.applyTimerEndPenalty(memberUUID);
+                 // Nobody can be bought out of the cage once the timer has taken them, so the chest
+                 // goes dark even though sand may already have been paid toward the revive.
+                 DeathCage expiredCage = getPlayerDeathCage(team.getTeamId(), memberUUID);
+                 if (expiredCage != null) sacrificeIndicatorManager.hide(expiredCage);
                  Player onlinePlayer = Bukkit.getPlayer(memberUUID);
                  if (onlinePlayer != null && onlinePlayer.isOnline()) {
                      // Snapshot the destination now: /sot set trapped may move it before the task runs.
@@ -384,6 +450,21 @@ public class GameManager {
          checkGameEndCondition(); // Check if game should end now
     }
 
+    /**
+     * Whether a team member should be pulled back to the lobby when the round ends.
+     *
+     * <p>Everyone except the players locked in by their timer. {@link #handleTeamTimerEnd} only
+     * <i>queues</i> the trapped teleport ({@code runTask} = next tick) and then calls
+     * {@link #checkGameEndCondition} synchronously, so on the last team's expiry
+     * {@link #endGameInternal} runs in that same tick and queues its lobby teleport <i>behind</i>
+     * the trapped one. Teleporting a trapped player here would therefore silently undo the
+     * trapping — which is exactly what used to happen in a single-team round, where the game
+     * always ends on the tick the team is trapped.
+     */
+    static boolean returnsToLobbyAtGameEnd(PlayerStatus status) {
+        return status != PlayerStatus.TRAPPED_TIMER_OUT;
+    }
+
     /** Checks if all active teams' timers have expired. */
     private void checkGameEndCondition() {
         if (currentState != GameState.RUNNING) return;
@@ -392,30 +473,41 @@ public class GameManager {
         endGameInternal("All timers expired.");
     }
 
-    /** Internal method containing the logic to actually end the game */
+    /**
+     * Internal method containing the logic to actually end the game.
+     *
+     * <p>Ends at {@link GameState#ENDED}, which is deliberately terminal: nothing rearms the game
+     * to {@link GameState#SETUP} on its own, so the final standings stay readable even with
+     * teleports still queued for the next tick. {@link #resetGame()} (via {@code /sot reset}) is
+     * the only way back.
+     */
     private void endGameInternal(String reason) {
-        if (currentState == GameState.ENDED) return;
+        // Positive guard: only a live round can end. Stronger than the old "not already ENDED"
+        // check, which stopped meaning anything useful once /sot reset made SETUP reachable again —
+        // this also refuses to run a teardown against a freshly reset game.
+        if (currentState != GameState.RUNNING && currentState != GameState.PAUSED
+                && currentState != GameState.COUNTDOWN) {
+            return;
+        }
         plugin.getLogger().info("Executing internal game end sequence. Reason: " + reason);
+        // A round aborted during its countdown never actually began: no timer ticked and nobody
+        // scored, so the standings ceremony would just be a wall of zeroes.
+        final boolean roundBegan = currentState != GameState.COUNTDOWN;
         this.currentState = GameState.ENDED;
+        roundEpoch++; // Retire any countdown ticker still scheduled for this round
 
-        for (SoTTeam team : activeTeamsInGame.values()) {
-            if (team.isTimerRunning()) team.stopTimer();
-            // Tear down the visual sand column too. A hub column is inside the dungeon bounds and
-            // gets air-filled by cleanupInstance below, but a lobby-fallback column is not.
-            team.clearVisualTimer();
+        // --- Final score calculations & display (needs activeTeamsInGame still populated) ---
+        if (roundBegan) {
+            displayFinalScores();
         }
 
-        // Take the sidebar down before the teams are cleared below, so every player gets the
-        // server's own scoreboard back rather than a frozen one.
-        scoreboardManager.stop();
-
-        // --- Final score calculations & display ---
-        displayFinalScores();
-
-        // Teleport remaining players to lobby (snapshot once; the field is mutable)
+        // Teleport remaining players to lobby (snapshot once; the field is mutable).
+        // The status must be read here rather than inside the task below — tearDownRound() clears
+        // every status further down in this same tick, so by the time the task fires they are gone.
         final Location lobbyDestination = getLobbyLocation();
         for (SoTTeam team : activeTeamsInGame.values()) {
             for (UUID memberId : team.getMemberUUIDs()) {
+                if (!returnsToLobbyAtGameEnd(playerStateManager.getStatus(memberId))) continue;
                 Player player = Bukkit.getPlayer(memberId);
                 if (player != null && player.isOnline()) {
                     Bukkit.getScheduler().runTask(plugin, () -> {
@@ -427,20 +519,196 @@ public class GameManager {
             }
         }
 
-        // Cleanup dungeon instances and manager states
-        for (DungeonManager dm : teamDungeonManagers.values()) {
-            dm.cleanupInstance(); // Calls clearTeamState on Vault/Door/FloorItem managers
-        }
-        activeTeamsInGame.clear();
-        teamDungeonManagers.clear();
-        playerStateManager.clearAllStates();
-        scoreManager.clearAllUnbankedScores();
-        sandManager.clearAllSandCounts();
-        // No need to call clearTeamState here again, cleanupInstance does it
-        dungeonLayoutBlueprint = null;
+        // Don't let this round's vault keys walk back to the lobby and into the next round. Also
+        // read while the teams are still populated.
+        stripGameKeysFromActiveTeams();
+
+        // MUST stay last: tearDownRound() clears player statuses and the team map, both of which the
+        // blocks above read. In particular the status read that keeps TRAPPED_TIMER_OUT players out
+        // of the lobby teleport (see returnsToLobbyAtGameEnd) is only correct while statuses live.
+        tearDownRound();
 
         Bukkit.getServer().broadcast(Component.text("Sands of Time has ended!", NamedTextColor.GOLD, TextDecoration.BOLD));
         plugin.getLogger().info("Sands of Time game ended and state cleared.");
+    }
+
+    /**
+     * Tears the round's state down to nothing: timers, sand columns, the sidebar, every pasted
+     * dungeon, and all of the per-round manager maps.
+     *
+     * <p>Deliberately idempotent — every step is a no-op on already-empty state — because three
+     * callers need it: {@link #endGameInternal} at the end of a round, {@link #resetGame()} to
+     * rescue the failed-start paths that set ENDED without ever cleaning up, and {@link #setupGame}
+     * as a last line of defence after a crash or a {@code /reload}.
+     *
+     * <p>Does <b>not</b> touch {@link #currentState}; the caller owns that.
+     */
+    private void tearDownRound() {
+        for (SoTTeam team : activeTeamsInGame.values()) {
+            if (team.isTimerRunning()) team.stopTimer();
+            // Tear down the visual sand column too. cleanupInstance below air-fills the dungeon
+            // bounds, which covers it, but this also disarms the display and keeps its own block
+            // count honest for the next round.
+            team.clearVisualTimer();
+            // Carried sand is real inventory now, so it has to be taken off the players themselves:
+            // activeTeamsInGame is the only source of member lists, and anything left undeposited
+            // would otherwise cross into the next round and buy free time at the next hub.
+            sandManager.clearSandItems(team.getMemberUUIDs());
+        }
+
+        // Take the sidebar down before the teams are cleared below, so every player gets the
+        // server's own scoreboard back rather than a frozen one.
+        scoreboardManager.stop();
+
+        // Drop the floating sacrifice indicators before the dungeons go: cleanupInstance() removes
+        // the entities inside its bounds anyway, but this also empties the manager's own map so it
+        // is not holding references to removed displays into the next round.
+        sacrificeIndicatorManager.clearAll();
+
+        cleanupDungeonInstances();
+        activeTeamsInGame.clear();
+        playerStateManager.clearAllStates();
+        scoreManager.clearAllUnbankedScores();
+        // cleanupInstance() clears these per team; repeat it globally so a team whose dungeon was
+        // never successfully created is covered too.
+        vaultManager.clearAllTeamStates();
+        doorManager.clearAllTeamStates();
+        floorItemManager.clearAllTeamStates();
+        mobManager.clearAllTeamStates();
+        // Drops the strong Player references SoTPlayerData holds, as well as last round's stats.
+        playerManager.clearAll();
+        dungeonLayoutBlueprint = null;
+    }
+
+    /**
+     * Air-fills and forgets every dungeon instance this round pasted.
+     *
+     * <p>Always use this rather than clearing {@link #teamDungeonManagers} directly: the
+     * DungeonManager is the only thing that knows where its blocks are, so dropping it without
+     * calling {@code cleanupInstance()} strands a dungeon in the world that the next round then
+     * pastes into (the paste uses {@code ignoreAirBlocks}, so it cannot clear the leftovers itself).
+     */
+    private void cleanupDungeonInstances() {
+        for (DungeonManager dm : teamDungeonManagers.values()) {
+            dm.cleanupInstance(); // Calls clearTeamState on Vault/Door/FloorItem managers
+        }
+        teamDungeonManagers.clear();
+    }
+
+    /**
+     * Whether {@link #resetGame()} is allowed to run from the given state.
+     *
+     * <p>A live round has players in a dungeon and timers on the clock, so it must be ended
+     * ({@code /sot end}) before it can be reset. Everything else — a finished round, or a SETUP
+     * that an operator wants to re-clear — is fair game.
+     */
+    public static boolean canResetFrom(GameState state) {
+        return state == GameState.ENDED || state == GameState.SETUP;
+    }
+
+    /**
+     * Whether a round is on the clock — the states in which players are inside a dungeon and the
+     * world has to be protected from them ({@code BlockProtectionListener}).
+     *
+     * <p>The exact complement of {@link #canResetFrom}, but written as its own explicit whitelist
+     * rather than a negation, so that a new {@link GameState} constant is classified by neither and
+     * fails {@code GameManagerTest} instead of silently defaulting to "unprotected".
+     *
+     * <p>{@code COUNTDOWN} counts: the hub segment's baked sand shaft is real sand in the world from
+     * the moment the dungeon is pasted, well before the visual timer arms itself.
+     */
+    public static boolean isRoundLive(GameState state) {
+        return state == GameState.COUNTDOWN || state == GameState.RUNNING || state == GameState.PAUSED;
+    }
+
+    /**
+     * Clears a finished round away and returns to {@link GameState#SETUP} so another game can be
+     * set up and started, without restarting the server.
+     *
+     * <p>This is the only transition out of the terminal {@code ENDED} state, and it is deliberately
+     * explicit ({@code /sot reset}) rather than automatic at the end of a round: the final standings
+     * stay on screen until an operator decides the round is done with.
+     *
+     * @return false if a round is still live, in which case nothing was changed.
+     */
+    public boolean resetGame() {
+        if (!canResetFrom(currentState)) {
+            plugin.getLogger().warning("Refusing to reset: a game is still " + currentState
+                    + ". End it first.");
+            return false;
+        }
+        plugin.getLogger().info("Resetting Sands of Time back to setup.");
+
+        // Normally a no-op straight after endGameInternal, but startGame's failure paths park the
+        // state at ENDED without any cleanup at all, so this is what rescues them.
+        tearDownRound();
+
+        // Team assignments outlive the round otherwise, so a player who was on a team last round
+        // but is not set up this round would still resolve to it.
+        teamManager.clearAssignments();
+        stripGameKeys(Bukkit.getOnlinePlayers());
+
+        this.currentState = GameState.SETUP;
+        plugin.getLogger().info("Sands of Time reset. Ready for /sot setup.");
+        return true;
+    }
+
+    /** Strips round keys from every member of every active team. Teams must still be populated. */
+    private void stripGameKeysFromActiveTeams() {
+        List<Player> members = new ArrayList<>();
+        for (SoTTeam team : activeTeamsInGame.values()) {
+            for (UUID memberId : team.getMemberUUIDs()) {
+                Player player = Bukkit.getPlayer(memberId);
+                if (player != null && player.isOnline()) members.add(player);
+            }
+        }
+        stripGameKeys(members);
+    }
+
+    /**
+     * Removes Sands of Time keys (rusty and vault) from the given players' inventories.
+     *
+     * <p>Vault keys are handed out as real items ({@code Key.giveTo}), so without this a player
+     * carries last round's gold key into the next one and opens that vault on sight. Only key items
+     * are taken: the builder tools carry a different tag and an admin keeps theirs across rounds.
+     *
+     * <p>Note this can only reach players who are online now — someone who logged out mid-round
+     * keeps the key in their saved inventory, which is why {@link #setupGame} strips again on the
+     * way into the next round rather than trusting the end-of-round pass.
+     *
+     * <p>Best-effort by design: this is cleanup, and it must never be the reason a reset or a setup
+     * fails. {@code ItemManager}'s tag lookups throw if its keys were never initialized, and that
+     * would otherwise leave the game stuck in ENDED — the exact dead end {@link #resetGame()} exists
+     * to clear.
+     */
+    private void stripGameKeys(Collection<? extends Player> players) {
+        if (players == null) return;
+        int removed = 0;
+        try {
+            for (Player player : players) {
+                if (player == null || !player.isOnline()) continue;
+                ItemStack[] contents = player.getInventory().getContents();
+                boolean changed = false;
+                for (int i = 0; i < contents.length; i++) {
+                    ItemStack item = contents[i];
+                    if (ItemManager.isRustyKey(item) || ItemManager.isVaultKey(item)) {
+                        contents[i] = null;
+                        changed = true;
+                        removed++;
+                    }
+                }
+                if (changed) {
+                    player.getInventory().setContents(contents);
+                    player.updateInventory();
+                }
+            }
+        } catch (RuntimeException e) {
+            plugin.getLogger().log(java.util.logging.Level.WARNING,
+                    "Could not strip leftover Sands of Time keys; continuing anyway.", e);
+        }
+        if (removed > 0) {
+            plugin.getLogger().info("Removed " + removed + " leftover Sands of Time key stack(s).");
+        }
     }
 
 
@@ -464,13 +732,28 @@ public class GameManager {
         // Update state
         playerStateManager.updateStatus(playerUUID, PlayerStatus.DEAD_AWAITING_REVIVE);
 
+        // Raise the price of this player's next revive and light up their sacrifice chest. Done before
+        // the teleport so the cost is known by the time we tell them what it is.
+        DeathCage cage = getPlayerDeathCage(teamId, playerUUID);
+        int reviveCost = 0;
+        if (cage != null) {
+            cage.recordDeath();
+            reviveCost = cage.getRequiredSand();
+            sacrificeIndicatorManager.update(cage);
+        }
+
         // Teleport to player's assigned death cage
         Location cageLocation = getPlayerDeathCageLocation(teamId, playerUUID);
         if (cageLocation != null) {
+            final int cost = reviveCost;
             Bukkit.getScheduler().runTask(plugin, () -> {
                 if (player.isValid()) {
                     player.teleport(cageLocation.clone().add(0.5, 0.1, 0.5));
-                    player.sendMessage(Component.text("You died! A teammate must sacrifice sand to free you.", NamedTextColor.RED));
+                    Component costText = cost > 0
+                            ? Component.text("You died! A teammate must sacrifice " + cost
+                                    + " sand to free you.", NamedTextColor.RED)
+                            : Component.text("You died! A teammate must sacrifice sand to free you.", NamedTextColor.RED);
+                    player.sendMessage(costText);
                 }
             });
         }
@@ -495,28 +778,6 @@ public class GameManager {
     }
 
     /**
-     * Handles reviving a dead player (called from SandManager after sand is consumed).
-     */
-    public void handlePlayerRevive(Player deadPlayer, Player reviver) {
-        if (deadPlayer == null || reviver == null) return;
-        UUID teamId = teamManager.getPlayerTeamId(deadPlayer);
-        if (teamId == null) return;
-
-        playerStateManager.updateStatus(deadPlayer, PlayerStatus.ALIVE_IN_DUNGEON);
-
-        Location hubLocation = getTeamHubLocation(teamId);
-        if (hubLocation != null) {
-            Bukkit.getScheduler().runTask(plugin, () -> {
-                if (deadPlayer.isValid()) {
-                    deadPlayer.teleport(hubLocation.clone().add(0.5, 0.1, 0.5));
-                }
-            });
-        }
-
-        plugin.getLogger().info(reviver.getName() + " revived " + deadPlayer.getName());
-    }
-
-    /**
      * Handles a player escaping the dungeon safely.
      */
     public void handlePlayerLeave(Player player) {
@@ -528,16 +789,24 @@ public class GameManager {
         playerStateManager.updateStatus(playerUUID, PlayerStatus.ESCAPED_SAFE);
         scoreManager.playerEscaped(playerUUID);
 
-        // Teleport to safe exit
-        Location safeExit = getTeamSafeExitLocation(teamId);
-        if (safeExit != null) {
-            Bukkit.getScheduler().runTask(plugin, () -> {
-                if (player.isValid()) {
-                    player.teleport(safeExit.clone().add(0.5, 0.1, 0.5));
-                    player.sendMessage(Component.text("You escaped safely!", NamedTextColor.GREEN));
-                }
-            });
-        }
+        // Everything they carried out leaves with them. Done synchronously rather than in the teleport
+        // task below: that task is a tick away and is skipped entirely if they log out, and the gap is
+        // a tick in which an escaped player could drop sand back into the dungeon for a teammate.
+        // Unbanked coins are numeric state in ScoreManager, not items, so this does not touch scoring.
+        player.getInventory().clear();
+        player.updateInventory();
+
+        // Out of the dungeon and out of the round: escaping is irreversible, so send them back to
+        // the lobby rather than leaving them standing at the exit block inside the dungeon.
+        // ESCAPED_SAFE already bars them from escaping again (EscapeListener) and from spending
+        // sand (SandManager); the lobby puts them physically out of reach of the dungeon too.
+        final Location lobbyDestination = getLobbyLocation();
+        Bukkit.getScheduler().runTask(plugin, () -> {
+            if (player.isValid()) {
+                player.teleport(lobbyDestination);
+                player.sendMessage(Component.text("You escaped safely!", NamedTextColor.GREEN));
+            }
+        });
 
         // Notify team
         NamedTextColor teamColor = teamManager.getTeamColor(teamId);
@@ -668,6 +937,23 @@ public class GameManager {
     }
 
     /**
+     * Whether the location is part of <em>any</em> active team's visual sand timer column.
+     *
+     * <p>Every team, not just the one the player belongs to: an operator who teleported into someone
+     * else's hub is exactly the case worth covering, and team dungeons are thousands of blocks apart
+     * so a cross-team hit cannot happen by accident. Resolving the owning team via
+     * {@link #getTeamIdForLocation} first would buy nothing — the column check below is already one
+     * coordinate comparison per active team, and the answer would be the same.
+     */
+    public boolean isVisualTimerBlock(@Nullable Location location) {
+        if (location == null) return false;
+        for (SoTTeam team : activeTeamsInGame.values()) {
+            if (team.isVisualTimerBlock(location)) return true;
+        }
+        return false;
+    }
+
+    /**
      * Assigns each player on a team to their own death cage.
      * Called during startGame() after dungeon instances are created.
      */
@@ -709,6 +995,38 @@ public class GameManager {
     }
 
     /**
+     * Gets the DeathCage assigned to a specific player, or null if they have none.
+     */
+    @Nullable
+    private DeathCage getPlayerDeathCage(UUID teamId, UUID playerUUID) {
+        DungeonManager teamDungeonManager = teamDungeonManagers.get(teamId);
+        if (teamDungeonManager == null || teamDungeonManager.getDungeonData() == null) return null;
+        for (DeathCage cage : teamDungeonManager.getDungeonData().getDeathCages()) {
+            if (playerUUID.equals(cage.getAssignedPlayerUUID())) {
+                return cage;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * True if the location is a sacrifice chest belonging to <em>any</em> team's dungeon.
+     *
+     * <p>Used to suppress the vanilla chest UI on every sacrifice point, including for a player who
+     * is not on the owning team (or on no team at all) and so cannot pay at it.
+     */
+    public boolean isAnySacrificePointAt(Location location) {
+        if (location == null) return false;
+        for (DungeonManager teamDungeonManager : teamDungeonManagers.values()) {
+            if (teamDungeonManager == null || teamDungeonManager.getDungeonData() == null) continue;
+            for (DeathCage cage : teamDungeonManager.getDungeonData().getDeathCages()) {
+                if (cage.isSacrificePointAt(location)) return true;
+            }
+        }
+        return false;
+    }
+
+    /**
      * Finds the DeathCage whose sacrifice point is at the given location for a team.
      * @return The DeathCage, or null if no match.
      */
@@ -724,37 +1042,84 @@ public class GameManager {
         return null;
     }
 
-    /** Finds the team ID associated with a given world location. */
+    /**
+     * True if the location is a gate sacrifice chest belonging to <em>any</em> team's dungeon.
+     *
+     * <p>The counterpart of {@link #isAnySacrificePointAt}, and there for the same reason: a gate
+     * sacrifice point is a real chest, so the vanilla chest UI has to be suppressed on every one of
+     * them — including for a player who is on another team, or on no team, and so cannot pay at it.
+     * Gate sacrifice points live in {@link DoorManager}, beside the gates they open.
+     */
+    public boolean isAnyGateSacrificePointAt(Location location) {
+        if (location == null || doorManager == null) return false;
+        return doorManager.isAnyGateSacrificeAt(location);
+    }
+
+    /** A team's own gate sacrifice chest at the given block, or null when the team has none there. */
     @Nullable
-    public UUID getTeamIdForLocation(Location location) { /* ... (Implementation remains the same) ... */ return null;}
+    public GateSacrificePoint getGateSacrificePointAt(UUID teamId, Location location) {
+        if (teamId == null || location == null || doorManager == null) return null;
+        return doorManager.getGateSacrificeAt(teamId, location);
+    }
+
+    /**
+     * True if the given block location is one of a team's sand deposit cells — the TIMER_DEPOSIT
+     * marker positions where carried sand is spent to add time to that team's timer.
+     */
+    public boolean isTeamSandTimerDepositAt(UUID teamId, Location location) {
+        DungeonManager teamDungeonManager = teamDungeonManagers.get(teamId);
+        if (teamDungeonManager == null || teamDungeonManager.getDungeonData() == null) return false;
+        return teamDungeonManager.getDungeonData().isSandTimerDepositAt(location);
+    }
+
+    /**
+     * True if the given block location is the team's coin bank (the ender chest built at the
+     * BANK marker). False when the team has no dungeon, or the dungeon defines no bank.
+     */
+    public boolean isTeamBankAt(UUID teamId, Location location) {
+        DungeonManager teamDungeonManager = teamDungeonManagers.get(teamId);
+        if (teamDungeonManager == null || teamDungeonManager.getDungeonData() == null) return false;
+        return teamDungeonManager.getDungeonData().isBankAt(location);
+    }
+
+    /**
+     * Finds the team whose dungeon region contains the given world location.
+     *
+     * <p>Region, not segment: every team's instance owns a cuboid — the blueprint bounds translated
+     * by that team's origin, which is exactly the region {@code cleanupInstance()} air-fills at
+     * teardown — so a location in the gap between two of a team's rooms still resolves to that team.
+     * Ask {@link DungeonManager#getSegmentAtLocation} when you need a segment to actually be there.
+     *
+     * <p>Team origins are {@code TEAM_DUNGEON_SPACING} (5000 blocks on X) apart, so the regions
+     * cannot overlap and the match is unambiguous; with the bounds precomputed per instance this is
+     * six coordinate comparisons per active team, cheap enough to call from an event handler.
+     *
+     * @return the owning team's ID, or null for a location outside every team's dungeon (including
+     *         the lobby and the trapped box, which sit outside the generated regions).
+     */
+    @Nullable
+    public UUID getTeamIdForLocation(@Nullable Location location) {
+        return teamIdForLocation(teamDungeonManagers, location);
+    }
+
+    /**
+     * The lookup behind {@link #getTeamIdForLocation}, taking the map so it can be tested without
+     * standing up a whole GameManager — the same reason {@link #canResetFrom} is static.
+     */
+    @Nullable
+    static UUID teamIdForLocation(Map<UUID, DungeonManager> dungeonManagers, @Nullable Location location) {
+        if (location == null) return null;
+        for (Map.Entry<UUID, DungeonManager> entry : dungeonManagers.entrySet()) {
+            DungeonManager manager = entry.getValue();
+            if (manager != null && manager.containsLocation(location)) {
+                return entry.getKey();
+            }
+        }
+        return null;
+    }
+
     /** Gets the DungeonManager instance for a specific team. */
     @Nullable public DungeonManager getTeamDungeonManager(UUID teamId) { return teamDungeonManagers.get(teamId); }
-    /**
-     * Determines the bottom location (the block below the sand column) for a team's visual timer.
-     * Returns null if the anchor has no loaded world, which disables that team's display.
-     */
-    @Nullable
-    private Location determineVisualTimerBottomLocation(TeamDefinition teamDef, Location anchorLocation, int teamIndex) {
-        if (!hasVisualTimerWorld(teamDef, anchorLocation)) return null;
-        return VisualTimerLayout.bottomLocation(anchorLocation, teamIndex);
-    }
-
-    /**
-     * Determines the top location (the highest sand block) for a team's visual timer.
-     * Returns null if the anchor has no loaded world, which disables that team's display.
-     */
-    @Nullable
-    private Location determineVisualTimerTopLocation(TeamDefinition teamDef, Location anchorLocation, int teamIndex) {
-        if (!hasVisualTimerWorld(teamDef, anchorLocation)) return null;
-        return VisualTimerLayout.topLocation(anchorLocation, teamIndex);
-    }
-
-    private boolean hasVisualTimerWorld(TeamDefinition teamDef, Location anchorLocation) {
-        if (anchorLocation != null && anchorLocation.getWorld() != null) return true;
-        plugin.getLogger().warning("Lobby anchor has no loaded world; visual timer disabled for team "
-                + (teamDef != null ? teamDef.getName() : "unknown"));
-        return false;
-    }
 
     // --- Standard Getters ---
     public GameState getCurrentState() { return currentState; }
@@ -768,7 +1133,10 @@ public class GameManager {
     public DungeonGenerator getDungeonGenerator() { return dungeonGenerator; }
     public FloorItemManager getFloorItemManager() { return floorItemManager; } // Added Getter
     public DoorManager getDoorManager() { return doorManager; } // Added Getter
+    public MobManager getMobManager() { return mobManager; }
+    public SoTPlayerManager getPlayerManager() { return playerManager; }
     public GameScoreboardManager getScoreboardManager() { return scoreboardManager; }
+    public SacrificeIndicatorManager getSacrificeIndicatorManager() { return sacrificeIndicatorManager; }
     /** The universal trapped location. Returns a copy: {@link Location} is mutable. */
     public Location getTrappedLocation() { return configTrappedLocation.clone(); }
     /** The lobby anchor. Returns a copy: {@link Location} is mutable. */
@@ -807,6 +1175,34 @@ public class GameManager {
         if (!lobbyConfigured) names.add("lobby");
         if (!trappedConfigured) names.add("trapped");
         return names;
+    }
+
+    // --- Dungeon seed (see /sot seed and config.yml) ---
+
+    /**
+     * Fixes the seed future rounds generate from, or clears it with {@code null} so each round rolls
+     * its own. Only read when {@link #startGame} generates a layout, so this is safe to change
+     * between rounds; changing it mid-round has no effect on the dungeon already standing, which is
+     * why {@code /sot seed} refuses it rather than silently doing nothing.
+     */
+    public void setDungeonSeed(@Nullable Long seed) {
+        dungeonGenerator.setSeed(seed);
+    }
+
+    /** The configured fixed seed, or null when each round rolls its own. */
+    @Nullable
+    public Long getConfiguredDungeonSeed() {
+        return dungeonGenerator.getSeed();
+    }
+
+    /**
+     * The seed the current (or most recent) round's dungeon was generated from, or null before any
+     * round has generated one. This is what the population RNGs derive from, so that every team's
+     * dungeon is populated identically, and what an operator reads back to replay a random layout.
+     */
+    @Nullable
+    public Long getRoundSeed() {
+        return dungeonGenerator.getLastUsedSeed();
     }
 
 }

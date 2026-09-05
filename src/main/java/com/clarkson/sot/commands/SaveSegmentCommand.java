@@ -73,6 +73,7 @@ public class SaveSegmentCommand implements CommandExecutor, TabCompleter {
     private final NamespacedKey DIRECTION_KEY;
     private final NamespacedKey VAULT_COLOR_KEY;
     private final NamespacedKey COIN_VALUE_KEY;
+    private final NamespacedKey SACRIFICE_COST_KEY;
     private final NamespacedKey BOUND_MIN_KEY;
     private final NamespacedKey BOUND_MAX_KEY;
 
@@ -91,6 +92,7 @@ public class SaveSegmentCommand implements CommandExecutor, TabCompleter {
         DIRECTION_KEY    = new NamespacedKey(plugin, SegmentBuilderKeys.DIRECTION);
         VAULT_COLOR_KEY  = new NamespacedKey(plugin, SegmentBuilderKeys.VAULT_COLOR);
         COIN_VALUE_KEY   = new NamespacedKey(plugin, SegmentBuilderKeys.COIN_VALUE);
+        SACRIFICE_COST_KEY = new NamespacedKey(plugin, SegmentBuilderKeys.SACRIFICE_COST);
         BOUND_MIN_KEY    = new NamespacedKey(plugin, SegmentBuilderKeys.BOUND_MIN);
         BOUND_MAX_KEY    = new NamespacedKey(plugin, SegmentBuilderKeys.BOUND_MAX);
     }
@@ -175,6 +177,7 @@ public class SaveSegmentCommand implements CommandExecutor, TabCompleter {
         List<BlockVector3> itemSpawns          = new ArrayList<>();
         List<BlockVector3> coinSpawns          = new ArrayList<>();
         List<BlockVector3> sandSacrifices      = new ArrayList<>();
+        List<Integer>      sandSacrificeCosts  = new ArrayList<>(); // index-aligned with sandSacrifices
         List<BlockVector3> mobSpawners         = new ArrayList<>();
         List<SegmentBound> gates               = new ArrayList<>();
 
@@ -189,6 +192,7 @@ public class SaveSegmentCommand implements CommandExecutor, TabCompleter {
         List<BlockVector3> deathCageOffsets    = new ArrayList<>();
         List<BlockVector3> sandTimerOffsets    = new ArrayList<>();
         List<BlockVector3> playerSpawnOffsets  = new ArrayList<>();
+        List<BlockVector3> branchSignifiers    = new ArrayList<>();
         VaultColor containedVault              = null;
         VaultColor containedVaultKey           = null;
 
@@ -312,9 +316,12 @@ public class SaveSegmentCommand implements CommandExecutor, TabCompleter {
                 case "SAND_SPAWN":
                     sandSpawns.add(relPos);
                     break;
-                case "SAND_SACRIFICE":
+                case "SAND_SACRIFICE": {
                     sandSacrifices.add(relPos);
+                    Integer cost = pdc.get(SACRIFICE_COST_KEY, PersistentDataType.INTEGER);
+                    sandSacrificeCosts.add(Segment.clampSacrificeCost(cost));
                     break;
+                }
                 case "SAFE_EXIT": {
                     SegmentBound bound = readBound(pdc, selMin);
                     if (bound != null) {
@@ -352,6 +359,9 @@ public class SaveSegmentCommand implements CommandExecutor, TabCompleter {
                 }
                 case "PLAYER_SPAWN":
                     playerSpawnOffsets.add(relPos);
+                    break;
+                case "BRANCH_SIGNIFIER":
+                    branchSignifiers.add(relPos);
                     break;
                 case "COIN_SPAWN": {
                     coinSpawns.add(relPos);
@@ -391,15 +401,45 @@ public class SaveSegmentCommand implements CommandExecutor, TabCompleter {
                     + "beyond their wall). Missing: " + String.join("; ", limit(markersOutside, 8)));
         }
 
-        if (!gates.isEmpty() && leverOffset == null) {
+        // Outside the HUB a SAND_SACRIFICE chest opens the segment's gates, so it stands in for a
+        // lever. A HUB's sacrifice chests are death-cage points and never open anything.
+        boolean gateSacrificeAvailable = segmentType != SegmentType.HUB && !sandSacrifices.isEmpty();
+        if (!gates.isEmpty() && leverOffset == null && !gateSacrificeAvailable) {
             player.sendMessage(Component.text(
-                    "Save failed: segment has " + gates.size() + " gate(s) but no LEVER marker.",
+                    "Save failed: segment has " + gates.size() + " gate(s) but no LEVER marker"
+                            + (segmentType == SegmentType.HUB
+                                    ? ". A HUB's SAND_SACRIFICE markers are death-cage points, so a HUB with gates needs a LEVER."
+                                    : " or SAND_SACRIFICE marker."),
                     NamedTextColor.RED));
             return true;
         }
         if (gates.isEmpty() && leverOffset != null) {
             player.sendMessage(Component.text(
                     "Warning: LEVER marker present but no gates found.", NamedTextColor.YELLOW));
+        }
+        if (segmentType != SegmentType.HUB && gates.isEmpty() && !sandSacrifices.isEmpty()) {
+            warn(player, sandSacrifices.size() + " SAND_SACRIFICE marker(s) on a segment with no gates. "
+                    + "Outside the HUB a sacrifice chest opens the segment's gates, so these will be ignored.");
+        }
+        if (segmentType == SegmentType.HUB
+                && sandSacrificeCosts.stream().anyMatch(c -> c != Segment.DEFAULT_SACRIFICE_COST)) {
+            warn(player, "HUB sacrifice chests are priced by the caged player's death count; the cost "
+                    + "set with /sotmode SAND_SACRIFICE <cost> is saved but ignored here.");
+        }
+        if (vaultDoorBound != null && vaultOffset == null) {
+            // The VAULT_DOOR marker's colour is what sets containedVault, so a segment saved like this
+            // claims to hold a vault it has no marker for. DungeonGenerator then counts the colour as
+            // placed while consolidateFeatureLocations emits no marker, and every one of its 20
+            // attempts fails validation on the missing marker -- /sot start aborts with no clear cause.
+            player.sendMessage(Component.text(
+                    "Save failed: segment has a VAULT_DOOR but no VAULT_MARKER. A vault door must live "
+                    + "in the same segment as the vault it seals.", NamedTextColor.RED));
+            return true;
+        }
+        if (!entryPoints.isEmpty() && branchSignifiers.isEmpty()) {
+            warn(player, "No BRANCH_SIGNIFIER marker — this segment will show no vault-colour "
+                    + "marking, so players can't tell which branch they are on. Place one beside "
+                    + "each exit that should advertise its branch.");
         }
         if (deathCageOffsets.size() > 4) {
             warn(player, deathCageOffsets.size() + " DEATH_CAGE markers — the runtime uses at most 4 "
@@ -413,7 +453,11 @@ public class SaveSegmentCommand implements CommandExecutor, TabCompleter {
         player.sendMessage(info("Item Spawns",     itemSpawns.size()));
         player.sendMessage(info("Coin Spawns",     coinSpawns.size())
                 .append(Component.text(" (total value: " + totalCoins + ")", NamedTextColor.GRAY)));
-        player.sendMessage(info("Sand Sacrifices", sandSacrifices.size()));
+        player.sendMessage(info("Sand Sacrifices", sandSacrifices.size())
+                .append(segmentType != SegmentType.HUB && !sandSacrificeCosts.isEmpty()
+                        ? Component.text(" (gate cost in sand: " + sandSacrificeCosts.stream()
+                                .map(String::valueOf).collect(Collectors.joining(", ")) + ")", NamedTextColor.GRAY)
+                        : Component.empty()));
         player.sendMessage(info("Mob Spawners",    mobSpawners.size()));
         player.sendMessage(info("Gates",           gates.size()));
         player.sendMessage(Component.text("  Lever: ", NamedTextColor.WHITE)
@@ -441,6 +485,7 @@ public class SaveSegmentCommand implements CommandExecutor, TabCompleter {
         player.sendMessage(info("Death Cages",    deathCageOffsets.size()));
         player.sendMessage(info("Timer Deposits", sandTimerOffsets.size()));
         player.sendMessage(info("Player Spawns",  playerSpawnOffsets.size()));
+        player.sendMessage(info("Branch Signifiers", branchSignifiers.size()));
         player.sendMessage(Component.text("  Timer: ", NamedTextColor.WHITE)
                 .append(Component.text(timerOffset != null ? "yes" : "none",
                         timerOffset != null ? NamedTextColor.GREEN : NamedTextColor.GRAY)));
@@ -465,7 +510,8 @@ public class SaveSegmentCommand implements CommandExecutor, TabCompleter {
                     sandSacrifices, mobSpawners,
                     safeExitOffset,
                     bankOffset, deathCageOffsets, safeExitBound, sandTimerOffsets, timerOffset,
-                    playerSpawnOffsets
+                    playerSpawnOffsets, branchSignifiers,
+                    sandSacrificeCosts
             );
         } catch (Exception e) {
             plugin.getLogger().log(Level.SEVERE, "Error constructing Segment for " + segmentName, e);

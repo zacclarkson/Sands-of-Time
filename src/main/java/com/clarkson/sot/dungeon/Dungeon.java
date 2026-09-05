@@ -6,6 +6,7 @@ import org.bukkit.World;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable; // For hubLocation potentially
 
+import com.clarkson.sot.dungeon.segment.EntryPoint;
 import com.clarkson.sot.dungeon.segment.PlacedSegment;
 
 import java.util.*;
@@ -32,7 +33,15 @@ public class Dungeon {
     private final List<Location> itemSpawnLocations;
     private final List<DeathCage> deathCages;
     private final Location safeExitLocation; // Null when no segment template defined one
+    private final Location bankLocation; // Cell holding the coin bank; null when no BANK marker was defined
     private final List<Location> playerSpawnLocations; // Absolute per-player start points (may be empty)
+    private final List<Location> sandTimerLocations; // Absolute sand deposit cells (may be empty)
+    private final List<Location> mobSpawnerLocations; // Absolute mob spawner cells (may be empty)
+
+    // Absolute openings between segments. Doorways get a rusty-key door; unused openings are the
+    // entry points generation never attached a neighbour to and are sealed as plain wall.
+    private final List<EntryPoint> doorways;
+    private final List<EntryPoint> unusedOpenings;
 
     /**
      * Constructor for the Dungeon data object.
@@ -50,6 +59,12 @@ public class Dungeon {
      * @param itemSpawnLocations List of absolute general item spawn locations.
      * @param deathCages List of death cage + sacrifice point pairs (max 4).
      * @param safeExitLocation The absolute location players interact with to escape, or null if undefined.
+     * @param bankLocation The absolute cell the coin bank stands in, or null if no BANK marker was defined.
+     * @param playerSpawnLocations List of absolute per-player spawn points (may be empty).
+     * @param sandTimerLocations List of absolute cells where carried sand is deposited onto the timer.
+     * @param mobSpawnerLocations List of absolute cells where hostile mobs are armed to spawn.
+     * @param doorways Absolute doorways between connected segments (one rusty-key door each).
+     * @param unusedOpenings Absolute entry points with no neighbour attached, to be sealed.
      */
     public Dungeon(@NotNull UUID teamId, @NotNull World world, @NotNull Location origin, @NotNull DungeonBlueprint blueprint,
                    @Nullable Location hubLocation,
@@ -60,7 +75,12 @@ public class Dungeon {
                    @NotNull List<Location> itemSpawnLocations,
                    @NotNull List<DeathCage> deathCages,
                    @Nullable Location safeExitLocation,
-                   @NotNull List<Location> playerSpawnLocations) {
+                   @Nullable Location bankLocation,
+                   @NotNull List<Location> playerSpawnLocations,
+                   @NotNull List<Location> sandTimerLocations,
+                   @NotNull List<Location> mobSpawnerLocations,
+                   @NotNull List<EntryPoint> doorways,
+                   @NotNull List<EntryPoint> unusedOpenings) {
 
         this.instanceId = UUID.randomUUID();
         this.teamId = Objects.requireNonNull(teamId, "Team ID cannot be null");
@@ -69,6 +89,7 @@ public class Dungeon {
         this.blueprint = Objects.requireNonNull(blueprint, "Blueprint cannot be null");
         this.hubLocation = hubLocation;
         this.safeExitLocation = safeExitLocation;
+        this.bankLocation = bankLocation;
 
         // Store immutable copies of maps/lists containing ABSOLUTE locations
         this.vaultMarkerLocations = Collections.unmodifiableMap(new HashMap<>(vaultMarkerLocations));
@@ -78,6 +99,10 @@ public class Dungeon {
         this.itemSpawnLocations = Collections.unmodifiableList(new ArrayList<>(itemSpawnLocations));
         this.deathCages = Collections.unmodifiableList(new ArrayList<>(deathCages));
         this.playerSpawnLocations = Collections.unmodifiableList(new ArrayList<>(playerSpawnLocations));
+        this.sandTimerLocations = Collections.unmodifiableList(new ArrayList<>(sandTimerLocations));
+        this.mobSpawnerLocations = Collections.unmodifiableList(new ArrayList<>(mobSpawnerLocations));
+        this.doorways = Collections.unmodifiableList(new ArrayList<>(doorways));
+        this.unusedOpenings = Collections.unmodifiableList(new ArrayList<>(unusedOpenings));
     }
 
     // --- Getters ---
@@ -98,8 +123,64 @@ public class Dungeon {
         return deathCages; // Already unmodifiable
     }
 
+    /** Absolute doorways between connected segments; DoorManager builds a rusty-key door at each. */
+    @NotNull public List<EntryPoint> getDoorways() { return doorways; }
+
+    /** Absolute entry points with no neighbour attached; DoorManager seals these as plain wall. */
+    @NotNull public List<EntryPoint> getUnusedOpenings() { return unusedOpenings; }
+
     /** Absolute per-player spawn points (empty if no PLAYER_SPAWN markers were defined). */
     @NotNull public List<Location> getPlayerSpawnLocations() { return playerSpawnLocations; } // Already unmodifiable
+
+    /** Absolute sand deposit cells (empty if no TIMER_DEPOSIT markers were defined). */
+    @NotNull public List<Location> getSandTimerLocations() { return sandTimerLocations; } // Already unmodifiable
+
+    /**
+     * Absolute mob spawner cells (empty if no MOB_SPAWNER markers were defined).
+     *
+     * <p>These are only <em>armed</em> at instance setup — {@code MobManager} spawns the mobs when
+     * a member of the owning team first comes near.
+     */
+    @NotNull public List<Location> getMobSpawnerLocations() { return mobSpawnerLocations; } // Already unmodifiable
+
+    /**
+     * True if the given block location is one of this instance's sand deposit cells.
+     *
+     * <p>Matched on exact block coordinates, with no tolerance. The builder tool records a
+     * TIMER_DEPOSIT marker at the <em>air cell</em> next to the face the builder clicked, which is
+     * precisely the cell a placed sand block occupies — so unlike the safe exit (which compares a
+     * clicked solid block against an air-cell marker and therefore needs a +/-1 Y allowance) a deposit
+     * is an exact match.
+     */
+    public boolean isSandTimerDepositAt(@NotNull Location location) {
+        for (Location deposit : sandTimerLocations) {
+            if (deposit.getBlockX() == location.getBlockX()
+                    && deposit.getBlockY() == location.getBlockY()
+                    && deposit.getBlockZ() == location.getBlockZ()
+                    && Objects.equals(deposit.getWorld(), location.getWorld())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** Absolute cell the coin bank stands in, or null if no segment template defined a BANK marker. */
+    @Nullable public Location getBankLocation() { return bankLocation != null ? bankLocation.clone() : null; }
+
+    /**
+     * True if the given block location is this instance's coin bank.
+     *
+     * <p>Matched on exact block coordinates, with no tolerance, for the same reason as
+     * {@link #isSandTimerDepositAt}: the builder tool records a BANK marker at the <em>air cell</em>
+     * next to the face the builder clicked, which is precisely the cell the bank block is written into.
+     */
+    public boolean isBankAt(@NotNull Location location) {
+        return bankLocation != null
+                && bankLocation.getBlockX() == location.getBlockX()
+                && bankLocation.getBlockY() == location.getBlockY()
+                && bankLocation.getBlockZ() == location.getBlockZ()
+                && Objects.equals(bankLocation.getWorld(), location.getWorld());
+    }
 
     /**
      * Gets the absolute safe exit location, or null if no segment template defined one.

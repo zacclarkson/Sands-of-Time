@@ -1,8 +1,12 @@
 package com.clarkson.sot.dungeon;
 
 // Local project imports
+import com.clarkson.sot.dungeon.segment.EntryPoint;
 import com.clarkson.sot.dungeon.segment.PlacedSegment;
 import com.clarkson.sot.dungeon.segment.Segment;
+import com.clarkson.sot.dungeon.segment.SegmentBound;
+import com.clarkson.sot.dungeon.segment.SegmentGeometry;
+import com.clarkson.sot.dungeon.segment.SegmentType;
 import com.clarkson.sot.entities.Area;
 import com.clarkson.sot.events.FloorItemManager;
 import com.clarkson.sot.main.GameManager;
@@ -14,6 +18,9 @@ import org.bukkit.Material;
 import org.bukkit.NamespacedKey;
 import org.bukkit.World;
 import org.bukkit.block.Block;
+import org.bukkit.block.BlockFace;
+import org.bukkit.block.data.BlockData;
+import org.bukkit.block.data.Directional;
 import org.bukkit.entity.Entity; // Import Entity
 import org.bukkit.entity.Player; // Import Player
 import org.bukkit.persistence.PersistentDataType;
@@ -48,6 +55,7 @@ import java.io.FileInputStream;
 import java.io.IOException;
 import java.util.*;
 import java.util.logging.Level;
+import java.util.logging.Logger;
 import java.util.stream.Collectors;
 
 /**
@@ -64,20 +72,52 @@ public class DungeonManager {
     private final VaultManager vaultManager;
     private final FloorItemManager floorItemManager;
     private final DoorManager doorManager;
-    private final Random random; // Added for probabilities
+    private final MobManager mobManager;
+    /**
+     * Rusty-key and sand rolls, seeded from the round seed so a seed reproduces what is on the floor
+     * and not merely the shape of the rooms. Every team derives the same value, so every team's
+     * dungeon populates identically -- which is also the fairer behaviour for a race.
+     */
+    private final Random random;
 
     // --- Instance State ---
     private final UUID teamId;
     private final Location dungeonOrigin; // Absolute world origin for this instance
     private final World world;
     private final DungeonBlueprint blueprintData; // The relative blueprint used
+    /**
+     * The absolute world region this instance owns: the blueprint's relative bounds translated by
+     * {@link #dungeonOrigin}. Computed once, since both inputs are final.
+     *
+     * <p>This is exactly the region {@link #cleanupInstance()} air-fills between rounds, which is
+     * what makes it the right answer to "whose dungeon is this location in?" -- see
+     * {@link #containsLocation(Location)}.
+     */
+    private final Area absoluteBounds;
     private final List<PlacedSegment> placedSegmentsInWorld; // Actual segments placed in the world
     // --- Constants ---
     private static final double SAND_SPAWN_CHANCE = 0.4; // Example: 40% chance for sand to spawn at a location
 
+    /**
+     * Chance that an ITEM_SPAWN marker yields a rusty key instead of rolling the loot table.
+     *
+     * <p>Rusty keys are the only way through a segment door, and they are placed by chance rather
+     * than one-per-room, so a branch can in principle come up with no key in it and stay shut for
+     * the round. Raise this if that happens often -- the doorway count is logged at generation.
+     */
+    private static final double RUSTY_KEY_SPAWN_CHANCE = 0.20;
+
+    /**
+     * Mixed into the round seed for this instance's RNG. Population uses a salted sub-seed rather
+     * than continuing the generator's own stream so that it cannot be perturbed by how many draws
+     * layout generation happened to consume (a validation retry changes that count).
+     */
+    private static final long POPULATION_SEED_SALT = 0xA5A5F100D5EEDL;
+
     // The consolidated data object with ABSOLUTE locations for this instance
     private Dungeon dungeonData;
     private Location timerBaseLocation; // Absolute base of the visual sand timer; null if no TIMER marker
+    private Location bankLocation; // Absolute cell holding the coin bank; null if no BANK marker
 
     /**
      * Constructor for a team's specific DungeonManager instance.
@@ -97,14 +137,28 @@ public class DungeonManager {
         this.vaultManager = Objects.requireNonNull(gameManager.getVaultManager(), "VaultManager cannot be null via GameManager");
         this.floorItemManager = Objects.requireNonNull(gameManager.getFloorItemManager(), "FloorItemManager cannot be null via GameManager");
         this.doorManager = Objects.requireNonNull(gameManager.getDoorManager(), "DoorManager cannot be null via GameManager");
+        this.mobManager = Objects.requireNonNull(gameManager.getMobManager(), "MobManager cannot be null via GameManager");
         this.teamId = Objects.requireNonNull(teamId, "Team ID cannot be null");
         this.dungeonOrigin = Objects.requireNonNull(dungeonOrigin, "Dungeon origin cannot be null");
         this.world = Objects.requireNonNull(dungeonOrigin.getWorld(), "Dungeon origin must have a valid world");
         this.blueprintData = Objects.requireNonNull(blueprintData, "Dungeon blueprint cannot be null");
+        this.absoluteBounds = toAbsoluteBounds(this.dungeonOrigin, this.blueprintData.getRelativeBounds());
 
         this.placedSegmentsInWorld = new ArrayList<>();
         this.dungeonData = null;
-        this.random = new Random(); // Initialize Random
+        this.random = populationRandom(gameManager.getRoundSeed());
+    }
+
+    /**
+     * The RNG that populates a dungeon instance, derived from the seed its layout was generated
+     * from. Deliberately takes no account of the team: every team is populated from the same
+     * sub-seed and walks the same blueprint-ordered spawn lists, so every team's dungeon ends up
+     * identical. Falls back to an unseeded RNG only when no layout has been generated, which in
+     * practice means a caller constructed a DungeonManager outside {@code GameManager.startGame}.
+     */
+    @NotNull
+    static Random populationRandom(@Nullable Long roundSeed) {
+        return roundSeed != null ? new Random(roundSeed ^ POPULATION_SEED_SALT) : new Random();
     }
     /**
      * Initializes the dungeon instance in the world.
@@ -125,11 +179,17 @@ public class DungeonManager {
         List<Location> absCoinSpawns = calculateAbsoluteLocations(blueprintData.getCoinSpawnRelativeLocations());
         List<Location> absItemSpawns = calculateAbsoluteLocations(blueprintData.getItemSpawnRelativeLocations());
         List<Location> absPlayerSpawns = calculateAbsoluteLocations(blueprintData.getPlayerSpawnRelativeLocations());
+        List<Location> absSandTimers = calculateAbsoluteLocations(blueprintData.getSandTimerRelativeLocations());
+        List<Location> absMobSpawners = calculateAbsoluteLocations(blueprintData.getMobSpawnerRelativeLocations());
         Location absHubLocation = dungeonOrigin.clone().add(blueprintData.getHubRelativeLocation());
         Vector safeExitRelative = blueprintData.getSafeExitRelativeLocation();
         Location absSafeExitLocation = (safeExitRelative != null) ? dungeonOrigin.clone().add(safeExitRelative) : null;
         Vector timerBaseRelative = blueprintData.getTimerBaseRelativeLocation();
         this.timerBaseLocation = (timerBaseRelative != null) ? dungeonOrigin.clone().add(timerBaseRelative) : null;
+        Vector bankRelative = blueprintData.getBankRelativeLocation();
+        this.bankLocation = (bankRelative != null) ? dungeonOrigin.clone().add(bankRelative) : null;
+        List<EntryPoint> absDoorways = calculateAbsoluteDoorways(blueprintData.getDoorways());
+        List<EntryPoint> absUnusedOpenings = calculateAbsoluteDoorways(blueprintData.getUnusedOpenings());
 
 
         // --- 2. Paste Schematics (Populates placedSegmentsInWorld) ---
@@ -145,29 +205,25 @@ public class DungeonManager {
 
 
         // --- 3. Create Dungeon Data Object ---
-        // Create 4 death cage + sacrifice point pairs near the hub (one per player, max 4)
+        // Death cages and their sacrifice points come straight from the blueprint, which guarantees
+        // the two lists are the same length and index-aligned (DungeonGenerator derives a point for
+        // any cage the templates left unpaired), so this is a plain zip.
+        List<Location> absCages = calculateAbsoluteLocations(blueprintData.getDeathCageRelativeLocations());
+        List<Location> absSacrificePoints = calculateAbsoluteLocations(blueprintData.getSandSacrificeRelativeLocations());
         List<DeathCage> deathCages = new ArrayList<>();
-        if (absHubLocation != null) {
-            // Cages are placed in a row offset from the hub center
-            // Each cage has a paired sacrifice point 2 blocks in front of it
-            int[][] cageOffsets = { {3, 0, 3}, {3, 0, -3}, {-3, 0, 3}, {-3, 0, -3} };
-            for (int[] offset : cageOffsets) {
-                Location cageLoc = absHubLocation.clone().add(offset[0], offset[1], offset[2]);
-                // Sacrifice point is 2 blocks toward hub center from the cage
-                Location sacrificeLoc = cageLoc.clone().add(
-                    offset[0] > 0 ? -2 : 2, 0,
-                    offset[2] > 0 ? -2 : 2
-                );
-                deathCages.add(new DeathCage(cageLoc, sacrificeLoc));
-            }
+        for (int i = 0; i < absCages.size() && i < absSacrificePoints.size(); i++) {
+            deathCages.add(new DeathCage(absCages.get(i), absSacrificePoints.get(i)));
         }
+        plugin.getLogger().info("Prepared " + deathCages.size() + " death cage(s) for team " + teamId);
 
          try {
             this.dungeonData = new Dungeon(
                 teamId, world, dungeonOrigin, blueprintData,
                 absHubLocation, absVaultMarkers, absKeySpawns,
                 absSandSpawns, absCoinSpawns, absItemSpawns,
-                deathCages, absSafeExitLocation, absPlayerSpawns
+                deathCages, absSafeExitLocation, this.bankLocation, absPlayerSpawns, absSandTimers,
+                absMobSpawners,
+                absDoorways, absUnusedOpenings
             );
              plugin.getLogger().info("Created Dungeon data object for team " + teamId);
          } catch (Exception e) {
@@ -180,8 +236,17 @@ public class DungeonManager {
         // These managers use the absolute locations stored in dungeonData
         try {
             vaultManager.initializeForInstance(this.dungeonData);
+            placeBankBlock(); // Must run after the paste: a schematic would overwrite the chest
+            placeBranchSignifiers(); // Likewise: coloured wall markings written over the pasted wall
             doorManager.initializeDoorsForInstance(this.dungeonData); // Initialize doors
+            // After the doors, so a gate overlapping an opening sealUnusedOpenings just walled off
+            // wins -- the interactive thing should.
+            doorManager.initializeGatesForInstance(teamId,
+                    resolveGateGroups(placedSegmentsInWorld, plugin.getLogger()),
+                    resolveVaultDoors(placedSegmentsInWorld, plugin.getLogger()));
+            placeSacrificePoints(); // Build the chests teammates click to revive
             populateFloorItems(); // Spawn floor items
+            armMobSpawners(); // Arm mob spawners (mobs appear when a player gets close)
         } catch (Exception e) {
              plugin.getLogger().log(Level.SEVERE, "Error during feature manager initialization for team " + teamId, e);
              return false;
@@ -200,6 +265,14 @@ public class DungeonManager {
             absoluteMap.put(entry.getKey(), dungeonOrigin.clone().add(entry.getValue()));
         }
         return absoluteMap;
+    }
+
+    /** Helper to convert blueprint-relative doorways into absolute ones for this instance. */
+    private List<EntryPoint> calculateAbsoluteDoorways(List<Doorway> relativeDoorways) {
+        return relativeDoorways.stream()
+                               .map(d -> new EntryPoint(dungeonOrigin.clone().add(d.getRelativePosition()),
+                                                        d.getDirection()))
+                               .collect(Collectors.toList());
     }
 
     /** Helper to convert relative list to absolute list */
@@ -334,6 +407,66 @@ public class DungeonManager {
      * and places Sand blocks probabilistically based on the absolute locations
      * stored in the `dungeonData` object. Called by `initializeInstance`.
      */
+    /**
+     * Builds the chest at each death cage's sacrifice point.
+     *
+     * <p>Placing this block is what makes a sacrifice point exist at all: the marker records an
+     * <em>air</em> cell, so without writing something here there is nothing for a teammate to
+     * right-click and the revive can never fire.
+     *
+     * <p>Chests are forced to {@link org.bukkit.block.data.type.Chest.Type#SINGLE}. Two sacrifice
+     * points placed next to each other would otherwise pair into a double chest, which moves the
+     * block a click actually lands on and would break the point-to-cage lookup.
+     */
+    private void placeSacrificePoints() {
+        if (dungeonData == null) return;
+
+        int placed = 0;
+        for (DeathCage cage : dungeonData.getDeathCages()) {
+            if (placeSingleChest(cage.getSacrificePointLocation(), plugin.getLogger(), teamId,
+                    "sacrifice chest", "That cage cannot be revived from this round.")) {
+                placed++;
+            }
+        }
+        plugin.getLogger().info("Placed " + placed + " sacrifice chest(s) for team " + teamId);
+    }
+
+    /**
+     * Writes a single (never double) chest into {@code loc}, the block that makes a cage sacrifice
+     * point or a gate sacrifice point exist. Shared with {@code DoorManager}, which builds the gate
+     * variety, so the two cannot drift.
+     *
+     * @param purpose     what the chest is, for the log ("sacrifice chest", "gate sacrifice chest").
+     * @param consequence one sentence on what is lost when it cannot be placed, appended to the warning.
+     * @return true when the chest was written; false (with a warning) when the cell is occupied or
+     *         the write threw.
+     */
+    static boolean placeSingleChest(@NotNull Location loc, @NotNull Logger log, @NotNull UUID teamId,
+                                    @NotNull String purpose, @NotNull String consequence) {
+        try {
+            Block block = loc.getBlock();
+            // Material-level test rather than Block.isPassable(): the marker cell is air after the
+            // paste, a liquid or a plant is just as free, and only a solid block means the template
+            // disagrees with its own marker.
+            Material current = block.getType();
+            if (!current.isAir() && current.isSolid()) {
+                log.warning("Could not place " + purpose + " at " + loc.toVector()
+                        + " for team " + teamId + ": block is " + current + ". " + consequence);
+                return false;
+            }
+            block.setType(Material.CHEST, false);
+            BlockData data = block.getBlockData();
+            if (data instanceof org.bukkit.block.data.type.Chest chestData) {
+                chestData.setType(org.bukkit.block.data.type.Chest.Type.SINGLE);
+                block.setBlockData(chestData, false);
+            }
+            return true;
+        } catch (Exception e) {
+            log.log(Level.WARNING, "Error placing " + purpose + " at " + loc + " for team " + teamId, e);
+            return false;
+        }
+    }
+
     private void populateFloorItems() {
         // Ensure data is ready
         if (dungeonData == null) {
@@ -357,7 +490,7 @@ public class DungeonManager {
                 if (absLoc == null) continue;
                 try {
                     int depth = dungeonData.getDepthAtLocation(absLoc, this.placedSegmentsInWorld);
-                    int baseValue = 5 + (depth / 2);
+                    int baseValue = coinBaseValueForDepth(depth);
                     floorItemManager.spawnCoinStack(absLoc, baseValue, teamId, instanceUUID, depth);
                 } catch (Exception e) {
                     plugin.getLogger().log(Level.WARNING, "Error processing coin spawn at " + absLoc + " for team " + teamId, e);
@@ -369,17 +502,25 @@ public class DungeonManager {
 
         // --- Populate Generic Items ---
         List<Location> itemLocs = dungeonData.getItemSpawnLocations();
+        int rustyKeyCount = 0;
         if (itemLocs != null && !itemLocs.isEmpty()) {
             plugin.getLogger().finer("Processing " + itemLocs.size() + " potential item spawn locations.");
             for (Location absLoc : itemLocs) {
                  if (absLoc == null) continue;
                  try {
                      int depth = dungeonData.getDepthAtLocation(absLoc, this.placedSegmentsInWorld);
-                     floorItemManager.spawnGenericItem(absLoc, teamId, instanceUUID, depth);
+                     if (spawnsRustyKey(random.nextDouble())) {
+                         floorItemManager.spawnRustyKey(absLoc, teamId, instanceUUID, depth);
+                         rustyKeyCount++;
+                     } else {
+                         floorItemManager.spawnGenericItem(absLoc, teamId, instanceUUID, depth, random);
+                     }
                  } catch (Exception e) {
                      plugin.getLogger().log(Level.WARNING, "Error processing item spawn at " + absLoc + " for team " + teamId, e);
                  }
             }
+            plugin.getLogger().fine("Spawned " + rustyKeyCount + " rusty keys out of " + itemLocs.size()
+                    + " item spawn locations for team " + teamId + ".");
         } else {
              plugin.getLogger().finer("No generic item spawn locations found for team " + teamId);
         }
@@ -416,6 +557,63 @@ public class DungeonManager {
     }
 
 
+    /**
+     * Whether an item spawn location becomes a rusty key rather than rolling the loot table.
+     *
+     * <p>Split out from {@link #populateFloorItems()} so the spawn rate is testable: everything
+     * else in that method needs a pasted dungeon, a live world and WorldEdit.
+     *
+     * @param roll A uniform random draw in [0, 1).
+     */
+    static boolean spawnsRustyKey(double roll) {
+        return roll < RUSTY_KEY_SPAWN_CHANCE;
+    }
+
+    /**
+     * Base coin value for a pickup at the given depth, before {@code ScoreManager}'s depth multiplier.
+     *
+     * <p>Shared with {@link MobManager}, which pays the same for a destroyed mob spawner, so the two
+     * cannot drift apart.
+     */
+    static int coinBaseValueForDepth(int depth) {
+        return 5 + (depth / 2);
+    }
+
+    /**
+     * Hands every {@code MOB_SPAWNER} marker in this instance to the {@link MobManager}.
+     *
+     * <p>This places the spawner blocks; no mob appears until a member of the team comes near one.
+     * Depth is resolved the same way {@link #populateFloorItems()} resolves it, because this class
+     * is the only place holding {@link #placedSegmentsInWorld}.
+     */
+    private void armMobSpawners() {
+        if (dungeonData == null) {
+            plugin.getLogger().severe("Cannot arm mob spawners: Dungeon data object is null for team " + teamId);
+            return;
+        }
+
+        List<Location> spawnerLocs = dungeonData.getMobSpawnerLocations();
+        if (spawnerLocs.isEmpty()) {
+            plugin.getLogger().fine("No mob spawner locations found for team " + teamId);
+            return;
+        }
+
+        int armed = 0;
+        for (Location absLoc : spawnerLocs) {
+            if (absLoc == null) continue;
+            try {
+                int depth = dungeonData.getDepthAtLocation(absLoc, this.placedSegmentsInWorld);
+                mobManager.armSpawner(absLoc, teamId, dungeonData.getInstanceId(), depth);
+                armed++;
+            } catch (Exception e) {
+                plugin.getLogger().log(Level.WARNING, "Error arming mob spawner at " + absLoc
+                        + " for team " + teamId, e);
+            }
+        }
+        plugin.getLogger().fine("Placed " + armed + " of " + spawnerLocs.size()
+                + " mob spawners for team " + teamId + ".");
+    }
+
     // --- Getters ---
     @NotNull public Location getDungeonOrigin() { return dungeonOrigin.clone(); } // Clone for safety
     @NotNull public World getWorld() { return world; }
@@ -424,7 +622,153 @@ public class DungeonManager {
 
     /** Absolute base of this instance's visual sand-timer column, or null if the hub has no TIMER marker. */
     @Nullable public Location getTimerBaseLocation() { return (timerBaseLocation != null) ? timerBaseLocation.clone() : null; }
+    /** Absolute cell the coin bank stands in; null when no segment template defined a BANK marker. */
+    @Nullable public Location getBankLocation() { return (bankLocation != null) ? bankLocation.clone() : null; }
     @NotNull public List<PlacedSegment> getPlacedSegmentsInWorld() { return Collections.unmodifiableList(this.placedSegmentsInWorld); }
+
+    /**
+     * Pairs each placed segment's gates with what opens them -- its lever and/or its sand sacrifice
+     * chests -- in absolute coordinates.
+     *
+     * <p>Read straight off the placed segments rather than carried on the blueprint. Doorways ride
+     * the blueprint because the DFS <em>discards</em> which connections it made and that cannot be
+     * recovered afterwards; gates discard nothing -- every GATE, LEVER and non-hub SAND_SACRIFICE
+     * marker on a placed template is used verbatim. Flattening them into a dungeon-wide list, the
+     * shape every other blueprint feature uses, would also lose the per-segment pairing that makes a
+     * lever or a chest mean anything.
+     *
+     * <p>A {@code SAND_SACRIFICE} marker means different things by segment type: on the HUB it is a
+     * death-cage point (blueprint data, see {@code DungeonGenerator.selectSandSacrificeRelativeLocations})
+     * and is <em>never</em> a gate sacrifice, so a HUB with gates still needs a lever; on any other
+     * segment it is a gate sacrifice, priced by {@link Segment#getSandSacrificeCost(int)}.
+     *
+     * <p>Static and package-private so it can be tested against hand-built placements: everything
+     * else on this path needs WorldEdit and a pasted dungeon.
+     */
+    @NotNull
+    static List<GateGroup> resolveGateGroups(@NotNull List<PlacedSegment> placedSegments, @NotNull Logger log) {
+        List<GateGroup> groups = new ArrayList<>();
+        for (PlacedSegment placed : placedSegments) {
+            Segment template = placed.getSegmentTemplate();
+            if (template == null) continue;
+
+            List<SegmentBound> gates = template.getGates();
+            BlockVector3 leverOffset = template.getLeverOffset();
+            boolean hub = template.getType() == SegmentType.HUB;
+            List<BlockVector3> sacrificeOffsets = hub ? List.of() : template.getSandSacrificeLocations();
+
+            if (gates.isEmpty()) {
+                if (leverOffset != null) {
+                    log.fine("Segment " + template.getName() + " has a LEVER marker but no gates; ignoring it.");
+                }
+                if (!sacrificeOffsets.isEmpty()) {
+                    log.warning("Segment " + template.getName() + " has " + sacrificeOffsets.size()
+                            + " SAND_SACRIFICE marker(s) but no gates; ignoring them. Outside the HUB a "
+                            + "sacrifice chest opens the segment's gates -- add GATE bounds or remove the markers.");
+                }
+                continue;
+            }
+            if (leverOffset == null && sacrificeOffsets.isEmpty()) {
+                // SaveSegmentCommand refuses this combination, so only hand-edited JSON reaches here.
+                // Leaving the gates unbuilt keeps the area open rather than sealing it behind a wall
+                // nothing can ever raise.
+                log.warning("Segment " + template.getName() + " declares " + gates.size()
+                        + " gate(s) but no lever" + (hub ? " (a HUB's SAND_SACRIFICE markers are cage points)"
+                        : " or SAND_SACRIFICE marker")
+                        + "; leaving them open. Re-save the template with a LEVER"
+                        + (hub ? "" : " or SAND_SACRIFICE") + " marker.");
+                continue;
+            }
+
+            List<Area> bounds = new ArrayList<>();
+            for (SegmentBound gate : gates) {
+                bounds.add(SegmentGeometry.toAbsoluteArea(placed, gate));
+            }
+            List<GateGroup.SacrificePlacement> sacrifices = new ArrayList<>();
+            for (int i = 0; i < sacrificeOffsets.size(); i++) {
+                sacrifices.add(new GateGroup.SacrificePlacement(
+                        SegmentGeometry.toAbsoluteLocation(placed, sacrificeOffsets.get(i)),
+                        template.getSandSacrificeCost(i)));
+            }
+            Location lever = leverOffset != null ? SegmentGeometry.toAbsoluteLocation(placed, leverOffset) : null;
+            groups.add(new GateGroup(lever, bounds, sacrifices, template.getName()));
+        }
+        return groups;
+    }
+
+    /**
+     * Resolves each placed segment's vault door into an absolute wall plus the colour that opens it.
+     *
+     * <p>Two segments carrying the same colour is not an error: {@code openVaultDoors} opens every
+     * door of a colour, so a duplicate simply opens both.
+     */
+    @NotNull
+    static List<VaultDoorPlacement> resolveVaultDoors(@NotNull List<PlacedSegment> placedSegments, @NotNull Logger log) {
+        List<VaultDoorPlacement> doors = new ArrayList<>();
+        for (PlacedSegment placed : placedSegments) {
+            Segment template = placed.getSegmentTemplate();
+            if (template == null) continue;
+
+            SegmentBound bound = template.getVaultDoorBound();
+            if (bound == null) continue;
+
+            VaultColor color = template.getContainedVault();
+            if (color == null) {
+                // /sotmode VAULT_DOOR with no colour stores none on the marker, so the saved template
+                // has a wall nothing can ever open.
+                log.warning("Segment " + template.getName() + " has a vault door with no vault colour;"
+                        + " skipping it. Re-place the marker with /sotmode VAULT_DOOR <color>.");
+                continue;
+            }
+            doors.add(new VaultDoorPlacement(color, SegmentGeometry.toAbsoluteArea(placed, bound),
+                    template.getName()));
+        }
+        return doors;
+    }
+
+    /**
+     * Translates a blueprint's relative bounds by a dungeon origin, giving the absolute region an
+     * instance placed at that origin occupies.
+     *
+     * <p>Static and pure so the coordinate maths can be pinned without a server; the relative
+     * points carry a null world, and the returned Area's do not.
+     */
+    @NotNull
+    static Area toAbsoluteBounds(@NotNull Location origin, @NotNull Area relativeBounds) {
+        return new Area(origin.clone().add(relativeBounds.getMinPoint().toVector()),
+                        origin.clone().add(relativeBounds.getMaxPoint().toVector()));
+    }
+
+    /** The absolute world region this dungeon instance occupies -- the region cleanup clears. */
+    @NotNull
+    public Area getAbsoluteBounds() { return absoluteBounds; }
+
+    /**
+     * Whether a region in the given world holds the location.
+     *
+     * <p>The world test lives here rather than in {@link Area}, which compares coordinates only:
+     * two worlds share a coordinate space, so a region check without it would claim a location in
+     * the overworld for a dungeon in the nether. Static and pure so that is pinnable.
+     */
+    static boolean regionContains(@NotNull World world, @NotNull Area bounds, @Nullable Location location) {
+        if (location == null || !world.equals(location.getWorld())) return false;
+        return bounds.contains(location);
+    }
+
+    /**
+     * True if the location lies inside this instance's dungeon region.
+     *
+     * <p>Region, not segment: a location in the air between two placed rooms is still inside this
+     * team's dungeon and answers true here. Use {@link #getSegmentAtLocation(Location)} when you
+     * need to know that a segment is actually there. The region is fixed at construction, so this
+     * also answers correctly for an instance whose paste has not run (or failed part-way) -- the
+     * space is allocated to the team either way.
+     *
+     * <p>Six coordinate comparisons and a world check, so callers can afford it per event.
+     */
+    public boolean containsLocation(@Nullable Location location) {
+        return regionContains(world, absoluteBounds, location);
+    }
 
     /** Finds the PlacedSegment (with absolute world coords) at a given absolute world location within this instance. */
     @Nullable
@@ -440,6 +784,90 @@ public class DungeonManager {
             }
         }
         return null;
+    }
+
+    /**
+     * Writes the coin bank into the world: an ender chest in the cell the BANK marker named.
+     *
+     * <p>The block is what makes the bank exist — the same lesson as {@link com.clarkson.sot.entities.Door},
+     * where registering the object without writing blocks left nothing to click. Must be called after
+     * {@link #pasteSegmentSchematics()}, which would otherwise paint over the chest.
+     *
+     * <p>Nothing is needed at teardown: {@link #cleanupInstance()} clears the whole blueprint region.
+     */
+    private void placeBankBlock() {
+        if (bankLocation == null) {
+            plugin.getLogger().warning("No BANK marker for team " + teamId
+                    + "; this dungeon has no coin bank. Add a BANK marker to the HUB segment and re-save it.");
+            return;
+        }
+
+        Block bankBlock = world.getBlockAt(bankLocation);
+        bankBlock.setType(Material.ENDER_CHEST, false);
+
+        // Face the chest at the hub so it does not render staring into a wall.
+        BlockData data = bankBlock.getBlockData();
+        if (data instanceof Directional directional) {
+            BlockFace facing = facingTowardsHub();
+            if (directional.getFaces().contains(facing)) {
+                directional.setFacing(facing);
+                bankBlock.setBlockData(directional, false);
+            }
+        }
+
+        plugin.getLogger().info("Placed the coin bank for team " + teamId + " at " + bankLocation.toVector());
+    }
+
+    /**
+     * Writes the coloured wall markings that tell players which vault colour lies down a branch.
+     *
+     * <p>The colour is already decided: {@link DungeonGenerator#resolveBranchSignifiers} paired each
+     * template placeholder with the branch beside it when the blueprint was generated, and dropped
+     * any placeholder whose branch reaches no vault. All that is left here is writing the block.
+     *
+     * <p>Must run after {@link #pasteSegmentSchematics()}, which would otherwise paint over them,
+     * and needs nothing at teardown: {@link #cleanupInstance()} clears the whole blueprint region.
+     */
+    private void placeBranchSignifiers() {
+        List<BranchSignifier> signifiers = blueprintData.getBranchSignifiers();
+        if (signifiers.isEmpty()) return;
+
+        int placed = 0, skipped = 0;
+        for (BranchSignifier signifier : signifiers) {
+            Location loc = dungeonOrigin.clone().add(signifier.getRelativePosition());
+            try {
+                Block block = world.getBlockAt(loc);
+                // The marker records an air cell against a wall, so anything solid here means the
+                // template moved on since it was placed. Leave the segment's own geometry alone.
+                if (!(block.isPassable() || block.getType().isAir() || block.isLiquid())) {
+                    plugin.getLogger().fine("Skipped branch signifier at " + loc.toVector()
+                            + " for team " + teamId + ": cell holds " + block.getType());
+                    skipped++;
+                    continue;
+                }
+                block.setType(signifier.getColor().getConcreteMaterial(), false);
+                placed++;
+            } catch (Exception e) {
+                plugin.getLogger().log(Level.WARNING,
+                        "Error placing branch signifier at " + loc + " for team " + teamId, e);
+                skipped++;
+            }
+        }
+        plugin.getLogger().info("Placed " + placed + " branch colour marking(s) for team " + teamId
+                + (skipped > 0 ? " (" + skipped + " skipped -- cell not empty)" : ""));
+    }
+
+    /** The cardinal direction from the bank cell towards the hub, defaulting to NORTH. */
+    private BlockFace facingTowardsHub() {
+        Location hub = (dungeonData != null) ? dungeonData.getHubLocation() : null;
+        if (hub == null || bankLocation == null) return BlockFace.NORTH;
+
+        double dx = hub.getX() - bankLocation.getX();
+        double dz = hub.getZ() - bankLocation.getZ();
+        if (Math.abs(dx) >= Math.abs(dz)) {
+            return dx >= 0 ? BlockFace.EAST : BlockFace.WEST;
+        }
+        return dz >= 0 ? BlockFace.SOUTH : BlockFace.NORTH;
     }
 
     /**
@@ -481,18 +909,23 @@ public class DungeonManager {
     public void cleanupInstance() {
          plugin.getLogger().info("Attempting cleanup for dungeon instance of team " + teamId + " at origin " + dungeonOrigin.toVector());
 
-         // Ensure we have the blueprint data to calculate bounds
-         if (blueprintData == null || dungeonData == null) { // Check dungeonData too, as it confirms successful init
-             plugin.getLogger().warning("Cannot cleanup instance for team " + teamId + ": Blueprint or Dungeon data is missing.");
+         // The blueprint is what gives us the bounds, so it is the only hard requirement.
+         // dungeonData being null means initializeInstance() failed part-way — which is exactly when
+         // there are half-pasted blocks to remove, so that case must NOT skip the clear below.
+         if (blueprintData == null) {
+             plugin.getLogger().warning("Cannot cleanup instance for team " + teamId + ": Blueprint data is missing.");
              // Still attempt to clear manager states
              clearManagerStates();
              return;
          }
+         if (dungeonData == null) {
+             plugin.getLogger().warning("Cleaning up a partially initialized dungeon for team " + teamId
+                     + "; clearing the blueprint bounds anyway.");
+         }
 
-         // --- 1. Calculate Absolute Bounds ---
-         Area relativeBounds = blueprintData.getRelativeBounds();
-         Location absMinLoc = dungeonOrigin.clone().add(relativeBounds.getMinPoint().toVector());
-         Location absMaxLoc = dungeonOrigin.clone().add(relativeBounds.getMaxPoint().toVector());
+         // --- 1. Absolute Bounds (the same region getTeamIdForLocation resolves a team from) ---
+         Location absMinLoc = absoluteBounds.getMinPoint();
+         Location absMaxLoc = absoluteBounds.getMaxPoint();
          plugin.getLogger().fine("Calculated absolute cleanup bounds: " + absMinLoc.toVector() + " to " + absMaxLoc.toVector());
 
          // Adapt world and create WorldEdit region
@@ -554,13 +987,15 @@ public class DungeonManager {
      /** Helper method to clear internal state and notify managers */
      private void clearManagerStates() {
           placedSegmentsInWorld.clear();
-          if (dungeonData != null) { // Check if dungeonData was successfully created
-              // Tell managers to clear state related to this teamId
-              if (vaultManager != null) vaultManager.clearTeamState(teamId);
-              if (doorManager != null) doorManager.clearTeamState(teamId);
-              if (floorItemManager != null) floorItemManager.clearTeamState(teamId);
-              dungeonData = null; // Clear local reference
-          }
+          // Unconditional: these are keyed by teamId and no-op on a team they know nothing about,
+          // whereas gating them on dungeonData would skip cleanup for a team whose instance failed
+          // part-way through initialization — and team UUIDs are reused every round, so a leaked
+          // entry makes the next round's vaults report as already open.
+          if (vaultManager != null) vaultManager.clearTeamState(teamId);
+          if (doorManager != null) doorManager.clearTeamState(teamId);
+          if (floorItemManager != null) floorItemManager.clearTeamState(teamId);
+          if (mobManager != null) mobManager.clearTeamState(teamId);
+          dungeonData = null; // Clear local reference
           plugin.getLogger().fine("Cleared internal manager states for team " + teamId);
      }
 

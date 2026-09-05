@@ -1,6 +1,7 @@
 package com.clarkson.sot.commands;
 
 import com.clarkson.sot.dungeon.VaultColor;
+import com.clarkson.sot.dungeon.segment.Segment;
 import com.clarkson.sot.events.BuilderMode;
 import com.clarkson.sot.events.BuilderSessionManager;
 import com.clarkson.sot.events.PlayerBuilderSession;
@@ -23,7 +24,7 @@ import java.util.List;
 import java.util.stream.Collectors;
 
 /**
- * /sotmode <mode> [color|value]
+ * /sotmode <mode> [color|value|cost]
  * Switches the builder tool mode for the calling player.
  *
  * Examples:
@@ -31,6 +32,7 @@ import java.util.stream.Collectors;
  *   /sotmode VAULT_DOOR BLUE
  *   /sotmode KEY_SPAWN GOLD
  *   /sotmode COIN_SPAWN 50
+ *   /sotmode SAND_SACRIFICE 3   (sand price of a gate sacrifice chest; ignored on a HUB)
  */
 public class SetBuilderModeCommand implements CommandExecutor, TabCompleter {
 
@@ -114,10 +116,23 @@ public class SetBuilderModeCommand implements CommandExecutor, TabCompleter {
             }
         }
 
+        int newSacrificeCost = session.getSacrificeCost();
+        if (newMode == BuilderMode.SAND_SACRIFICE && args.length >= 2) {
+            try {
+                newSacrificeCost = Integer.parseInt(args[1]);
+                if (newSacrificeCost < 1 || newSacrificeCost > Segment.MAX_SACRIFICE_COST) throw new NumberFormatException();
+            } catch (NumberFormatException e) {
+                player.sendMessage(Component.text("Invalid sacrifice cost: " + args[1]
+                        + ". Must be 1-" + Segment.MAX_SACRIFICE_COST + " sand.", NamedTextColor.RED));
+                return true;
+            }
+        }
+
         // --- Apply to session ---
         session.setMode(newMode);
         session.setVaultColor(newColor);
         session.setCoinValue(newCoinValue);
+        session.setSacrificeCost(newSacrificeCost);
 
         // --- Feedback ---
         Component msg = Component.text("Mode: ", NamedTextColor.GREEN)
@@ -127,6 +142,9 @@ public class SetBuilderModeCommand implements CommandExecutor, TabCompleter {
         }
         if (newMode == BuilderMode.COIN_SPAWN) {
             msg = msg.append(Component.text(" value=" + newCoinValue, NamedTextColor.GOLD));
+        }
+        if (newMode == BuilderMode.SAND_SACRIFICE) {
+            msg = msg.append(Component.text(" cost=" + newSacrificeCost + " sand", NamedTextColor.GOLD));
         }
         player.sendActionBar(msg);
         player.sendMessage(msg);
@@ -156,12 +174,15 @@ public class SetBuilderModeCommand implements CommandExecutor, TabCompleter {
             if (mode == BuilderMode.COIN_SPAWN) {
                 return List.of("1", "5", "10", "25", "50", "100");
             }
+            if (mode == BuilderMode.SAND_SACRIFICE) {
+                return List.of("1", "2", "3", "4", "5", "10");
+            }
         }
         return new ArrayList<>();
     }
 
     private void sendUsage(Player player, String label) {
-        player.sendMessage(Component.text("Usage: /" + label + " <mode> [color|value]", NamedTextColor.YELLOW));
+        player.sendMessage(Component.text("Usage: /" + label + " <mode> [color|value|cost]", NamedTextColor.YELLOW));
         player.sendMessage(Component.text("Modes: " +
                 Arrays.stream(BuilderMode.values()).map(BuilderMode::name)
                         .collect(Collectors.joining(", ")), NamedTextColor.GRAY));

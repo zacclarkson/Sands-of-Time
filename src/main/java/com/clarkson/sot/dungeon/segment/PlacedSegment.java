@@ -134,7 +134,9 @@ public class PlacedSegment {
              throw new IllegalStateException("Cannot calculate absolute entry points when worldOrigin's world is null.");
          }
         List<EntryPoint> absoluteEntryPoints = new ArrayList<>();
-        for (Segment.RelativeEntryPoint relEp : segmentTemplate.getEntryPoints()) {
+        // Rotated, not raw: this placement's footprint is rotated, so an unrotated template offset
+        // would put the entry point (and anything built on it, such as a door) in the wrong place.
+        for (Segment.RelativeEntryPoint relEp : getRotatedEntryPoints()) {
             Location absLoc = getAbsoluteLocation(relEp.getRelativePosition());
             // Assuming original EntryPoint constructor takes Location and Direction
             absoluteEntryPoints.add(new EntryPoint(absLoc, relEp.getDirection()));
@@ -155,7 +157,10 @@ public class PlacedSegment {
          if (worldOrigin.getWorld() == null) {
              throw new IllegalStateException("Cannot calculate absolute spawn locations when worldOrigin's world is null.");
          }
+        // Rotate each template offset into this placement's frame first, for the same reason
+        // getAbsoluteEntryPoints does: an unrotated offset lands outside a rotated footprint.
         return relativeSpawnPoints.stream()
+                                  .map(this::getRotatedOffset)
                                   .map(this::getAbsoluteLocation) // Convert each relative vec to absolute loc
                                   .collect(Collectors.toList());
      }

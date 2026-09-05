@@ -59,19 +59,74 @@ public abstract class Door {
     public abstract boolean isCorrectKey(@Nullable ItemStack keyStack);
     @NotNull protected abstract Material getClosedMaterial();
 
-    public boolean open(@NotNull Player player) {
+    /**
+     * The material of the block players right-click to unlock this door -- its keyhole.
+     * Defaults to the door's own material; override to make the interact point visible.
+     */
+    @NotNull protected Material getLockMaterial() { return getClosedMaterial(); }
+
+    /**
+     * Places this door's blocks in the world in the closed state, with the keyhole at the lock
+     * location.
+     *
+     * <p>Segment templates carve their doorways as open holes, so without this the door exists
+     * only as a Java object: the passage stays walkable and the lock location is air, which never
+     * fires a right-click at all.
+     */
+    public void buildClosed() {
+        if (!Bukkit.isPrimaryThread()) {
+            new BukkitRunnable() { @Override public void run() { buildClosed(); } }.runTask(plugin);
+            return;
+        }
+        cancelAnimation();
+        List<Block> blocks = getBlocksSorted(false);
+        if (blocks.isEmpty()) {
+            plugin.getLogger().warning("Cannot build door " + id + ": no blocks found in its bounds.");
+            return;
+        }
+        // No physics pass afterwards, unlike setOpenState: this runs while the dungeon is still
+        // being built, and every block being placed is a solid one going into air.
+        Material closedMaterial = getClosedMaterial();
+        for (Block block : blocks) {
+            if (block.getType() != closedMaterial) block.setType(closedMaterial, false);
+        }
+        applyLockMaterial();
+        this.isOpen = false;
+        plugin.getLogger().finer("Built door " + id + " closed at " + lockLocation.toVector());
+    }
+
+    /** Stamps the keyhole back over the door material at the lock location. */
+    private void applyLockMaterial() {
+        Material lockMaterial = getLockMaterial();
+        Block lockBlock = lockLocation.getBlock();
+        if (lockBlock.getType() != lockMaterial) {
+            lockBlock.setType(lockMaterial, false);
+        }
+    }
+
+    /**
+     * Opens this door. No player is required: the animation never used the one it was handed, and a
+     * gate is opened by a lever while a vault door is opened by its vault -- neither is a click on the
+     * door itself.
+     */
+    public boolean open() {
         if (isOpen || (currentAnimationTask != null && !currentAnimationTask.isCancelled())) return false;
-        startOpeningAnimation(player);
+        startOpeningAnimation();
         return true;
+    }
+
+    /** Convenience for the click paths, which do have a player. */
+    public boolean open(@NotNull Player player) {
+        return open();
     }
 
     public boolean close(@Nullable Player player) {
          if (!isOpen || (currentAnimationTask != null && !currentAnimationTask.isCancelled())) return false;
-         startClosingAnimation(player);
+         startClosingAnimation();
          return true;
     }
 
-    protected void startOpeningAnimation(@NotNull Player player) {
+    protected void startOpeningAnimation() {
         cancelAnimation();
         final List<Block> blocksToChange = getBlocksSorted(true); // Get blocks sorted top-to-bottom
         final World world = lockLocation.getWorld();
@@ -104,7 +159,7 @@ public abstract class Door {
          plugin.getLogger().fine("Finished opening door " + id);
      }
 
-    protected void startClosingAnimation(@Nullable Player player) {
+    protected void startClosingAnimation() {
         cancelAnimation();
         final List<Block> blocksToChange = getBlocksSorted(false); // Get blocks sorted bottom-to-top
         final Material closedMat = getClosedMaterial();
@@ -135,6 +190,7 @@ public abstract class Door {
      private void finishClosing() {
          this.isOpen = false; this.currentAnimationTask = null;
          List<Block> finalBlocks = getBlocksSorted(false); // Get blocks again to be safe
+         applyLockMaterial(); // The closing animation paints over the keyhole; put it back
          forceBlockUpdates(finalBlocks); // Update physics now
          if (lockLocation.getWorld() != null) lockLocation.getWorld().playSound(lockLocation, Sound.BLOCK_IRON_DOOR_CLOSE, SoundCategory.BLOCKS, 1.0f, 1.0f);
          plugin.getLogger().fine("Finished closing door " + id);
@@ -148,11 +204,16 @@ public abstract class Door {
         List<Block> blocks = getBlocksSorted(false); // Sorting order doesn't matter for instant set
 
         if (!Bukkit.isPrimaryThread()) {
-            new BukkitRunnable() { @Override public void run() { setBlocksInstantly(blocks, targetMaterial); } }.runTask(plugin);
+            new BukkitRunnable() { @Override public void run() { setStateBlocks(blocks, targetMaterial, open); } }.runTask(plugin);
         } else {
-            setBlocksInstantly(blocks, targetMaterial);
+            setStateBlocks(blocks, targetMaterial, open);
         }
          plugin.getLogger().fine("Set door " + id + " state to " + (open ? "OPEN" : "CLOSED") + " instantly.");
+    }
+
+    private void setStateBlocks(List<Block> blocks, Material material, boolean open) {
+        setBlocksInstantly(blocks, material);
+        if (!open) applyLockMaterial();
     }
 
     private void setBlocksInstantly(List<Block> blocks, Material material) {
@@ -176,7 +237,14 @@ public abstract class Door {
          }.runTask(plugin);
      }
 
-    protected void cancelAnimation() {
+    /**
+     * Cancels any in-flight open/close animation.
+     *
+     * <p>Public because {@code DoorManager} (a different package) has to stop these when a round is
+     * torn down: an animation still ticking after the dungeon has been air-filled keeps writing
+     * door blocks back into the cleared region.
+     */
+    public void cancelAnimation() {
         if (this.currentAnimationTask != null && !this.currentAnimationTask.isCancelled()) {
             this.currentAnimationTask.cancel();
              plugin.getLogger().finer("Cancelled animation task for door " + id);

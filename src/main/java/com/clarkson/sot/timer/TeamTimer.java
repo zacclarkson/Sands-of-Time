@@ -26,7 +26,9 @@ public class TeamTimer {
     // --- Dependencies ---
     private final Plugin plugin;
     private final TimerCallback expiryCallback; // Called when timer hits 0
-    private final VisualSandTimerDisplay visualNotifier; // To sync visual display (can be null)
+    // To sync visual display (can be null). Not final: the display is only created once the team's
+    // dungeon hub exists, which is well after the timer is constructed at /sot setup.
+    private VisualSandTimerDisplay visualNotifier;
 
     // --- Configuration ---
     private final int maxSeconds; // Maximum time allowed
@@ -69,6 +71,15 @@ public class TeamTimer {
         this.timerTask = null;
 
         plugin.getLogger().config("TeamTimer created: start=" + startSeconds + "s, max=" + this.maxSeconds + "s, interval=" + this.timerIntervalTicks + "t");
+    }
+
+    /**
+     * Attaches (or replaces) the visual sand column this timer keeps in sync. Null detaches it.
+     *
+     * @param visualNotifier The display to notify, or null for none.
+     */
+    public void setVisualNotifier(VisualSandTimerDisplay visualNotifier) {
+        this.visualNotifier = visualNotifier;
     }
 
     /**

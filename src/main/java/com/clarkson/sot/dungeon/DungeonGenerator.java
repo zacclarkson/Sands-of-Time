@@ -40,12 +40,53 @@ public class DungeonGenerator {
     private final Plugin plugin;
     private final StructureLoader structureLoader;
     private List<Segment> availableSegments; // Templates loaded from files
-    private Random random; // non-final so tests can seed it for determinism
+    /**
+     * Reseeded at the top of every {@link #generateDungeonLayout()} call, from {@link #configuredSeed}
+     * when one is set and from a fresh random draw otherwise. The value assigned in the constructor
+     * is only a placeholder so the field is never null.
+     */
+    private Random random;
+    /** Fixed seed from config.yml / {@code /sot seed}, or null to roll a new one each round. */
+    @Nullable private Long configuredSeed;
+    /** The seed the most recent generation actually used, so a random layout can be replayed. */
+    @Nullable private Long lastUsedSeed;
     private static final int MAX_DEPTH = 12; // Deepest vault (gold) maxes at 10, leaving headroom.
     private static final int MAX_TOTAL_SEGMENTS = 120; // Safety cap; a full dungeon fans out well under this.
+
+    /** One death cage per player, and teams are at most four players. */
+    private static final int MAX_DEATH_CAGES = 4;
+
+    /**
+     * How far a derived sacrifice point sits from its cage. Matches the builder tool's cosmetic
+     * "Revive" preview distance, so what a builder saw when placing the cage is what they get.
+     */
+    private static final int SACRIFICE_DERIVE_DISTANCE = 2;
     // Track placed vaults/keys during generation
     private Set<VaultColor> keysPlacedInDFS;
     private Set<VaultColor> vaultsPlacedInDFS;
+    /**
+     * Connections the DFS actually made, in blueprint-relative space. Each becomes a rusty-key
+     * door; entry points absent from this list opened onto nothing and get sealed instead.
+     */
+    private List<Doorway> doorwaysInDFS;
+    /**
+     * Blueprint-relative doorway cell -> the vault colours reachable through it. Populated as the
+     * DFS unwinds, so an entry holds every colour in the subtree hanging off that connection.
+     * {@link #resolveBranchSignifiers} reads it to colour each segment's wall markings.
+     */
+    private final Map<BlockVector3, Set<VaultColor>> branchColoursByDoorway = new HashMap<>();
+    /** Depth of the vault segment that actually won each colour, for picking the nearest one. */
+    private final Map<VaultColor, Integer> vaultDepthsInDFS = new EnumMap<>(VaultColor.class);
+    // --- Per-generateDungeonLayout warning state ---
+    // generateDungeonLayout retries attemptGeneration many times, and every attempt re-checks the
+    // same loaded templates. Warnings that describe the templates on disk rather than the individual
+    // attempt are byte-identical on every retry, so they are keyed here and logged once per
+    // generateDungeonLayout call (this set is cleared at the top of it).
+    private final Set<String> warnedOncePerGeneration = new HashSet<>();
+    // Unmet layout requirement -> how many attempts it was missing from. Unlike the above, these are
+    // genuinely per-attempt (a layout can fail validation on one attempt and pass on the next), so
+    // they are logged at fine level and summarised once if every attempt fails.
+    private final Map<String, Integer> validationFailureCounts = new LinkedHashMap<>();
 
     // --- Generation Configuration ---
     // Depth ranges (min/max inclusive) for vaults. Every max MUST be < MAX_DEPTH so the forced
@@ -85,9 +126,12 @@ public class DungeonGenerator {
         this.plugin = plugin;
         this.structureLoader = new StructureLoader(plugin);
         this.availableSegments = new ArrayList<>();
-        this.random = new Random();
+        this.random = new Random(); // Placeholder; generateDungeonLayout reseeds before any draw.
+        this.configuredSeed = null;
+        this.lastUsedSeed = null;
         this.keysPlacedInDFS = new HashSet<>();
         this.vaultsPlacedInDFS = new HashSet<>();
+        this.doorwaysInDFS = new ArrayList<>();
         // throw new UnsupportedOperationException("Constructor implementation not provided."); // Remove throw if implementing
     }
 
@@ -97,9 +141,31 @@ public class DungeonGenerator {
         this.availableSegments = new ArrayList<>(segments);
     }
 
-    /** Seeds the RNG so a generation run is deterministic. For unit tests only. */
-    void setRandomSeedForTest(long seed) {
-        this.random = new Random(seed);
+    // --- Seeding ---
+
+    /**
+     * Fixes the seed every subsequent {@link #generateDungeonLayout()} call generates from, so the
+     * same seed always yields the same dungeon. Pass {@code null} to go back to rolling a fresh seed
+     * per round.
+     */
+    public void setSeed(@Nullable Long seed) {
+        this.configuredSeed = seed;
+    }
+
+    /** The configured fixed seed, or null when each round rolls its own. */
+    @Nullable
+    public Long getSeed() {
+        return configuredSeed;
+    }
+
+    /**
+     * The seed the most recent generation ran from, or null before anything has been generated.
+     * Feeding this back to {@link #setSeed} replays that layout exactly, which is the point of
+     * logging it: a good random dungeon can be captured after the fact.
+     */
+    @Nullable
+    public Long getLastUsedSeed() {
+        return lastUsedSeed;
     }
 
     // --- Public API Methods ---
@@ -168,17 +234,56 @@ public class DungeonGenerator {
     @Nullable
     public DungeonBlueprint generateDungeonLayout() {
         int maxRetries = 20; // Blueprint stage does no world I/O, so retries are cheap.
+        // Fresh warning state per call: template-level warnings fire once, and the validation
+        // tally starts from zero so the failure summary describes this call only.
+        warnedOncePerGeneration.clear();
+        validationFailureCounts.clear();
+
+        // Reseed once per CALL, deliberately not once per attempt. The retries below share one RNG
+        // stream on purpose -- each attempt consumes fresh draws, which is exactly what lets a layout
+        // that failed validation succeed on the next try. Reseeding inside the loop would make every
+        // attempt byte-identical and turn a single validation failure into 20 copies of itself.
+        // The deterministic unit is therefore the whole call: one seed in, one blueprint out.
+        long seed = (configuredSeed != null) ? configuredSeed : new Random().nextLong();
+        this.lastUsedSeed = seed;
+        this.random = new Random(seed);
+        if (configuredSeed != null) {
+            plugin.getLogger().info("Generating dungeon layout with configured seed " + seed + ".");
+        } else {
+            plugin.getLogger().info("Generating dungeon layout with random seed " + seed
+                    + ". Run '/sot seed " + seed + "' to replay this layout.");
+        }
         for (int attempt = 1; attempt <= maxRetries; attempt++) {
-            plugin.getLogger().info("Starting dungeon layout generation attempt " + attempt + "/" + maxRetries + "...");
+            plugin.getLogger().fine("Starting dungeon layout generation attempt " + attempt + "/" + maxRetries + "...");
             DungeonBlueprint blueprint = attemptGeneration();
             if (blueprint != null) {
-                plugin.getLogger().info("Dungeon layout generated successfully on attempt " + attempt);
+                plugin.getLogger().info("Dungeon layout generated successfully on attempt " + attempt + "/" + maxRetries);
                 return blueprint; // Success
             }
-            plugin.getLogger().warning("Dungeon generation attempt " + attempt + " failed validation or generation. Retrying...");
+            plugin.getLogger().fine("Dungeon generation attempt " + attempt + " failed validation or generation. Retrying...");
         }
         plugin.getLogger().severe("Failed to generate a valid dungeon layout after " + maxRetries + " attempts.");
+        if (!validationFailureCounts.isEmpty()) {
+            String summary = validationFailureCounts.entrySet().stream()
+                    .map(entry -> entry.getKey() + " (missing on " + entry.getValue() + "/" + maxRetries + " attempts)")
+                    .collect(Collectors.joining(", "));
+            plugin.getLogger().severe("Unmet layout requirements across all attempts: " + summary);
+        }
         return null; // Failed after all retries
+    }
+
+    /**
+     * Logs a warning the first time the given key is seen within one generateDungeonLayout call.
+     * Used for conditions that are a property of the loaded segment templates rather than of an
+     * individual attempt, which would otherwise be repeated verbatim once per retry.
+     *
+     * @param key     Identity of the condition; repeats within a call are suppressed.
+     * @param message The warning text to log on the first occurrence.
+     */
+    private void warnOncePerGeneration(@NotNull String key, @NotNull String message) {
+        if (warnedOncePerGeneration.add(key)) {
+            plugin.getLogger().warning(message);
+        }
     }
 
     /**
@@ -196,10 +301,14 @@ public class DungeonGenerator {
         List<Vector> sandSpawnRelativeLocations = new ArrayList<>();
         List<Vector> coinSpawnRelativeLocations = new ArrayList<>();
         List<Vector> itemSpawnRelativeLocations = new ArrayList<>();
+        List<Vector> mobSpawnerRelativeLocations = new ArrayList<>();
         Vector hubRelativeLocation = null;
         // Reset placed trackers for this attempt
         keysPlacedInDFS.clear(); // Tracks Red, Green, Gold keys placed by DFS
         vaultsPlacedInDFS.clear(); // Tracks Blue, Red, Green, Gold vaults placed by DFS
+        doorwaysInDFS.clear(); // Tracks the connections this attempt actually made
+        branchColoursByDoorway.clear(); // Tracks which vault colours lie down each connection
+        vaultDepthsInDFS.clear();
 
         // --- Pre-checks ---
         if (availableSegments.isEmpty()) { /* ... error log ... */ return null; }
@@ -233,11 +342,12 @@ public class DungeonGenerator {
         if (placedSegments.size() <= 1) { /* ... log warning ... */ return null; }
 
         // Consolidate features (this populates the maps based on placed segments)
-        consolidateFeatureLocations(placedSegments, vaultMarkerRelativeLocations, keySpawnRelativeLocations, sandSpawnRelativeLocations, coinSpawnRelativeLocations, itemSpawnRelativeLocations);
+        consolidateFeatureLocations(placedSegments, vaultMarkerRelativeLocations, keySpawnRelativeLocations, sandSpawnRelativeLocations, coinSpawnRelativeLocations, itemSpawnRelativeLocations, mobSpawnerRelativeLocations);
 
         Vector safeExitRelativeLocation = selectSafeExitRelativeLocation(placedSegments);
         if (safeExitRelativeLocation == null) {
-            plugin.getLogger().warning("No SAFE_EXIT marker in any segment template; escaping will fall back to "
+            warnOncePerGeneration("no-safe-exit",
+                    "No SAFE_EXIT marker in any segment template; escaping will fall back to "
                     + "the hub location. Add a SAFE_EXIT marker to your HUB segment and re-save it.");
         }
 
@@ -250,36 +360,108 @@ public class DungeonGenerator {
 
         // --- Validate Required Vaults & Keys ---
         // Validation relies on consolidateFeatureLocations having correctly populated the maps
-        boolean valid = true;
-        VaultColor[] requiredKeys = {VaultColor.RED, VaultColor.GREEN, VaultColor.GOLD}; // Blue key is not placed by DFS
+        // BLUE is checked separately below: it lives on the hub, and a hub template saved before the
+        // KEY_SPAWN marker existed should still generate a (partly incomplete) dungeon.
+        VaultColor[] requiredKeys = {VaultColor.RED, VaultColor.GREEN, VaultColor.GOLD};
         VaultColor[] requiredVaults = {VaultColor.BLUE, VaultColor.RED, VaultColor.GREEN, VaultColor.GOLD}; // All 4 vaults must be placed by DFS
 
+        List<String> missingRequirements = new ArrayList<>();
         for (VaultColor requiredColor : requiredVaults) {
             if (!vaultMarkerRelativeLocations.containsKey(requiredColor)) {
-                plugin.getLogger().warning("Validation Failed: Missing vault marker location for color: " + requiredColor);
-                valid = false;
+                missingRequirements.add("vault marker for " + requiredColor);
             }
         }
         for (VaultColor requiredColor : requiredKeys) {
             if (!keySpawnRelativeLocations.containsKey(requiredColor)) {
-                plugin.getLogger().warning("Validation Failed: Missing key spawn location for color: " + requiredColor);
-                valid = false;
+                missingRequirements.add("key spawn for " + requiredColor);
             }
         }
+        // The blue key belongs on the hub (see GAME_RULES.md), but a hub template saved without a
+        // KEY_SPAWN marker carries none. Warn rather than fail: a dungeon missing one vault beats
+        // no dungeon at all. Add a BLUE KEY_SPAWN marker to the hub and re-save it to fix.
+        if (!keySpawnRelativeLocations.containsKey(VaultColor.BLUE)) {
+            warnOncePerGeneration("no-blue-key",
+                    "No BLUE key spawn in any segment template; the blue vault will "
+                    + "not be openable. Add a BLUE KEY_SPAWN marker to your HUB segment and re-save it.");
+        }
 
-        if (!valid) {
+        if (!missingRequirements.isEmpty()) {
+            // Per-attempt, so kept off the console: a layout can fail validation on one attempt and
+            // pass on the next. generateDungeonLayout logs one summary if every attempt fails.
+            plugin.getLogger().fine("Validation failed for this attempt; missing " + String.join(", ", missingRequirements));
+            missingRequirements.forEach(requirement -> validationFailureCounts.merge(requirement, 1, Integer::sum));
             return null; // Validation failed for this attempt
         }
 
         Vector timerBaseRelativeLocation = selectTimerBaseRelativeLocation(placedSegments);
+        Vector bankRelativeLocation = selectBankRelativeLocation(placedSegments);
+        if (bankRelativeLocation == null) {
+            warnOncePerGeneration("no-bank",
+                    "No BANK marker in any segment template; players will have nowhere to bank "
+                    + "their coins and the round will score zero. Add a BANK marker to your HUB "
+                    + "segment and re-save it.");
+        }
         List<Vector> playerSpawnRelativeLocations = selectPlayerSpawnRelativeLocations(placedSegments);
+        List<Vector> sandTimerRelativeLocations = selectSandTimerRelativeLocations(placedSegments);
+        if (sandTimerRelativeLocations.isEmpty()) {
+            plugin.getLogger().warning("No TIMER_DEPOSIT marker on any segment template: collected sand "
+                    + "cannot be spent on the timer. Add TIMER_DEPOSIT markers to the HUB segment and re-save it.");
+        }
+
+        // Death cages and the sacrifice points that free them. Both lists leave here index-aligned
+        // and the same length, which is what lets DungeonManager zip them into DeathCage objects.
+        Vector hubCentre = hubCentreOf(placedSegments, hubRelativeLocation);
+        List<Vector> deathCageRelativeLocations = selectDeathCageRelativeLocations(placedSegments);
+        if (deathCageRelativeLocations.isEmpty()) {
+            warnOncePerGeneration("no-death-cages",
+                    "No DEATH_CAGE marker on any segment template; falling back to four cages around "
+                    + "the hub centre. Add DEATH_CAGE markers to your HUB segment and re-save it.");
+            deathCageRelativeLocations = fallbackCageLocations(hubCentre, hubRelativeLocation.getY());
+        }
+        List<Vector> sacrificeMarkers = selectSandSacrificeRelativeLocations(placedSegments);
+        if (sacrificeMarkers.isEmpty()) {
+            warnOncePerGeneration("no-sand-sacrifice",
+                    "No SAND_SACRIFICE marker on any segment template; a sacrifice chest will be "
+                    + "derived beside each death cage. Add SAND_SACRIFICE markers to your HUB segment "
+                    + "and re-save it to place them yourself.");
+        } else if (sacrificeMarkers.size() < deathCageRelativeLocations.size()) {
+            warnOncePerGeneration("too-few-sand-sacrifice",
+                    "Only " + sacrificeMarkers.size() + " SAND_SACRIFICE marker(s) for "
+                    + deathCageRelativeLocations.size() + " death cage(s); the remaining cages get a "
+                    + "derived sacrifice chest. Add one SAND_SACRIFICE marker per cage.");
+        } else if (sacrificeMarkers.size() > deathCageRelativeLocations.size()) {
+            warnOncePerGeneration("too-many-sand-sacrifice",
+                    sacrificeMarkers.size() + " SAND_SACRIFICE markers for only "
+                    + deathCageRelativeLocations.size() + " death cage(s); the extras are ignored.");
+        }
+        List<Vector> sandSacrificeRelativeLocations =
+                reconcileSacrificePoints(deathCageRelativeLocations, sacrificeMarkers, hubCentre);
+
+        List<Doorway> doorways = new ArrayList<>(doorwaysInDFS);
+        List<Doorway> unusedOpenings = findUnusedOpenings(placedSegments, doorways);
+        plugin.getLogger().info("Layout has " + doorways.size() + " doorways and "
+                + unusedOpenings.size() + " unattached openings to seal.");
+
+        boolean anyPlaceholder = placedSegments.stream()
+                .anyMatch(placed -> !placed.getSegmentTemplate().getBranchSignifierOffsets().isEmpty());
+        if (!anyPlaceholder) {
+            warnOncePerGeneration("no-branch-signifier",
+                    "No BRANCH_SIGNIFIER marker on any segment template; nothing will show which "
+                    + "vault colour a branch leads to. Add BRANCH_SIGNIFIER markers beside your HUB's "
+                    + "vault exits and re-save it.");
+        }
+        List<BranchSignifier> branchSignifiers =
+                resolveBranchSignifiers(placedSegments, branchColoursByDoorway, vaultDepthsInDFS);
+        plugin.getLogger().info("Layout has " + branchSignifiers.size() + " branch colour marking(s).");
 
         // --- Create and Return Blueprint ---
         return new DungeonBlueprint(
                 placedSegments, hubRelativeLocation, vaultMarkerRelativeLocations, keySpawnRelativeLocations,
                 sandSpawnRelativeLocations, coinSpawnRelativeLocations, itemSpawnRelativeLocations,
-                blueprintBounds, safeExitRelativeLocation, timerBaseRelativeLocation,
-                playerSpawnRelativeLocations
+                blueprintBounds, safeExitRelativeLocation, timerBaseRelativeLocation, bankRelativeLocation,
+                playerSpawnRelativeLocations, sandTimerRelativeLocations,
+                deathCageRelativeLocations, sandSacrificeRelativeLocations, doorways, unusedOpenings,
+                mobSpawnerRelativeLocations, branchSignifiers
         );
     }
 
@@ -294,8 +476,13 @@ public class DungeonGenerator {
      * @param placedSegments    (In/Out) List of all segments placed so far in the blueprint.
      * @param occupiedOrigins   (In/Out) Set of BlockVector3 relative origins already occupied.
      * @param currentDepth      The current depth (number of segments) from the hub segment.
+     * @return The vault colours reachable through this connection, empty if the branch ends here
+     *         or reaches no vault. Collected as the recursion unwinds so a caller learns what lies
+     *         down the branch it just started; {@link #resolveBranchSignifiers} colours the wall
+     *         markings from it.
      */
-    private void generatePathRecursive(
+    @NotNull
+    private Set<VaultColor> generatePathRecursive(
             @NotNull PlacedSegment currentSegment,
             @NotNull RelativeEntryPoint connectionPoint,
             @NotNull List<PlacedSegment> placedSegments,
@@ -304,11 +491,11 @@ public class DungeonGenerator {
 
         // --- Base Cases / Termination Conditions ---
         if (currentDepth >= MAX_DEPTH) {
-            return; // Reached max depth for this branch
+            return Set.of(); // Reached max depth for this branch
         }
         if (placedSegments.size() >= MAX_TOTAL_SEGMENTS) {
             // Optional: Log warning if hitting total segment limit frequently
-            return; // Reached overall dungeon size limit
+            return Set.of(); // Reached overall dungeon size limit
         }
 
         // --- Select Next Segment (template + rotation) ---
@@ -317,14 +504,14 @@ public class DungeonGenerator {
 
         // If no suitable segment found, this path ends (backtrack)
         if (next == null) {
-            return;
+            return Set.of();
         }
 
         // --- Calculate Placement (using the ROTATED entry that faces requiredDirection) ---
         RelativeEntryPoint nextEntryPoint = rotatedEntryByDirection(next.template, next.steps, requiredDirection);
         if (nextEntryPoint == null) {
              plugin.getLogger().warning("Segment " + next.template.getName() + " selected but missing required entry point " + requiredDirection + " after rotation. Stopping branch.");
-             return; // Should not happen if selectNextSegment filters correctly
+             return Set.of(); // Should not happen if selectNextSegment filters correctly
         }
         BlockVector3 currentSegmentOrigin = BlockVector3.at(
             currentSegment.getWorldOrigin().toVector().getX(),
@@ -335,7 +522,7 @@ public class DungeonGenerator {
 
         // --- Check Collision (rotated footprint) ---
         if (checkCollision(nextSegmentOrigin, next.template, next.steps, occupiedOrigins, placedSegments)) {
-            return; // Collision detected, stop this branch
+            return Set.of(); // Collision detected, stop this branch
         }
 
         // --- Place Segment ---
@@ -345,9 +532,22 @@ public class DungeonGenerator {
         placedSegments.add(nextPlacedSegment);
         occupiedOrigins.add(nextSegmentOrigin);
 
+        // Record the connection we just made. Both segments meet on this one cell (see
+        // calculatePlacementOrigin), so one Doorway covers the shared opening from either side.
+        BlockVector3 doorwayCell = currentSegmentOrigin.add(connectionPoint.getRelativePosition());
+        doorwaysInDFS.add(new Doorway(
+                new Vector(doorwayCell.x(), doorwayCell.y(), doorwayCell.z()),
+                connectionPoint.getDirection()));
+
         // --- Update Global Placed Vaults/Keys Tracking (colour is rotation-independent) ---
+        // Only the FIRST segment of a colour counts, matching the first-wins rule
+        // consolidateFeatureLocations applies to the markers -- a later duplicate is not the vault
+        // that ends up in the blueprint, so its branch must not advertise that colour.
+        Set<VaultColor> branchColours = EnumSet.noneOf(VaultColor.class);
         VaultColor placedVault = next.template.getContainedVault();
         if (placedVault != null && vaultsPlacedInDFS.add(placedVault)) {
+            vaultDepthsInDFS.put(placedVault, currentDepth);
+            branchColours.add(placedVault);
             plugin.getLogger().info("Placed " + placedVault + " vault segment (" + next.template.getName() + ") at depth " + currentDepth);
         }
         VaultColor placedKey = next.template.getContainedVaultKey();
@@ -361,9 +561,152 @@ public class DungeonGenerator {
         for (RelativeEntryPoint outgoingEntryPoint : outgoingExits) {
             // Don't go back through the entry point we just came from
             if (outgoingEntryPoint.getDirection() != requiredDirection) {
-                generatePathRecursive(nextPlacedSegment, outgoingEntryPoint, placedSegments, occupiedOrigins, currentDepth + 1);
+                branchColours.addAll(generatePathRecursive(
+                        nextPlacedSegment, outgoingEntryPoint, placedSegments, occupiedOrigins, currentDepth + 1));
             }
         }
+
+        // Recorded on the way back out, so it covers the whole subtree behind this doorway. The
+        // cell is shared by both segments (see calculatePlacementOrigin), which is what lets a
+        // marking in the child resolve against the branch it stands on.
+        branchColoursByDoorway.put(doorwayCell, branchColours);
+        return branchColours;
+    }
+
+    /**
+     * Every rotated entry point across {@code placedSegments} that no connection was made through.
+     *
+     * <p>Segment templates carve their doorways as open 3x4 holes, and the DFS attaches a
+     * neighbour to only some of them -- the hub template alone declares nine. The leftovers open
+     * onto nothing, so they are returned here for {@code DoorManager} to seal as plain wall rather
+     * than dress as a door that costs a rusty key and leads nowhere.
+     *
+     * @param placedSegments The segments of a finished layout, with blueprint-relative origins.
+     * @param doorways       The connections the DFS made.
+     * @return One Doorway per unattached opening, in blueprint-relative space.
+     */
+    @NotNull
+    static List<Doorway> findUnusedOpenings(@NotNull List<PlacedSegment> placedSegments,
+                                            @NotNull List<Doorway> doorways) {
+        // Keyed on BlockVector3, not Bukkit Vector: these are whole-block cells, and BlockVector3
+        // has exact integer equals/hashCode where Vector compares doubles with an epsilon.
+        Set<BlockVector3> connected = new HashSet<>();
+        for (Doorway doorway : doorways) {
+            Vector pos = doorway.getRelativePosition();
+            connected.add(BlockVector3.at(pos.getBlockX(), pos.getBlockY(), pos.getBlockZ()));
+        }
+
+        List<Doorway> unused = new ArrayList<>();
+        for (PlacedSegment placedSegment : placedSegments) {
+            Vector segmentOrigin = placedSegment.getWorldOrigin().toVector();
+            for (RelativeEntryPoint ep : placedSegment.getRotatedEntryPoints()) {
+                BlockVector3 pos = ep.getRelativePosition();
+                Vector cell = segmentOrigin.clone().add(new Vector(pos.x(), pos.y(), pos.z()));
+                BlockVector3 key = BlockVector3.at(cell.getBlockX(), cell.getBlockY(), cell.getBlockZ());
+                if (!connected.contains(key)) {
+                    unused.add(new Doorway(cell, ep.getDirection()));
+                }
+            }
+        }
+        return unused;
+    }
+
+    /**
+     * Colours every branch-signifier placeholder in a finished layout.
+     *
+     * <p>A template declares only <em>where</em> a colour marking goes, never which colour: the
+     * same corridor can sit on the red branch in one layout and the gold branch in the next. Each
+     * placeholder is therefore paired with the <b>nearest entry point of its own template</b> --
+     * the exit it stands beside -- and takes the colour of whatever lies down that connection.
+     * Pairing is done in template space, so it is unaffected by the placement's rotation and index
+     * i of {@code getEntryPoints()} is index i of {@code getRotatedEntryPoints()}.
+     *
+     * <p>Two cases deliberately produce nothing rather than a wrong marking: a placeholder whose
+     * nearest exit the DFS never attached a neighbour to (the hub's ~6 non-vault exits), and one
+     * whose branch reaches no vault at all. Where a branch holds several vaults the nearest one
+     * wins, since that is the one a player following the marking meets first.
+     *
+     * @param placedSegments        The segments of a finished layout, with blueprint-relative origins.
+     * @param branchColoursByDoorway Doorway cell -> vault colours reachable through it.
+     * @param vaultDepths           Depth of the segment that won each colour, for the nearest-wins tie-break.
+     * @return One signifier per resolvable placeholder, in blueprint-relative space.
+     */
+    @NotNull
+    static List<BranchSignifier> resolveBranchSignifiers(
+            @NotNull List<PlacedSegment> placedSegments,
+            @NotNull Map<BlockVector3, Set<VaultColor>> branchColoursByDoorway,
+            @NotNull Map<VaultColor, Integer> vaultDepths) {
+
+        List<BranchSignifier> signifiers = new ArrayList<>();
+        for (PlacedSegment placedSegment : placedSegments) {
+            Segment template = placedSegment.getSegmentTemplate();
+            List<BlockVector3> placeholders = template.getBranchSignifierOffsets();
+            List<RelativeEntryPoint> templateEntries = template.getEntryPoints();
+            if (placeholders.isEmpty() || templateEntries.isEmpty()) continue;
+
+            List<RelativeEntryPoint> rotatedEntries = placedSegment.getRotatedEntryPoints();
+            Vector segmentOrigin = placedSegment.getWorldOrigin().toVector();
+
+            for (BlockVector3 placeholder : placeholders) {
+                if (placeholder == null) continue;
+                int entryIndex = nearestEntryIndex(placeholder, templateEntries);
+                BlockVector3 entryPos = rotatedEntries.get(entryIndex).getRelativePosition();
+                BlockVector3 doorwayCell = BlockVector3.at(
+                        segmentOrigin.getBlockX() + entryPos.x(),
+                        segmentOrigin.getBlockY() + entryPos.y(),
+                        segmentOrigin.getBlockZ() + entryPos.z());
+
+                VaultColor colour = nearestVaultColour(branchColoursByDoorway.get(doorwayCell), vaultDepths);
+                if (colour == null) continue; // that exit leads to no vault (or to nothing at all)
+
+                BlockVector3 rotated = placedSegment.getRotatedOffset(placeholder);
+                signifiers.add(new BranchSignifier(
+                        segmentOrigin.clone().add(new Vector(rotated.x(), rotated.y(), rotated.z())),
+                        colour));
+            }
+        }
+        return signifiers;
+    }
+
+    /**
+     * Index of the entry point closest to a placeholder, by squared distance in template space.
+     * Ties go to the lowest index so the result is deterministic. {@code entries} must be non-empty.
+     */
+    static int nearestEntryIndex(@NotNull BlockVector3 placeholder,
+                                 @NotNull List<RelativeEntryPoint> entries) {
+        int best = 0;
+        long bestDistance = Long.MAX_VALUE;
+        for (int i = 0; i < entries.size(); i++) {
+            BlockVector3 pos = entries.get(i).getRelativePosition();
+            long dx = pos.x() - placeholder.x(), dy = pos.y() - placeholder.y(), dz = pos.z() - placeholder.z();
+            long distance = dx * dx + dy * dy + dz * dz;
+            if (distance < bestDistance) {
+                bestDistance = distance;
+                best = i;
+            }
+        }
+        return best;
+    }
+
+    /**
+     * The colour whose vault sits shallowest among {@code colours} -- the first one a player
+     * following the marking would reach. Ties (and colours with no recorded depth) fall back to the
+     * enum's declaration order so the choice is deterministic. Null when there is nothing to show.
+     */
+    @Nullable
+    static VaultColor nearestVaultColour(@Nullable Set<VaultColor> colours,
+                                         @NotNull Map<VaultColor, Integer> vaultDepths) {
+        if (colours == null || colours.isEmpty()) return null;
+        VaultColor best = null;
+        int bestDepth = Integer.MAX_VALUE;
+        for (VaultColor colour : colours) {
+            int depth = vaultDepths.getOrDefault(colour, Integer.MAX_VALUE);
+            if (best == null || depth < bestDepth || (depth == bestDepth && colour.ordinal() < best.ordinal())) {
+                best = colour;
+                bestDepth = depth;
+            }
+        }
+        return best;
     }
 
     /** A chosen segment template plus the Y rotation (0..3) to apply when placing it. */
@@ -658,8 +1001,12 @@ public class DungeonGenerator {
         for (PlacedSegment segment : placedSegments) {
             // Get the relative origin vector of this segment (world is null)
             Vector origin = segment.getWorldOrigin().toVector();
-            // Get the size of the segment template
-            BlockVector3 size = segment.getSegmentTemplate().getSize();
+            // Get the ROTATED footprint of this placement: 90/270 steps swap X and Z, so the
+            // unrotated template size would under-cover a non-square segment on one axis. These
+            // bounds become the blueprint Area that DungeonManager.cleanupInstance() air-fills
+            // between rounds, and blocks left outside it survive the next round's paste
+            // (ignoreAirBlocks). Matches calculatePotentialBounds and PlacedSegment's own bounds.
+            BlockVector3 size = segment.getRotatedSize();
 
             // Calculate the maximum corner coordinates for this segment
             // Remember size includes the origin block, so add size-1 to origin coord
@@ -736,6 +1083,32 @@ public class DungeonGenerator {
     }
 
     /**
+     * Picks the blueprint-relative cell the coin bank stands in (the {@code BANK} marker), with a HUB
+     * template winning over any other segment. Null if no template defines one, in which case the round
+     * simply plays with no bank.
+     */
+    @Nullable
+    static Vector selectBankRelativeLocation(@NotNull List<PlacedSegment> placedSegments) {
+        Vector best = null;
+        boolean bestFromHub = false;
+        for (PlacedSegment placedSegment : placedSegments) {
+            Segment template = placedSegment.getSegmentTemplate();
+            if (template == null) continue;
+            BlockVector3 offset = template.getBankOffset();
+            if (offset == null) continue;
+
+            boolean fromHub = template.getType() == SegmentType.HUB;
+            if (best != null && !(fromHub && !bestFromHub)) continue;
+
+            BlockVector3 rot = placedSegment.getRotatedOffset(offset);
+            best = placedSegment.getWorldOrigin().toVector().clone()
+                    .add(new Vector(rot.x(), rot.y(), rot.z()));
+            bestFromHub = fromHub;
+        }
+        return best;
+    }
+
+    /**
      * Collects the blueprint-relative per-player spawn points from {@code PLAYER_SPAWN} markers.
      * A HUB template's spawns win: if any HUB defines spawns those are used exclusively; otherwise
      * every segment's spawns are gathered. Empty when no template defines any (callers fall back to
@@ -760,6 +1133,177 @@ public class DungeonGenerator {
     }
 
     /**
+     * Collects the blueprint-relative sand deposit points from {@code TIMER_DEPOSIT} markers — the cells
+     * players place carried sand into to feed their team's timer. Like the player spawns, a HUB template's
+     * points win outright: if any HUB defines deposit points those are used exclusively, otherwise every
+     * segment's are gathered. Empty when no template defines any, in which case a team simply has nowhere
+     * to spend sand (generation still succeeds; {@link com.clarkson.sot.utils.SandManager} logs it).
+     */
+    @NotNull
+    static List<Vector> selectSandTimerRelativeLocations(@NotNull List<PlacedSegment> placedSegments) {
+        List<Vector> hubDeposits = new ArrayList<>();
+        List<Vector> otherDeposits = new ArrayList<>();
+        for (PlacedSegment placedSegment : placedSegments) {
+            Segment template = placedSegment.getSegmentTemplate();
+            if (template == null) continue;
+            boolean fromHub = template.getType() == SegmentType.HUB;
+            Vector origin = placedSegment.getWorldOrigin().toVector();
+            for (BlockVector3 offset : template.getSandTimerOffsets()) {
+                BlockVector3 rot = placedSegment.getRotatedOffset(offset);
+                Vector abs = origin.clone().add(new Vector(rot.x(), rot.y(), rot.z()));
+                (fromHub ? hubDeposits : otherDeposits).add(abs);
+            }
+        }
+        return !hubDeposits.isEmpty() ? hubDeposits : otherDeposits;
+    }
+
+    /**
+     * Collects the blueprint-relative death cage cells from {@code DEATH_CAGE} markers, HUB templates
+     * winning outright exactly like the sand deposits. Capped at {@link #MAX_DEATH_CAGES}, since a team
+     * is at most four players and each player gets one cage.
+     */
+    @NotNull
+    static List<Vector> selectDeathCageRelativeLocations(@NotNull List<PlacedSegment> placedSegments) {
+        List<Vector> hubCages = new ArrayList<>();
+        List<Vector> otherCages = new ArrayList<>();
+        for (PlacedSegment placedSegment : placedSegments) {
+            Segment template = placedSegment.getSegmentTemplate();
+            if (template == null) continue;
+            boolean fromHub = template.getType() == SegmentType.HUB;
+            Vector origin = placedSegment.getWorldOrigin().toVector();
+            for (BlockVector3 offset : template.getDeathCageOffsets()) {
+                BlockVector3 rot = placedSegment.getRotatedOffset(offset);
+                Vector abs = origin.clone().add(new Vector(rot.x(), rot.y(), rot.z()));
+                (fromHub ? hubCages : otherCages).add(abs);
+            }
+        }
+        List<Vector> chosen = !hubCages.isEmpty() ? hubCages : otherCages;
+        return chosen.size() > MAX_DEATH_CAGES ? new ArrayList<>(chosen.subList(0, MAX_DEATH_CAGES)) : chosen;
+    }
+
+    /**
+     * Collects the blueprint-relative cage sacrifice cells from the HUB's {@code SAND_SACRIFICE}
+     * markers — the chests a teammate right-clicks to buy a caged player out.
+     *
+     * <p><b>HUB only</b>, and unlike the other hub-wins selectors there is no fallback to other
+     * segments: a {@code SAND_SACRIFICE} marker on any non-HUB segment is a <em>gate sacrifice</em>
+     * (it opens that segment's gates for a sand price) and is resolved from template geometry by
+     * {@code DungeonManager.resolveGateGroups}, never paired with a death cage. Falling back would
+     * turn the first branch chest in the dungeon into a revive point the moment a hub declares none —
+     * which the bundled hub does.
+     *
+     * <p>Returned raw and unpaired; {@link #reconcileSacrificePoints} is what matches them to cages.
+     */
+    @NotNull
+    static List<Vector> selectSandSacrificeRelativeLocations(@NotNull List<PlacedSegment> placedSegments) {
+        List<Vector> hubPoints = new ArrayList<>();
+        for (PlacedSegment placedSegment : placedSegments) {
+            Segment template = placedSegment.getSegmentTemplate();
+            if (template == null || template.getType() != SegmentType.HUB) continue;
+            Vector origin = placedSegment.getWorldOrigin().toVector();
+            for (BlockVector3 offset : template.getSandSacrificeLocations()) {
+                BlockVector3 rot = placedSegment.getRotatedOffset(offset);
+                hubPoints.add(origin.clone().add(new Vector(rot.x(), rot.y(), rot.z())));
+            }
+        }
+        return hubPoints;
+    }
+
+    /**
+     * The blueprint-relative centre of the hub segment, used to orient derived sacrifice points.
+     *
+     * <p>Falls back to the hub origin when the hub segment cannot be identified, which only leaves
+     * the derivation slightly off rather than failing generation.
+     */
+    @NotNull
+    static Vector hubCentreOf(@NotNull List<PlacedSegment> placedSegments, @NotNull Vector hubRelativeLocation) {
+        for (PlacedSegment placedSegment : placedSegments) {
+            Segment template = placedSegment.getSegmentTemplate();
+            if (template == null || template.getType() != SegmentType.HUB) continue;
+            BlockVector3 size = template.getSize();
+            return placedSegment.getWorldOrigin().toVector().clone()
+                    .add(new Vector(size.x() / 2.0, size.y() / 2.0, size.z() / 2.0));
+        }
+        return hubRelativeLocation.clone();
+    }
+
+    /**
+     * Four evenly spread fallback cages for a hub that defines no {@code DEATH_CAGE} markers at all.
+     *
+     * <p>Spread around the hub's <em>centre</em> horizontally, but standing on the hub's <em>floor</em>.
+     * The hub is placed at {@link BlockVector3#ZERO} and {@code hubRelativeLocation} is therefore its
+     * origin corner, so the offsets this replaces put two of the four cages at negative coordinates —
+     * outside the dungeon entirely. Centring fixes that; taking the centre's <em>height</em> too would
+     * swap one bug for another and hang the cages in mid-air, half the hub up.
+     */
+    @NotNull
+    static List<Vector> fallbackCageLocations(@NotNull Vector hubCentre, double floorY) {
+        int[][] offsets = { {3, 0, 3}, {3, 0, -3}, {-3, 0, 3}, {-3, 0, -3} };
+        // Floored to whole cells: an even-sized hub centres on a .5 boundary, and a cage on a block
+        // corner would put its teleport and its chest half a block out.
+        Vector base = new Vector(Math.floor(hubCentre.getX()), Math.floor(floorY), Math.floor(hubCentre.getZ()));
+        List<Vector> cages = new ArrayList<>();
+        for (int[] offset : offsets) {
+            cages.add(base.clone().add(new Vector(offset[0], offset[1], offset[2])));
+        }
+        return cages;
+    }
+
+    /**
+     * Pairs each death cage with the sacrifice point that frees it, so the returned list is always
+     * the same size as {@code cages} and index-aligned with it.
+     *
+     * <p>Markers are consumed in placement order — the Nth {@code SAND_SACRIFICE} marker frees the Nth
+     * {@code DEATH_CAGE}. Any cage left over (because the template defines fewer points than cages, or
+     * none at all) gets a point derived beside it; any surplus marker is dropped.
+     *
+     * <p>The derivation moves <em>every</em> cage by one shared cardinal step rather than resolving a
+     * direction per cage. Per-cage "toward the hub centre" breaks on exactly the layout hubs tend to
+     * use: the bundled hub's four cages sit in a row along X, and resolving each one independently
+     * flips some of them onto the X axis and leaves the row incoherent. One shared translation keeps
+     * the points in front of the row, and — because translating distinct cells by a single vector
+     * cannot collide them — guarantees no two cages ever share a sacrifice point.
+     */
+    @NotNull
+    static List<Vector> reconcileSacrificePoints(@NotNull List<Vector> cages,
+                                                 @NotNull List<Vector> markers,
+                                                 @NotNull Vector hubCentre) {
+        List<Vector> paired = new ArrayList<>(cages.size());
+        Vector step = derivationStep(cages, hubCentre);
+        for (int i = 0; i < cages.size(); i++) {
+            if (i < markers.size()) {
+                paired.add(markers.get(i).clone());
+            } else {
+                paired.add(cages.get(i).clone().add(step));
+            }
+        }
+        return paired;
+    }
+
+    /**
+     * The single cardinal offset used to derive sacrifice points, pointing from the cages toward the
+     * hub centre along whichever horizontal axis is more wrong. Ties (and a degenerate case where the
+     * cages sit exactly on the centre) resolve to +Z so the result is always deterministic.
+     */
+    @NotNull
+    private static Vector derivationStep(@NotNull List<Vector> cages, @NotNull Vector hubCentre) {
+        if (cages.isEmpty()) return new Vector(0, 0, SACRIFICE_DERIVE_DISTANCE);
+
+        double sumX = 0, sumZ = 0;
+        for (Vector cage : cages) {
+            sumX += cage.getX();
+            sumZ += cage.getZ();
+        }
+        double dx = hubCentre.getX() - (sumX / cages.size());
+        double dz = hubCentre.getZ() - (sumZ / cages.size());
+
+        if (Math.abs(dx) > Math.abs(dz)) {
+            return new Vector(dx > 0 ? SACRIFICE_DERIVE_DISTANCE : -SACRIFICE_DERIVE_DISTANCE, 0, 0);
+        }
+        return new Vector(0, 0, dz < 0 ? -SACRIFICE_DERIVE_DISTANCE : SACRIFICE_DERIVE_DISTANCE);
+    }
+
+    /**
      * Iterates through all placed segments in the completed blueprint layout and consolidates
      * the relative locations of all defined features (vaults, keys, spawns) into the final maps/lists
      * used to construct the DungeonBlueprint object. Converts relative BlockVector3 offsets to relative Bukkit Vectors.
@@ -771,6 +1315,7 @@ public class DungeonGenerator {
      * @param sandSpawnRelativeLocations   (Out) List to populate with relative sand spawn locations (Vector).
      * @param coinSpawnRelativeLocations   (Out) List to populate with relative coin spawn locations (Vector).
      * @param itemSpawnRelativeLocations   (Out) List to populate with relative item spawn locations (Vector).
+     * @param mobSpawnerRelativeLocations  (Out) List to populate with relative mob spawner locations (Vector).
      */
     private void consolidateFeatureLocations(
             @NotNull List<PlacedSegment> placedSegments,
@@ -778,7 +1323,8 @@ public class DungeonGenerator {
             @NotNull Map<VaultColor, Vector> keySpawnRelativeLocations,    // Map to populate
             @NotNull List<Vector> sandSpawnRelativeLocations,             // List to populate
             @NotNull List<Vector> coinSpawnRelativeLocations,             // List to populate
-            @NotNull List<Vector> itemSpawnRelativeLocations              // List to populate
+            @NotNull List<Vector> itemSpawnRelativeLocations,             // List to populate
+            @NotNull List<Vector> mobSpawnerRelativeLocations             // List to populate
             ) {
 
         // Clear output collections before populating
@@ -787,6 +1333,7 @@ public class DungeonGenerator {
         sandSpawnRelativeLocations.clear();
         coinSpawnRelativeLocations.clear();
         itemSpawnRelativeLocations.clear();
+        mobSpawnerRelativeLocations.clear();
 
         plugin.getLogger().fine("Consolidating feature locations from " + placedSegments.size() + " placed segments...");
 
@@ -806,22 +1353,36 @@ public class DungeonGenerator {
                 if (vaultMarkerRelativeLocations.putIfAbsent(vaultColor, vaultRelativePos) == null) {
                      plugin.getLogger().finer("Consolidated " + vaultColor + " vault marker location: " + vaultRelativePos);
                 } else {
-                     plugin.getLogger().warning("Duplicate vault marker found for color " + vaultColor + " in segment " + template.getName() + ". Keeping first one found.");
+                     warnOncePerGeneration("dup-vault:" + vaultColor + ":" + template.getName(),
+                             "Duplicate vault marker found for color " + vaultColor + " in segment " + template.getName() + ". Keeping first one found.");
                 }
+            } else if (vaultColor != null) {
+                // A VAULT_DOOR marker sets containedVault too, so a segment saved with a vault door and
+                // no VAULT_MARKER claims a vault it cannot provide: the DFS counts the colour as placed
+                // while no marker is emitted, and every attempt then fails on the missing marker.
+                // SaveSegmentCommand refuses this now; templates saved before it can still be on disk.
+                warnOncePerGeneration("vault-no-marker:" + vaultColor + ":" + template.getName(),
+                        "Segment " + template.getName() + " claims the " + vaultColor + " vault but has no"
+                        + " VAULT_MARKER (a VAULT_DOOR marker alone sets the colour). Generation cannot"
+                        + " place that vault -- re-save the segment with a matching VAULT_MARKER.");
             }
 
             // --- Consolidate Key Spawn ---
             VaultColor keyColor = template.getContainedVaultKey();
             BlockVector3 keyOffset = template.getKeyOffset(); // Offset relative to segment origin
-             // Ignore Blue Key consolidation - handled separately by VaultManager relative to Hub
-            if (keyColor != null && keyOffset != null && keyColor != VaultColor.BLUE) {
+            // BLUE is consolidated like every other colour. It used to be skipped here on the
+            // assumption that VaultManager placed it relative to the hub, but no such code ever
+            // existed, so the blue key never spawned and the blue vault could not be opened. The
+            // hub is itself a placed segment, so a BLUE key marker on it flows through this path.
+            if (keyColor != null && keyOffset != null) {
                 // Calculate final relative position: Segment Origin + rotated offset
                 Vector keyRelativePos = addRotated(segmentRelativeOrigin, placedSegment, keyOffset);
                 // Only add if this color hasn't been placed yet
                 if (keySpawnRelativeLocations.putIfAbsent(keyColor, keyRelativePos) == null) {
                     plugin.getLogger().finer("Consolidated " + keyColor + " key spawn location: " + keyRelativePos);
                 } else {
-                     plugin.getLogger().warning("Duplicate key spawn found for color " + keyColor + " in segment " + template.getName() + ". Keeping first one found.");
+                     warnOncePerGeneration("dup-key:" + keyColor + ":" + template.getName(),
+                             "Duplicate key spawn found for color " + keyColor + " in segment " + template.getName() + ". Keeping first one found.");
                 }
             }
 
@@ -851,6 +1412,16 @@ public class DungeonGenerator {
                 for (BlockVector3 offset : itemOffsets) {
                      if (offset != null) {
                          itemSpawnRelativeLocations.add(addRotated(segmentRelativeOrigin, placedSegment, offset));
+                     }
+                 }
+             }
+
+            // --- Consolidate Mob Spawners ---
+            List<BlockVector3> mobOffsets = template.getMobSpawnerLocations();
+             if (mobOffsets != null) {
+                for (BlockVector3 offset : mobOffsets) {
+                     if (offset != null) {
+                         mobSpawnerRelativeLocations.add(addRotated(segmentRelativeOrigin, placedSegment, offset));
                      }
                  }
              }

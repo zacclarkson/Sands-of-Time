@@ -21,6 +21,8 @@ import java.io.File;
 import java.io.FileReader;
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Comparator;
 import java.util.List;
 import java.util.logging.Level;
 
@@ -72,6 +74,12 @@ public class StructureLoader {
             return loadedSegments; // Return empty list
         }
 
+        // Sort by filename before loading. File.listFiles() has no defined order, and the dungeon
+        // seed indexes into this list (DungeonGenerator picks templates by random index, and takes
+        // the first HUB it finds), so an unsorted list would make the same seed produce a different
+        // dungeon on a different machine -- or after the data folder is simply re-copied.
+        Arrays.sort(jsonFiles, Comparator.comparing(File::getName));
+
         plugin.getLogger().info("[StructureLoader] Found " + jsonFiles.length + " potential segment JSON files in " + dataDir.getAbsolutePath() + ". Attempting to load templates...");
 
         // --- Read, Parse, and Deserialize Each JSON File ---
@@ -87,6 +95,7 @@ public class StructureLoader {
                 if (segment != null) {
                     loadedSegments.add(segment);
                     plugin.getLogger().info("[StructureLoader] Successfully loaded segment template: '" + segment.getName() + "' from " + jsonFile.getName());
+                    warnIfDeclaredSizeIsTooSmall(segment, new File(dataDir, "schematics"));
                 }
                 // Errors during deserialization are logged within deserializeSegmentTemplateFromJson
 
@@ -104,6 +113,54 @@ public class StructureLoader {
 
         plugin.getLogger().info("[StructureLoader] Finished loading segment templates. Total loaded: " + loadedSegments.size());
         return loadedSegments; // Return the list of successfully loaded segments
+    }
+
+    /**
+     * Warns when a template declares a {@code size} smaller than the schematic it points at.
+     *
+     * <p>Nothing else compares the two, and the declared size is what the blueprint bounds — and so the
+     * region {@code DungeonManager.cleanupInstance()} air-fills between rounds — are built from. Under-declare
+     * it and the part of the build outside those bounds is left standing at teardown, which the next
+     * round's paste cannot clear either ({@code ignoreAirBlocks}). That failure surfaces a round later and
+     * nowhere near its cause, so it is worth saying at load.
+     *
+     * <p>Only an under-declared size is a defect: declaring more is how the bundled hub reserves the air
+     * above it for the visual sand timer column. Everything here is best effort — a schematic that is
+     * absent or unreadable is left to the paste, which already fails loudly and names the file.
+     */
+    private void warnIfDeclaredSizeIsTooSmall(Segment segment, File schematicsDir) {
+        File schematicFile = new File(schematicsDir, segment.getSchematicFileName());
+        if (!schematicFile.isFile()) {
+            plugin.getLogger().fine("[StructureLoader] No schematic at " + schematicFile.getPath()
+                    + " to size-check template '" + segment.getName() + "' against.");
+            return;
+        }
+        BlockVector3 actual;
+        try {
+            actual = SchematicDimensions.read(schematicFile);
+        } catch (Exception | LinkageError e) {
+            plugin.getLogger().fine("[StructureLoader] Could not read the dimensions of "
+                    + schematicFile.getName() + " to size-check '" + segment.getName() + "': " + e);
+            return;
+        }
+        if (actual == null) {
+            plugin.getLogger().fine("[StructureLoader] " + schematicFile.getName()
+                    + " carries no dimension header; not size-checking '" + segment.getName() + "'.");
+            return;
+        }
+        BlockVector3 declared = segment.getSize();
+        if (!SchematicDimensions.covers(declared, actual)) {
+            plugin.getLogger().warning("[StructureLoader] Template '" + segment.getName() + "' declares size "
+                    + describe(declared) + " but " + schematicFile.getName() + " is " + describe(actual)
+                    + ". Everything outside the declared size is left behind when the dungeon is cleaned up"
+                    + " between rounds. Re-save the segment with a WorldEdit selection that covers the whole"
+                    + " build, or edit \"size\" in the template's .json.");
+        }
+    }
+
+    /** Formats a size as {@code 42x17x37} for the size-mismatch warning. */
+    private static String describe(BlockVector3 size) {
+        return size.x() + "x" + size.y() + "x" + size.z();
     }
 
     /**
@@ -197,6 +254,12 @@ public class StructureLoader {
                     json.getAsJsonArray("sandSacrificeLocations"), "sandSacrificeLocations", name, sourceFileName);
             List<BlockVector3> mobSpawners = deserializeBlockVectorList(
                     json.getAsJsonArray("mobSpawnerLocations"), "mobSpawnerLocations", name, sourceFileName);
+            // Optional: templates saved before gate sacrifices had a price carry no array here, and
+            // the Segment constructor pads a short or missing list with the default cost. (A stale
+            // "sandTradeLocations" key from the removed trade chest is simply never read.)
+            List<Integer> sandSacrificeCosts = json.has("sandSacrificeCosts")
+                    ? deserializeSacrificeCosts(json.get("sandSacrificeCosts"), name, sourceFileName)
+                    : new ArrayList<>();
 
             // --- Deserialize hub features ---
             BlockVector3 bankOffset = null;
@@ -218,6 +281,12 @@ public class StructureLoader {
                 timerOffset = deserializeBlockVector3(
                         json.getAsJsonObject("timerLocationOffset"), "timerLocationOffset", name, sourceFileName);
             }
+            // Optional: templates saved before BRANCH_SIGNIFIER existed simply have no array here,
+            // and generate a dungeon with no colour markings rather than failing to load.
+            List<BlockVector3> branchSignifiers = json.has("branchSignifierLocations")
+                    ? deserializeBlockVectorList(json.getAsJsonArray("branchSignifierLocations"),
+                            "branchSignifierLocations", name, sourceFileName)
+                    : new ArrayList<>();
 
             // --- Construct the Segment Template Object ---
             return new Segment(
@@ -246,7 +315,9 @@ public class StructureLoader {
                     safeExitBound,
                     sandTimers != null ? sandTimers : new ArrayList<>(),
                     timerOffset,
-                    playerSpawns != null ? playerSpawns : new ArrayList<>()
+                    playerSpawns != null ? playerSpawns : new ArrayList<>(),
+                    branchSignifiers != null ? branchSignifiers : new ArrayList<>(),
+                    sandSacrificeCosts
             );
 
         } catch (JsonParseException | IllegalStateException | ClassCastException | NullPointerException e) {
@@ -356,6 +427,39 @@ public class StructureLoader {
             plugin.getLogger().warning("[StructureLoader] Failed to create BlockVector3 for " + context + " in template '" + segmentName + "' from " + sourceFileName + ": " + e.getMessage());
             return null;
         }
+    }
+
+    /**
+     * Deserializes the {@code sandSacrificeCosts} array. A non-numeric entry is replaced by
+     * {@link Segment#DEFAULT_SACRIFICE_COST} and an out-of-range one is clamped, each with a warning,
+     * so one bad number never costs the whole template.
+     */
+    private List<Integer> deserializeSacrificeCosts(@Nullable JsonElement arrayElement, String segmentName, String sourceFileName) {
+        List<Integer> costs = new ArrayList<>();
+        if (arrayElement == null || !arrayElement.isJsonArray()) {
+            plugin.getLogger().warning("[StructureLoader] 'sandSacrificeCosts' in " + sourceFileName
+                    + " (segment " + segmentName + ") is not an array; using the default cost for every chest.");
+            return costs;
+        }
+        JsonArray array = arrayElement.getAsJsonArray();
+        for (int i = 0; i < array.size(); i++) {
+            JsonElement element = array.get(i);
+            if (element == null || !element.isJsonPrimitive() || !element.getAsJsonPrimitive().isNumber()) {
+                plugin.getLogger().warning("[StructureLoader] sandSacrificeCosts[" + i + "] in " + sourceFileName
+                        + " (segment " + segmentName + ") is not a number; using " + Segment.DEFAULT_SACRIFICE_COST + ".");
+                costs.add(Segment.DEFAULT_SACRIFICE_COST);
+                continue;
+            }
+            int raw = element.getAsInt();
+            int clamped = Segment.clampSacrificeCost(raw);
+            if (clamped != raw) {
+                plugin.getLogger().warning("[StructureLoader] sandSacrificeCosts[" + i + "] in " + sourceFileName
+                        + " (segment " + segmentName + ") is " + raw + "; clamped to " + clamped
+                        + " (valid range 1-" + Segment.MAX_SACRIFICE_COST + ").");
+            }
+            costs.add(clamped);
+        }
+        return costs;
     }
 
     /**
