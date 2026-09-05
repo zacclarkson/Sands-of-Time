@@ -29,6 +29,7 @@ import com.clarkson.sot.events.BuilderSessionManager;
 import com.clarkson.sot.events.CountdownFreezeListener;
 import com.clarkson.sot.events.DeathListener;
 import com.clarkson.sot.events.EscapeListener;
+import com.clarkson.sot.events.HungerListener;
 import com.clarkson.sot.events.NetherPortalListener;
 import com.clarkson.sot.events.SegmentBuilderKeys;
 import com.clarkson.sot.events.ToolListener;
@@ -166,6 +167,9 @@ public class SoT extends JavaPlugin {
         getServer().getPluginManager().registerEvents(new DeathListener(gameManager), this);
         getServer().getPluginManager().registerEvents(new EscapeListener(gameManager), this);
         getServer().getPluginManager().registerEvents(new CountdownFreezeListener(gameManager), this);
+        // Hunger is frozen for participants while a round is live; healing comes from the floor
+        // potions instead of food.
+        getServer().getPluginManager().registerEvents(new HungerListener(gameManager), this);
         // Stops players mining the dungeon apart mid-round -- notably their own sand timer column.
         // Registered at LOW priority inside the listener so a denied break never reaches SandManager.
         getServer().getPluginManager().registerEvents(new BlockProtectionListener(gameManager), this);

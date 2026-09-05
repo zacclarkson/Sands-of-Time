@@ -416,6 +416,25 @@ line — so it is actionable without rediscovering it.
   clock, and `VisualSandTimerDisplay.isColumnBlock` is deliberately **not** gated on `armed` —
   the unarmed window is exactly the countdown, when the baked shaft is minable. Creative/Spectator
   bypasses everything; there is no bypass permission.
+- **Hunger is frozen for participants while a round is live, and the loot table carries no food.**
+  `HungerListener` (in `events`, registered in `SoT.onEnable()` like the other plain listeners)
+  cancels every `FoodLevelChangeEvent` that would *lower* a participant's food level and lets a rise
+  through, gated on `isRoundLive` + `isParticipant` — so the countdown and a pause are covered, and a
+  player in the death cage or the trapped box does not starve there, while staff elsewhere are
+  untouched. No Creative/Spectator bypass, since those modes have no drain to bypass. Two vanilla
+  details matter. **(a)** Saturation drains *silently* and the event only fires once it is gone, so
+  cancelling pins the food level while saturation still runs to zero: only fast regen is lost, and
+  with the bar pinned at 20 the slow natural regen keeps ticking all round. **(b)** The listener only
+  stops the bar going *down*, and sprint needs a food level above 6, so `beginPlay` calls
+  `HungerListener.fillHunger` on every participant when the clock starts — a player who arrived
+  hungry would otherwise stay hungry for the round. Food level is set *before* saturation there,
+  because saturation is clamped to the food level. With hunger pinned, food would be dead weight, so
+  `FloorItemManager.LOOT_TABLE` holds none: the two slots bread had are `SPLASH_POTION`, stamped
+  `PotionType.HEALING` in `createLootStack` (a splash potion with no base type is an empty bottle).
+  The table stays at 10 slots and `rollLoot` keeps the exact draw order (one `nextInt(length)`, then
+  `nextInt(3)` only for a torch/arrow stack size), because the population RNG is seeded and the
+  table length and draw count are part of what a seed reproduces; `rollLoot` is the seam
+  `FloorItemManagerLootTableTest` pins that on, without spawning a `FloorLoot` in a world.
 - **The visual sand column lives in the hub, never at the lobby.** Its base comes from a `TIMER`
   marker on a segment template (HUB wins), via `DungeonGenerator.selectTimerBaseRelativeLocation` →
   `DungeonBlueprint.getTimerBaseRelativeLocation` → `DungeonManager.getTimerBaseLocation`.

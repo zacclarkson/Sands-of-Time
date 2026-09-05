@@ -20,6 +20,8 @@ import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.player.PlayerMoveEvent;
 import org.bukkit.inventory.ItemStack; // If spawning generic loot needs ItemStacks
+import org.bukkit.inventory.meta.PotionMeta;
+import org.bukkit.potion.PotionType;
 import org.jetbrains.annotations.NotNull;
 
 import java.util.*;
@@ -114,10 +116,20 @@ public class FloorItemManager implements Listener {
     }
 
     private static final double ITEM_SPAWN_CHANCE = 0.30; // 30% chance per location
-    private static final Material[] LOOT_TABLE = {
+
+    /**
+     * The generic loot table. Weight is the number of repeated slots, so this is a 10-slot draw.
+     *
+     * <p><b>No food goes in here.</b> Hunger is frozen for the whole round ({@link HungerListener}),
+     * so food would be dead weight; healing is a splash potion of healing instead, which took over
+     * the two slots bread used to hold. The <em>length</em> is part of what a dungeon seed
+     * reproduces — the roll is {@code rng.nextInt(LOOT_TABLE.length)} — so adding or removing a slot
+     * silently changes what every seed yields. Package-private for the loot-table test.
+     */
+    static final Material[] LOOT_TABLE = {
         Material.TORCH, Material.TORCH, Material.TORCH,           // Common
         Material.ARROW, Material.ARROW,                            // Common
-        Material.BREAD, Material.BREAD,                            // Common
+        Material.SPLASH_POTION, Material.SPLASH_POTION,            // Common (healing; replaced bread)
         Material.IRON_SWORD,                                       // Uncommon
         Material.LEATHER_CHESTPLATE,                               // Uncommon
         Material.SHIELD,                                           // Rare
@@ -140,14 +152,41 @@ public class FloorItemManager implements Listener {
         // 30% chance to spawn anything at this location
         if (rng.nextDouble() > ITEM_SPAWN_CHANCE) return;
 
-        // Pick a random item from the loot table
-        Material lootMaterial = LOOT_TABLE[rng.nextInt(LOOT_TABLE.length)];
-        int amount = (lootMaterial == Material.TORCH || lootMaterial == Material.ARROW) ? 2 + rng.nextInt(3) : 1;
-        ItemStack itemToSpawn = new ItemStack(lootMaterial, amount);
+        ItemStack itemToSpawn = rollLoot(rng);
 
         FloorLoot floorLoot = new FloorLoot(plugin, location, itemToSpawn, teamId, segmentInstanceId, depth);
         trackItem(floorLoot);
-        plugin.getLogger().finer("Spawned FloorLoot " + floorLoot.getUniqueId() + " (" + lootMaterial + ") for team " + teamId);
+        plugin.getLogger().finer("Spawned FloorLoot " + floorLoot.getUniqueId() + " (" + itemToSpawn.getType() + ") for team " + teamId);
+    }
+
+    /**
+     * Rolls one item off {@link #LOOT_TABLE}. Separated from {@link #spawnGenericItem} so the table
+     * can be tested without spawning a {@code FloorLoot} (and its {@code ItemDisplay}) in a world.
+     *
+     * <p>The draw sequence is part of the seed contract: exactly one {@code nextInt(LOOT_TABLE.length)}
+     * for the material, then one {@code nextInt(3)} <em>only</em> for a torch or arrow stack size.
+     * Change it and every seeded dungeon's loot changes with it.
+     */
+    @NotNull
+    static ItemStack rollLoot(@NotNull Random rng) {
+        Material lootMaterial = LOOT_TABLE[rng.nextInt(LOOT_TABLE.length)];
+        int amount = (lootMaterial == Material.TORCH || lootMaterial == Material.ARROW) ? 2 + rng.nextInt(3) : 1;
+        return createLootStack(lootMaterial, amount);
+    }
+
+    /**
+     * Builds the stack for a rolled material. A splash potion is a bare, effect-less bottle until
+     * its base type is set, so it is stamped as a Splash Potion of Healing here; every other
+     * material is the plain stack.
+     */
+    @NotNull
+    static ItemStack createLootStack(@NotNull Material material, int amount) {
+        ItemStack stack = new ItemStack(material, amount);
+        if (material == Material.SPLASH_POTION && stack.getItemMeta() instanceof PotionMeta meta) {
+            meta.setBasePotionType(PotionType.HEALING);
+            stack.setItemMeta(meta);
+        }
+        return stack;
     }
 
      /**

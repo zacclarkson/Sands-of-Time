@@ -520,6 +520,14 @@ Items spawn on the dungeon floor as visual displays that players walk over to co
 - Plays `ENTITY_ITEM_PICKUP` sound on collection (0.7 volume, 1.2 pitch)
 - If inventory is full, overflow items drop at the player's feet
 
+### Hunger & Healing
+- **Hunger never drops while a round is live** — countdown, play and pause — for everyone on a
+  team, caged and trapped players included. The bar is filled the moment play begins, so nobody
+  starts a round unable to sprint
+- **There is no food in the dungeon.** The loot table drops **splash potions of healing** in the
+  slots bread used to hold — the burst heal for a fight, on top of vanilla's slow natural
+  regeneration, which keeps running because the hunger bar stays full
+
 ---
 
 ## Puzzle Rooms
