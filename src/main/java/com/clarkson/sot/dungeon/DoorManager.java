@@ -9,6 +9,7 @@ import com.clarkson.sot.entities.SegmentDoor;
 import com.clarkson.sot.entities.VaultDoor;
 import com.clarkson.sot.main.GameManager;
 import com.clarkson.sot.main.GameState;
+import com.clarkson.sot.ui.SacrificeIndicatorManager;
 
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
@@ -20,6 +21,7 @@ import org.bukkit.block.Block;
 import org.bukkit.block.BlockFace;
 import org.bukkit.block.data.BlockData;
 import org.bukkit.block.data.FaceAttachable;
+import org.bukkit.block.data.Powerable;
 import org.bukkit.block.data.type.Switch;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
@@ -35,6 +37,7 @@ import org.jetbrains.annotations.Nullable;
 
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.logging.Level;
 
 /**
  * Manages the segment doors within active dungeon instances.
@@ -86,9 +89,18 @@ public class DoorManager implements Listener {
 
     /**
      * Lever location -> the gates that lever opens, per team. One lever, many gates: a segment with
-     * gates carries exactly one lever, and pulling it opens that segment's gates and no others.
+     * gates carries at most one lever, and pulling it opens that segment's gates and no others.
      */
     private final Map<UUID, Map<Location, List<Gate>>> gatesByTeamAndLeverLocation;
+
+    /**
+     * The gate sacrifice chests of each team's instance -- the other way a segment's gates open.
+     * Each point holds the <em>same</em> {@link Gate} objects its segment's lever (if any) holds, so
+     * whichever path opens first wins and the other reports the gates already open. A list rather
+     * than a map because lookups are block-coordinate compares anyway (see {@link #getDoorAt}) and
+     * the lever path needs to scan by lever cell.
+     */
+    private final Map<UUID, List<GateSacrificePoint>> gateSacrificesByTeam;
 
     /**
      * Vault colour -> that colour's doors, per team. Deliberately <em>not</em> in
@@ -103,6 +115,7 @@ public class DoorManager implements Listener {
         this.gameManager = gameManager;
         this.doorsByTeamAndLockLocation = new ConcurrentHashMap<>();
         this.gatesByTeamAndLeverLocation = new ConcurrentHashMap<>();
+        this.gateSacrificesByTeam = new ConcurrentHashMap<>();
         this.vaultDoorsByTeamAndColor = new ConcurrentHashMap<>();
         // Registered as a listener by SoT.onEnable, which is the single registration point for the
         // GameManager-owned manager instances. Registering here too would double-fire every event.
@@ -155,26 +168,36 @@ public class DoorManager implements Listener {
     }
 
     /**
-     * Builds this instance's gates closed with a real lever at each group's marker cell, and builds
-     * every vault door closed.
+     * Builds this instance's gates closed with a real lever at each group's lever cell and a real
+     * chest at each of its sacrifice cells, and builds every vault door closed.
      *
      * <p>Called after {@link #initializeDoorsForInstance}, so a gate that overlaps an opening
      * {@code sealUnusedOpenings} filled with plain wall wins -- the interactive thing should.
      *
+     * <p>The chest is what makes a gate sacrifice point exist: the marker records an <em>air</em>
+     * cell, and air never fires {@code RIGHT_CLICK_BLOCK} -- the same trap the lever and
+     * {@code Door.buildClosed()} exist for. Its price tag (the floating sand and count) is shown
+     * from this moment, not only once someone has paid, since unlike a cage chest the price is known
+     * before anyone interacts with it.
+     *
      * @param teamId     The team whose instance these belong to.
-     * @param gateGroups Absolute gates paired with the lever that opens them, one group per segment.
+     * @param gateGroups Absolute gates paired with the lever and/or sacrifice chests that open them,
+     *                   one group per segment.
      * @param vaultDoors Absolute vault door walls with the vault colour that opens each.
      */
     public void initializeGatesForInstance(@NotNull UUID teamId,
                                            @NotNull List<GateGroup> gateGroups,
                                            @NotNull List<VaultDoorPlacement> vaultDoors) {
         Map<Location, List<Gate>> teamGates = new ConcurrentHashMap<>();
+        List<GateSacrificePoint> teamPoints = Collections.synchronizedList(new ArrayList<>());
         int gateCount = 0;
         for (GateGroup group : gateGroups) {
             Location leverLocation = group.getLeverLocation();
-            if (!leverLocation.isWorldLoaded()) {
+            Location anchor = leverLocation != null ? leverLocation
+                    : group.getGateBounds().isEmpty() ? null : group.getGateBounds().get(0).getMinPoint();
+            if (anchor == null || !anchor.isWorldLoaded()) {
                 plugin.getLogger().warning("Skipping gate group from segment " + group.getSegmentName()
-                        + " for team " + teamId + ": lever world is not loaded.");
+                        + " for team " + teamId + ": world is not loaded.");
                 continue;
             }
 
@@ -187,10 +210,25 @@ public class DoorManager implements Listener {
                 gates.add(gate);
                 gateCount++;
             }
-            placeLeverBlock(leverLocation);
-            teamGates.put(leverLocation, gates);
+            if (leverLocation != null) {
+                placeLeverBlock(leverLocation);
+                teamGates.put(leverLocation, gates);
+            }
+            for (GateGroup.SacrificePlacement placement : group.getSacrificePlacements()) {
+                Location chest = placement.location();
+                if (!DungeonManager.placeSingleChest(chest, plugin.getLogger(), teamId, "gate sacrifice chest",
+                        leverLocation != null ? "Those gates can only be opened by their lever this round."
+                                : "Those gates cannot be opened this round.")) {
+                    continue;
+                }
+                GateSacrificePoint point = new GateSacrificePoint(chest, placement.cost(), gates,
+                        leverLocation, group.getSegmentName());
+                teamPoints.add(point);
+                showIndicator(point);
+            }
         }
         gatesByTeamAndLeverLocation.put(teamId, teamGates);
+        gateSacrificesByTeam.put(teamId, teamPoints);
 
         Map<VaultColor, List<VaultDoor>> teamVaultDoors = new ConcurrentHashMap<>();
         for (VaultDoorPlacement placement : vaultDoors) {
@@ -210,7 +248,20 @@ public class DoorManager implements Listener {
         vaultDoorsByTeamAndColor.put(teamId, teamVaultDoors);
 
         plugin.getLogger().info("Built " + gateCount + " gate(s) on " + teamGates.size()
-                + " lever(s) and " + vaultDoors.size() + " vault door(s) for team " + teamId);
+                + " lever(s) and " + teamPoints.size() + " sacrifice chest(s), plus "
+                + vaultDoors.size() + " vault door(s) for team " + teamId);
+    }
+
+    /** Shows a gate sacrifice chest's price tag; a no-op with no indicator manager (unit tests). */
+    private void showIndicator(@NotNull GateSacrificePoint point) {
+        SacrificeIndicatorManager indicators = gameManager.getSacrificeIndicatorManager();
+        if (indicators != null) indicators.update(point);
+    }
+
+    /** Removes a gate sacrifice chest's price tag; a no-op with no indicator manager (unit tests). */
+    private void hideIndicator(@NotNull GateSacrificePoint point) {
+        SacrificeIndicatorManager indicators = gameManager.getSacrificeIndicatorManager();
+        if (indicators != null) indicators.hide(point);
     }
 
     /**
@@ -353,6 +404,15 @@ public class DoorManager implements Listener {
              }
          }
 
+         List<GateSacrificePoint> teamPoints = gateSacrificesByTeam.remove(teamId);
+         if (teamPoints != null) {
+             for (GateSacrificePoint point : teamPoints) {
+                 // A sacrifice-only segment's gates are reachable from nowhere else, so cancel here too.
+                 for (Gate gate : point.getGates()) gate.cancelAnimation();
+                 hideIndicator(point);
+             }
+         }
+
          Map<VaultColor, List<VaultDoor>> teamVaultDoors = vaultDoorsByTeamAndColor.remove(teamId);
          if (teamVaultDoors != null) {
              for (List<VaultDoor> doors : teamVaultDoors.values()) {
@@ -426,8 +486,8 @@ public class DoorManager implements Listener {
     }
 
     /**
-     * Pulls a lever, opening every gate on it. One-way: a lever that has already been pulled does
-     * nothing.
+     * Pulls a lever, opening every gate on it. One-way: a lever that has already been pulled, or
+     * whose gates were already opened by a sacrifice chest, does nothing.
      *
      * @return true if this pull opened at least one gate.
      */
@@ -441,9 +501,113 @@ public class DoorManager implements Listener {
         }
         if (opened == 0) return false;
 
+        // Any sacrifice chest fronting these gates now has nothing left to sell; what was paid into
+        // it stays paid.
+        List<GateSacrificePoint> teamPoints = gateSacrificesByTeam.get(teamId);
+        if (teamPoints != null) {
+            for (GateSacrificePoint point : teamPoints) {
+                if (point.isOpenedByLeverAt(leverLocation)) {
+                    point.markOpened();
+                    hideIndicator(point);
+                }
+            }
+        }
+
         plugin.getLogger().fine((puller != null ? puller.getName() : "server") + " pulled the lever at "
                 + leverLocation.toVector() + ", opening " + opened + " gate(s) for team " + teamId);
         return true;
+    }
+
+    /**
+     * The gate sacrifice chest of a team at a block, or null when the team has none there.
+     * Compares block coordinates, like {@link #getDoorAt}, rather than trusting Location equality.
+     */
+    @Nullable
+    public GateSacrificePoint getGateSacrificeAt(@NotNull UUID teamId, @NotNull Location location) {
+        List<GateSacrificePoint> teamPoints = gateSacrificesByTeam.get(teamId);
+        if (teamPoints == null) return null;
+        for (GateSacrificePoint point : teamPoints) {
+            if (point.isAt(location)) return point;
+        }
+        return null;
+    }
+
+    /**
+     * True when a gate sacrifice chest of <em>any</em> team stands at a block. A sacrifice point is a
+     * real chest, so the vanilla chest UI has to be suppressed on every one of them -- including for
+     * a player on another team, or on no team, who cannot pay at it.
+     */
+    public boolean isAnyGateSacrificeAt(@NotNull Location location) {
+        for (List<GateSacrificePoint> teamPoints : gateSacrificesByTeam.values()) {
+            for (GateSacrificePoint point : teamPoints) {
+                if (point.isAt(location)) return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Opens the gates a fully-paid sacrifice chest fronts.
+     *
+     * <p>Called by {@code SandManager} on the click that completes the price. The chest click and
+     * the sand are SandManager's (it owns the currency, exactly as {@link VaultManager} owns the
+     * vault marker click); the wall is this manager's, which built it and owns its animation task.
+     *
+     * <p>If the segment also has a lever, its block is flipped to powered here, so the world records
+     * the gates' state the same way a pull would and a later click on it reads as "already open"
+     * rather than inviting a flip back to off over an open gate.
+     *
+     * @return how many gates this opened; 0 when they were already open.
+     */
+    public int openGatesForSacrifice(@NotNull UUID teamId, @NotNull GateSacrificePoint point, @Nullable Player payer) {
+        int opened = 0;
+        for (Gate gate : point.getGates()) {
+            if (gate.open()) opened++;
+        }
+
+        // Every chest sharing these gates (this one included) is now spent.
+        List<GateSacrificePoint> teamPoints = gateSacrificesByTeam.get(teamId);
+        Iterable<GateSacrificePoint> siblings = teamPoints != null ? teamPoints : List.of(point);
+        for (GateSacrificePoint other : siblings) {
+            if (other == point || sharesAGate(other, point)) {
+                other.markOpened();
+                hideIndicator(other);
+            }
+        }
+        if (teamPoints == null) {
+            point.markOpened();
+            hideIndicator(point);
+        }
+
+        Location lever = point.getLeverLocation();
+        if (lever != null && lever.isWorldLoaded()) {
+            try {
+                Block block = lever.getBlock();
+                if (block.getBlockData() instanceof Powerable powerable) {
+                    powerable.setPowered(true);
+                    block.setBlockData(powerable, false);
+                }
+            } catch (Exception e) {
+                plugin.getLogger().log(Level.FINE, "Could not flip the lever at " + lever.toVector()
+                        + " after a sacrifice opened its gates", e);
+            }
+        }
+
+        if (opened > 0) {
+            plugin.getLogger().fine((payer != null ? payer.getName() : "server") + " paid the sacrifice at "
+                    + point.getLocation().toVector() + ", opening " + opened + " gate(s) for team " + teamId);
+        }
+        return opened;
+    }
+
+    /** True when the two points open at least one identical {@link Gate} object. */
+    private static boolean sharesAGate(@NotNull GateSacrificePoint a, @NotNull GateSacrificePoint b) {
+        for (Gate gate : a.getGates()) {
+            for (Gate other : b.getGates()) {
+                if (gate == other) return true;
+            }
+        }
+        return false;
     }
 
     /**
@@ -540,7 +704,8 @@ public class DoorManager implements Listener {
     }
 
     /**
-     * Pulls a segment's lever, or refuses a lever that has already been pulled.
+     * Pulls a segment's lever, or refuses one whose gates are already open (pulled before, or paid
+     * open at a sacrifice chest).
      *
      * <p>The first pull is deliberately <em>not</em> cancelled: vanilla then flips the lever to
      * powered, so the world itself records that these gates are open and there is no second copy of
@@ -553,7 +718,7 @@ public class DoorManager implements Listener {
             return;
         }
         event.setCancelled(true);
-        player.sendMessage(Component.text("This lever has already been pulled.", NamedTextColor.YELLOW));
+        player.sendMessage(Component.text("These gates are already open.", NamedTextColor.YELLOW));
     }
 
     /** Consumes one of the required key item from the player's main hand. */
@@ -577,6 +742,7 @@ public class DoorManager implements Listener {
         // writes iron bars back into a region cleanupInstance() has already air-filled.
         Set<UUID> teams = new HashSet<>(doorsByTeamAndLockLocation.keySet());
         teams.addAll(gatesByTeamAndLeverLocation.keySet());
+        teams.addAll(gateSacrificesByTeam.keySet());
         teams.addAll(vaultDoorsByTeamAndColor.keySet());
 
         for (UUID teamId : teams) {
@@ -584,6 +750,7 @@ public class DoorManager implements Listener {
         }
         doorsByTeamAndLockLocation.clear();
         gatesByTeamAndLeverLocation.clear();
+        gateSacrificesByTeam.clear();
         vaultDoorsByTeamAndColor.clear();
         plugin.getLogger().info("Cleared door states for " + teams.size() + " teams.");
     }

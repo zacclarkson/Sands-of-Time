@@ -109,8 +109,8 @@ class ScoreManagerTest {
 
     @Test
     void awardedCoinsScaleWithDepthAndLandUnbanked() {
-        // The path a sand trade takes: the same multiplier as a coin stack, into the same at-risk
-        // unbanked pot, so a trade stays a gamble rather than a safe conversion.
+        // The one place the depth multiplier is applied: every coin source lands in the same at-risk
+        // unbanked pot on the same scale.
         UUID id = UUID.randomUUID();
         Player player = mock(Player.class);
         when(player.getUniqueId()).thenReturn(id);
@@ -129,7 +129,7 @@ class ScoreManagerTest {
         scoreManager.awardDepthScaledCoins(player, 25, 0);
 
         assertEquals(30, pickupNotifier.getPendingTotal(id),
-                "a trade and a pickup in the same burst read as one message");
+                "two coin sources in the same burst read as one message");
     }
 
     @Test

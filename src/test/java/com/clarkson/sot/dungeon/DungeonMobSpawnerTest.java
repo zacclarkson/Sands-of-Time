@@ -31,14 +31,14 @@ class DungeonMobSpawnerTest {
         Area bounds = new Area(new Location(null, 0, 0, 0), new Location(null, 15, 7, 15));
         return new DungeonBlueprint(List.of(), new Vector(0, 0, 0), Map.of(), Map.of(),
                 List.of(), List.of(), List.of(), bounds, null, null, null, List.of(),
-                List.of(), List.of(), List.of(), List.of(), List.of(), mobSpawners, List.of(), List.of());
+                List.of(), List.of(), List.of(), List.of(), List.of(), mobSpawners, List.of());
     }
 
     private Dungeon dungeon(List<Location> mobSpawners) {
         Location origin = new Location(world, 100, 64, 100);
         return new Dungeon(UUID.randomUUID(), world, origin, blueprint(List.of()),
                 origin.clone(), Map.of(), Map.of(), List.of(), List.of(), List.of(), List.of(),
-                null, null, List.of(), List.of(), mobSpawners, List.of(), List.of(), List.of());
+                null, null, List.of(), List.of(), mobSpawners, List.of(), List.of());
     }
 
     @Test

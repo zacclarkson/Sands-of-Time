@@ -16,7 +16,7 @@ commands:
 
   sotmode:
     description: Switches the segment builder tool mode.
-    usage: /<command> <mode> [color|value]
+    usage: /<command> <mode> [color|value|cost]
     permission: sot.admin.builder
 
   sotsavesegment:

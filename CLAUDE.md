@@ -132,7 +132,8 @@ line — so it is actionable without rediscovering it.
   (whose constructor is already 16 arguments). `DungeonManager.resolveGateGroups`/`resolveVaultDoors` walk
   `getPlacedSegmentsInWorld()` *after* the paste and hand `DoorManager.initializeGatesForInstance` absolute
   `GateGroup`s (one lever plus **that segment's** gates — the pairing is the feature) and
-  `VaultDoorPlacement`s. Relative→absolute goes through `SegmentGeometry`, which rotates a bound with
+  `VaultDoorPlacement`s. A `GateGroup`'s lever is nullable since gate sacrifice chests (see the
+  gate-sacrifice bullet below) can open gates instead; gates with neither are left open. Relative→absolute goes through `SegmentGeometry`, which rotates a bound with
   `SegmentRotation.rotateBound` **before** adding the origin: one 90° step maps `(x,z) -> (z, sizeX-1-x)`,
   so rotating can swap which corner is the minimum, and `PlacedSegment.getAbsoluteLocation` deliberately
   does not rotate. Gates are `IRON_BARS` (see-through on purpose — the mechanic is deciding whether to open
@@ -346,25 +347,35 @@ line — so it is actionable without rediscovering it.
   translation keeps the chests in front of the row and, because translating distinct cells by a single
   vector cannot collide them, *guarantees* no two cages share a chest. Ties and a cage sitting exactly
   on the centre resolve to +Z so the result is deterministic; tests pin all of it.
-- **A sand trade point is the same chest as a sacrifice point, and the marker is the only difference.**
-  `SAND_TRADE` markers ride the usual chain — `Segment.getSandTradeLocations()` →
-  `DungeonGenerator.selectSandTradeRelativeLocations` → `DungeonBlueprint` → `Dungeon` →
-  `DungeonManager.placeSandTradePoints` — and the chest, forced to `Chest.Type.SINGLE`, is again what
-  makes the point exist (the marker records an air cell). Two things set it apart from every other
-  selector here. **(a)** It is deliberately **not hub-wins**: a trade point pays more the deeper it
-  sits, so gathering only the HUB's markers whenever the hub carried one would throw away every trade
-  point in the dungeon and leave only depth-0 ones. **(b)** The payout is resolved at *click* time,
-  not at setup — `SandManager.attemptSandTrade` asks `GameManager.getTeamDepthAt` →
-  `DungeonManager.getDepthAt`, because `placedSegmentsInWorld` (the only thing that knows a location's
-  depth) lives on the manager and the `Dungeon` is built before the chests are placed.
-  `TRADE_COINS_PER_SAND` (25, five coin stacks at the hub) goes through
-  `ScoreManager.awardDepthScaledCoins`, the extracted coin-pickup path, so a trade and a pickup share
-  the 100%–120% multiplier *and* the batched `CoinPickupNotifier` message; the coins land **unbanked**,
-  which is what keeps the trade a gamble. `SandManager.onPlayerInteract` handles both chests because
-  they are the same block — it checks sacrifice first (a caged teammate is the meaning with a
-  deadline), and the `EquipmentSlot.HAND` guard still sits *after* `setCancelled` or the off-hand pass
-  opens the chest and a single click spends two sand. Nothing protects the chests specially:
-  `BreakableBlocks.BREAKABLE` whitelists `SAND` and `SPAWNER`, so a `CHEST` is already refused.
+- **A gate sacrifice point is the same marker as a cage sacrifice point; the segment type decides.**
+  A `SAND_SACRIFICE` chest never hands anything out. On the **HUB** it frees the paired death cage
+  (blueprint data, above). On **any other segment** it is a *gate sacrifice*: it stands in front of
+  that segment's `GATE` bounds and paying its price opens them — the coins are whatever the template
+  put behind the gate, the same philosophy as vault doors. That is the sand-for-money trade; the
+  direct-coin `SAND_TRADE` chest that briefly existed is gone (the loader ignores a stale
+  `sandTradeLocations` key). Gate sacrifices are **template geometry, not blueprint**, resolved by
+  `DungeonManager.resolveGateGroups` beside gates and levers: a `GateGroup` now has a *nullable* lever
+  plus zero or more `SacrificePlacement`s (absolute cell + cost), and is only left out — gates left
+  open, with a warning — when it has neither. `DungeonGenerator.selectSandSacrificeRelativeLocations`
+  is therefore **hub-only with no fallback**: it used to fall back to non-hub markers when the hub
+  declared none, and the bundled hub declares none, so the first branch chest would have been paired
+  with a death cage as well. `SaveSegmentCommand` accepts gates with a sacrifice marker in place of
+  a lever (outside the HUB), warns about a non-hub sacrifice marker with no gates, and warns when a
+  HUB marker carries a non-default cost (saved but ignored). The **cost is per marker**:
+  `/sotmode SAND_SACRIFICE <cost>` (1–10, `Segment.MAX_SACRIFICE_COST`) is stamped on the marker's
+  PDC (`SegmentBuilderKeys.SACRIFICE_COST`), saved as `sandSacrificeCosts` index-aligned with
+  `sandSacrificeLocations`, and the `Segment` constructor pads/truncates/clamps so the two lists are
+  always the same length — a template saved before prices existed costs the default everywhere.
+  Ownership follows the vault-door precedent: **`DoorManager` owns the chest and the wall**
+  (`initializeGatesForInstance` writes the `CHEST` through the shared `DungeonManager.placeSingleChest`,
+  registers a `GateSacrificePoint` per team holding the *same* `Gate` objects the lever holds, and
+  `openGatesForSacrifice` / `pullLever` each mark the other path spent), while **`SandManager` owns
+  the click and the sand** (`attemptGateSacrifice`, one sand per main-hand click, teammates chip in,
+  opens on the completing click, part-payment never refunded, an already-open point takes nothing).
+  `SandManager.onPlayerInteract` still checks the cage meaning first. A sacrifice open also flips the
+  lever block to powered so the world records the state as a pull would. The chest guard is a
+  material test (`isAir() || !isSolid()`), not `Block.isPassable()`, which MockBukkit does not
+  implement — the old guard silently refused every chest under test.
 - **Reviving costs the dead player's death count, paid a sand at a time.** The price and the
   part-payment live on `DeathCage`, which is already 1:1 with a player for the round, so they are torn
   down with the dungeon and reset per round with nothing having to clear them (`SoTPlayerData.timesDied`
@@ -376,13 +387,19 @@ line — so it is actionable without rediscovering it.
   handler gates on `CHEST` and **cancels before the team lookup** — a sacrifice point is a real chest, so
   returning early for a player with no team would let them open it.
 - **The floating sand above a chest is the activity signal, and is event-driven.** `SacrificeIndicatorManager`
-  spawns a `BlockDisplay` of sand plus a `TextDisplay` arrow and count above a chest only while its cage
-  holds someone awaiting revive; a chest with nothing above it has nobody to free. Like
+  spawns a `BlockDisplay` of sand plus a `TextDisplay` arrow and count above a chest: above a cage chest
+  only while its cage holds someone awaiting revive (a chest with nothing above it has nobody to free),
+  and above a gate sacrifice chest as the **price tag**, from `initializeGatesForInstance` until the
+  gates open. It is keyed on the chest *block* (`update(Location, int)`; the `DeathCage` and
+  `GateSacrificePoint` overloads delegate), so the two kinds can never fight over one chest. Like
   `GameScoreboardManager` it is owned by `GameManager` and is **not** a listener, so there is nothing for
   `SoT.onEnable()` to register — but unlike the scoreboard it runs no task, because the numbers only
-  change on death, payment, revive and timer-out. Its displays are `setPersistent(false)` and sit inside
-  the dungeon bounds, so `cleanupInstance()` removes them with every other non-player entity; `clearAll()`
-  in `tearDownRound()` is there to empty the manager's own map rather than to do the removing.
+  change on death, payment, revive, gate opening and timer-out. Its displays are `setPersistent(false)`
+  and sit inside the dungeon bounds, so `cleanupInstance()` removes them with every other non-player
+  entity; `clearAll()` in `tearDownRound()` is there to empty the manager's own map rather than to do
+  the removing. The two entities are spawned bare and tracked **before** any cosmetic setter runs, each
+  of which is best-effort: a setter that throws inside a spawn consumer (MockBukkit's
+  `TextDisplay.setBillboard`) left the sand block registered but untracked, an orphan nothing could remove.
 - **Dying drops carried sand on the floor.** Nearly all of that is vanilla: `DeathListener` never
   touches `event.getDrops()`, so a death that drops the inventory scatters the sand with everything
   else and it lands, merges and despawns by the server's own rules. `SandManager.dropCarriedSandOnDeath`

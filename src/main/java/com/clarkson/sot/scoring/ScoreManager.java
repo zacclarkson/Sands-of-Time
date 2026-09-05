@@ -63,10 +63,9 @@ public class ScoreManager {
      * Adds depth-scaled coins to a player's <em>unbanked</em> score and folds the amount into their
      * running pickup message.
      *
-     * <p>The path a coin stack takes, and also the one a sand trade takes — trading deep pays more for
-     * the same sand, on exactly the multiplier that makes a deep coin worth more than a shallow one.
-     * The coins land unbanked on purpose: they are lost on death and on a timer-out like any other
-     * unbanked coin, which is what keeps a trade a gamble rather than a safe conversion.
+     * <p>The path a coin stack takes, and the single place the depth multiplier is applied, so any
+     * other source of coins (a broken mob spawner, for one) shares it by calling here. The coins land
+     * unbanked on purpose: they are lost on death and on a timer-out like any other unbanked coin.
      *
      * @return the scaled amount actually added.
      */

@@ -437,12 +437,6 @@ public class DungeonGenerator {
         List<Vector> sandSacrificeRelativeLocations =
                 reconcileSacrificePoints(deathCageRelativeLocations, sacrificeMarkers, hubCentre);
 
-        // Sand trade points. Optional and unpaired, so unlike a missing bank this is not worth a
-        // warning: every template saved before the SAND_TRADE marker existed carries none, and a
-        // dungeon with no trade points plays perfectly well.
-        List<Vector> sandTradeRelativeLocations = selectSandTradeRelativeLocations(placedSegments);
-        plugin.getLogger().fine("Layout has " + sandTradeRelativeLocations.size() + " sand trade point(s).");
-
         List<Doorway> doorways = new ArrayList<>(doorwaysInDFS);
         List<Doorway> unusedOpenings = findUnusedOpenings(placedSegments, doorways);
         plugin.getLogger().info("Layout has " + doorways.size() + " doorways and "
@@ -467,8 +461,7 @@ public class DungeonGenerator {
                 blueprintBounds, safeExitRelativeLocation, timerBaseRelativeLocation, bankRelativeLocation,
                 playerSpawnRelativeLocations, sandTimerRelativeLocations,
                 deathCageRelativeLocations, sandSacrificeRelativeLocations, doorways, unusedOpenings,
-                mobSpawnerRelativeLocations, branchSignifiers,
-                sandTradeRelativeLocations
+                mobSpawnerRelativeLocations, branchSignifiers
         );
     }
 
@@ -1189,52 +1182,31 @@ public class DungeonGenerator {
     }
 
     /**
-     * Collects the blueprint-relative sacrifice point cells from {@code SAND_SACRIFICE} markers — the
-     * chests a teammate right-clicks to buy a caged player out. HUB templates win outright, as for
-     * every other hub feature.
+     * Collects the blueprint-relative cage sacrifice cells from the HUB's {@code SAND_SACRIFICE}
+     * markers — the chests a teammate right-clicks to buy a caged player out.
+     *
+     * <p><b>HUB only</b>, and unlike the other hub-wins selectors there is no fallback to other
+     * segments: a {@code SAND_SACRIFICE} marker on any non-HUB segment is a <em>gate sacrifice</em>
+     * (it opens that segment's gates for a sand price) and is resolved from template geometry by
+     * {@code DungeonManager.resolveGateGroups}, never paired with a death cage. Falling back would
+     * turn the first branch chest in the dungeon into a revive point the moment a hub declares none —
+     * which the bundled hub does.
      *
      * <p>Returned raw and unpaired; {@link #reconcileSacrificePoints} is what matches them to cages.
      */
     @NotNull
     static List<Vector> selectSandSacrificeRelativeLocations(@NotNull List<PlacedSegment> placedSegments) {
         List<Vector> hubPoints = new ArrayList<>();
-        List<Vector> otherPoints = new ArrayList<>();
         for (PlacedSegment placedSegment : placedSegments) {
             Segment template = placedSegment.getSegmentTemplate();
-            if (template == null) continue;
-            boolean fromHub = template.getType() == SegmentType.HUB;
+            if (template == null || template.getType() != SegmentType.HUB) continue;
             Vector origin = placedSegment.getWorldOrigin().toVector();
             for (BlockVector3 offset : template.getSandSacrificeLocations()) {
                 BlockVector3 rot = placedSegment.getRotatedOffset(offset);
-                Vector abs = origin.clone().add(new Vector(rot.x(), rot.y(), rot.z()));
-                (fromHub ? hubPoints : otherPoints).add(abs);
+                hubPoints.add(origin.clone().add(new Vector(rot.x(), rot.y(), rot.z())));
             }
         }
-        return !hubPoints.isEmpty() ? hubPoints : otherPoints;
-    }
-
-    /**
-     * Collects the blueprint-relative sand trade point cells from {@code SAND_TRADE} markers — the
-     * chests that buy depth-scaled coins for sand.
-     *
-     * <p>Deliberately <em>not</em> hub-wins, unlike every other selector here. A trade point is worth
-     * more the deeper it sits, so they belong out in the branches: gathering only the HUB's markers
-     * whenever the hub happened to carry one would throw away every trade point in the dungeon, and
-     * every one of them would have been at depth 0 anyway.
-     */
-    @NotNull
-    static List<Vector> selectSandTradeRelativeLocations(@NotNull List<PlacedSegment> placedSegments) {
-        List<Vector> points = new ArrayList<>();
-        for (PlacedSegment placedSegment : placedSegments) {
-            Segment template = placedSegment.getSegmentTemplate();
-            if (template == null) continue;
-            Vector origin = placedSegment.getWorldOrigin().toVector();
-            for (BlockVector3 offset : template.getSandTradeLocations()) {
-                BlockVector3 rot = placedSegment.getRotatedOffset(offset);
-                points.add(origin.clone().add(new Vector(rot.x(), rot.y(), rot.z())));
-            }
-        }
-        return points;
+        return hubPoints;
     }
 
     /**

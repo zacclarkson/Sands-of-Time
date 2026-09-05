@@ -6,6 +6,7 @@ import com.clarkson.sot.dungeon.segment.PlacedSegment;
 import com.clarkson.sot.dungeon.segment.Segment;
 import com.clarkson.sot.dungeon.segment.SegmentBound;
 import com.clarkson.sot.dungeon.segment.SegmentGeometry;
+import com.clarkson.sot.dungeon.segment.SegmentType;
 import com.clarkson.sot.entities.Area;
 import com.clarkson.sot.events.FloorItemManager;
 import com.clarkson.sot.main.GameManager;
@@ -180,7 +181,6 @@ public class DungeonManager {
         List<Location> absPlayerSpawns = calculateAbsoluteLocations(blueprintData.getPlayerSpawnRelativeLocations());
         List<Location> absSandTimers = calculateAbsoluteLocations(blueprintData.getSandTimerRelativeLocations());
         List<Location> absMobSpawners = calculateAbsoluteLocations(blueprintData.getMobSpawnerRelativeLocations());
-        List<Location> absSandTrades = calculateAbsoluteLocations(blueprintData.getSandTradeRelativeLocations());
         Location absHubLocation = dungeonOrigin.clone().add(blueprintData.getHubRelativeLocation());
         Vector safeExitRelative = blueprintData.getSafeExitRelativeLocation();
         Location absSafeExitLocation = (safeExitRelative != null) ? dungeonOrigin.clone().add(safeExitRelative) : null;
@@ -222,7 +222,7 @@ public class DungeonManager {
                 absHubLocation, absVaultMarkers, absKeySpawns,
                 absSandSpawns, absCoinSpawns, absItemSpawns,
                 deathCages, absSafeExitLocation, this.bankLocation, absPlayerSpawns, absSandTimers,
-                absMobSpawners, absSandTrades,
+                absMobSpawners,
                 absDoorways, absUnusedOpenings
             );
              plugin.getLogger().info("Created Dungeon data object for team " + teamId);
@@ -245,7 +245,6 @@ public class DungeonManager {
                     resolveGateGroups(placedSegmentsInWorld, plugin.getLogger()),
                     resolveVaultDoors(placedSegmentsInWorld, plugin.getLogger()));
             placeSacrificePoints(); // Build the chests teammates click to revive
-            placeSandTradePoints(); // Build the chests that buy coins for sand out in the branches
             populateFloorItems(); // Spawn floor items
             armMobSpawners(); // Arm mob spawners (mobs appear when a player gets close)
         } catch (Exception e) {
@@ -424,86 +423,48 @@ public class DungeonManager {
 
         int placed = 0;
         for (DeathCage cage : dungeonData.getDeathCages()) {
-            Location loc = cage.getSacrificePointLocation();
-            try {
-                Block block = loc.getBlock();
-                if (!(block.isPassable() || block.getType().isAir() || block.isLiquid())) {
-                    plugin.getLogger().warning("Could not place sacrifice chest at " + loc.toVector()
-                            + " for team " + teamId + ": block is " + block.getType()
-                            + ". That cage cannot be revived from this round.");
-                    continue;
-                }
-                block.setType(Material.CHEST, false);
-                BlockData data = block.getBlockData();
-                if (data instanceof org.bukkit.block.data.type.Chest chestData) {
-                    chestData.setType(org.bukkit.block.data.type.Chest.Type.SINGLE);
-                    block.setBlockData(chestData, false);
-                }
+            if (placeSingleChest(cage.getSacrificePointLocation(), plugin.getLogger(), teamId,
+                    "sacrifice chest", "That cage cannot be revived from this round.")) {
                 placed++;
-            } catch (Exception e) {
-                plugin.getLogger().log(Level.WARNING,
-                        "Error placing sacrifice chest at " + loc + " for team " + teamId, e);
             }
         }
         plugin.getLogger().info("Placed " + placed + " sacrifice chest(s) for team " + teamId);
     }
 
     /**
-     * Builds the chest at each {@code SAND_TRADE} marker — the points out in the branches that buy
-     * depth-scaled coins for a sand.
+     * Writes a single (never double) chest into {@code loc}, the block that makes a cage sacrifice
+     * point or a gate sacrifice point exist. Shared with {@code DoorManager}, which builds the gate
+     * variety, so the two cannot drift.
      *
-     * <p>As with {@link #placeSacrificePoints()}, writing the block is what makes the point exist:
-     * the marker records an <em>air</em> cell, so registering the location without a chest in it
-     * leaves nothing to right-click. Chests are forced to
-     * {@link org.bukkit.block.data.type.Chest.Type#SINGLE} for the same reason too — two trade points
-     * side by side would otherwise pair into a double chest and move the block a click lands on.
+     * @param purpose     what the chest is, for the log ("sacrifice chest", "gate sacrifice chest").
+     * @param consequence one sentence on what is lost when it cannot be placed, appended to the warning.
+     * @return true when the chest was written; false (with a warning) when the cell is occupied or
+     *         the write threw.
      */
-    private void placeSandTradePoints() {
-        if (dungeonData == null) return;
-
-        List<Location> tradePoints = dungeonData.getSandTradeLocations();
-        if (tradePoints.isEmpty()) {
-            plugin.getLogger().fine("No sand trade points for team " + teamId);
-            return;
-        }
-
-        int placed = 0;
-        for (Location loc : tradePoints) {
-            if (loc == null) continue;
-            try {
-                Block block = loc.getBlock();
-                if (!(block.isPassable() || block.getType().isAir() || block.isLiquid())) {
-                    plugin.getLogger().warning("Could not place sand trade chest at " + loc.toVector()
-                            + " for team " + teamId + ": block is " + block.getType()
-                            + ". That trade point is unusable this round.");
-                    continue;
-                }
-                block.setType(Material.CHEST, false);
-                BlockData data = block.getBlockData();
-                if (data instanceof org.bukkit.block.data.type.Chest chestData) {
-                    chestData.setType(org.bukkit.block.data.type.Chest.Type.SINGLE);
-                    block.setBlockData(chestData, false);
-                }
-                placed++;
-            } catch (Exception e) {
-                plugin.getLogger().log(Level.WARNING,
-                        "Error placing sand trade chest at " + loc + " for team " + teamId, e);
+    static boolean placeSingleChest(@NotNull Location loc, @NotNull Logger log, @NotNull UUID teamId,
+                                    @NotNull String purpose, @NotNull String consequence) {
+        try {
+            Block block = loc.getBlock();
+            // Material-level test rather than Block.isPassable(): the marker cell is air after the
+            // paste, a liquid or a plant is just as free, and only a solid block means the template
+            // disagrees with its own marker.
+            Material current = block.getType();
+            if (!current.isAir() && current.isSolid()) {
+                log.warning("Could not place " + purpose + " at " + loc.toVector()
+                        + " for team " + teamId + ": block is " + current + ". " + consequence);
+                return false;
             }
+            block.setType(Material.CHEST, false);
+            BlockData data = block.getBlockData();
+            if (data instanceof org.bukkit.block.data.type.Chest chestData) {
+                chestData.setType(org.bukkit.block.data.type.Chest.Type.SINGLE);
+                block.setBlockData(chestData, false);
+            }
+            return true;
+        } catch (Exception e) {
+            log.log(Level.WARNING, "Error placing " + purpose + " at " + loc + " for team " + teamId, e);
+            return false;
         }
-        plugin.getLogger().info("Placed " + placed + " sand trade chest(s) for team " + teamId);
-    }
-
-    /**
-     * The depth of the segment containing {@code location}, or 0 when it falls outside every placed
-     * segment (or the instance has not been initialized).
-     *
-     * <p>This class is the only holder of {@link #placedSegmentsInWorld}, so a caller that needs a
-     * depth at runtime — a sand trade paying out — has to come through here, exactly as
-     * {@link #populateFloorItems()} and {@link #armMobSpawners()} do at setup.
-     */
-    public int getDepthAt(@NotNull Location location) {
-        if (dungeonData == null) return 0;
-        return dungeonData.getDepthAtLocation(location, this.placedSegmentsInWorld);
     }
 
     private void populateFloorItems() {
@@ -666,13 +627,20 @@ public class DungeonManager {
     @NotNull public List<PlacedSegment> getPlacedSegmentsInWorld() { return Collections.unmodifiableList(this.placedSegmentsInWorld); }
 
     /**
-     * Pairs each placed segment's gates with the lever that opens them, in absolute coordinates.
+     * Pairs each placed segment's gates with what opens them -- its lever and/or its sand sacrifice
+     * chests -- in absolute coordinates.
      *
      * <p>Read straight off the placed segments rather than carried on the blueprint. Doorways ride
      * the blueprint because the DFS <em>discards</em> which connections it made and that cannot be
-     * recovered afterwards; gates discard nothing -- every GATE and LEVER marker on a placed template
-     * is used verbatim. Flattening them into a dungeon-wide list, the shape every other blueprint
-     * feature uses, would also lose the per-segment pairing that makes a lever mean anything.
+     * recovered afterwards; gates discard nothing -- every GATE, LEVER and non-hub SAND_SACRIFICE
+     * marker on a placed template is used verbatim. Flattening them into a dungeon-wide list, the
+     * shape every other blueprint feature uses, would also lose the per-segment pairing that makes a
+     * lever or a chest mean anything.
+     *
+     * <p>A {@code SAND_SACRIFICE} marker means different things by segment type: on the HUB it is a
+     * death-cage point (blueprint data, see {@code DungeonGenerator.selectSandSacrificeRelativeLocations})
+     * and is <em>never</em> a gate sacrifice, so a HUB with gates still needs a lever; on any other
+     * segment it is a gate sacrifice, priced by {@link Segment#getSandSacrificeCost(int)}.
      *
      * <p>Static and package-private so it can be tested against hand-built placements: everything
      * else on this path needs WorldEdit and a pasted dungeon.
@@ -686,19 +654,29 @@ public class DungeonManager {
 
             List<SegmentBound> gates = template.getGates();
             BlockVector3 leverOffset = template.getLeverOffset();
+            boolean hub = template.getType() == SegmentType.HUB;
+            List<BlockVector3> sacrificeOffsets = hub ? List.of() : template.getSandSacrificeLocations();
 
             if (gates.isEmpty()) {
                 if (leverOffset != null) {
                     log.fine("Segment " + template.getName() + " has a LEVER marker but no gates; ignoring it.");
                 }
+                if (!sacrificeOffsets.isEmpty()) {
+                    log.warning("Segment " + template.getName() + " has " + sacrificeOffsets.size()
+                            + " SAND_SACRIFICE marker(s) but no gates; ignoring them. Outside the HUB a "
+                            + "sacrifice chest opens the segment's gates -- add GATE bounds or remove the markers.");
+                }
                 continue;
             }
-            if (leverOffset == null) {
+            if (leverOffset == null && sacrificeOffsets.isEmpty()) {
                 // SaveSegmentCommand refuses this combination, so only hand-edited JSON reaches here.
                 // Leaving the gates unbuilt keeps the area open rather than sealing it behind a wall
                 // nothing can ever raise.
                 log.warning("Segment " + template.getName() + " declares " + gates.size()
-                        + " gate(s) but no lever; leaving them open. Re-save the template with a LEVER marker.");
+                        + " gate(s) but no lever" + (hub ? " (a HUB's SAND_SACRIFICE markers are cage points)"
+                        : " or SAND_SACRIFICE marker")
+                        + "; leaving them open. Re-save the template with a LEVER"
+                        + (hub ? "" : " or SAND_SACRIFICE") + " marker.");
                 continue;
             }
 
@@ -706,8 +684,14 @@ public class DungeonManager {
             for (SegmentBound gate : gates) {
                 bounds.add(SegmentGeometry.toAbsoluteArea(placed, gate));
             }
-            groups.add(new GateGroup(SegmentGeometry.toAbsoluteLocation(placed, leverOffset),
-                    bounds, template.getName()));
+            List<GateGroup.SacrificePlacement> sacrifices = new ArrayList<>();
+            for (int i = 0; i < sacrificeOffsets.size(); i++) {
+                sacrifices.add(new GateGroup.SacrificePlacement(
+                        SegmentGeometry.toAbsoluteLocation(placed, sacrificeOffsets.get(i)),
+                        template.getSandSacrificeCost(i)));
+            }
+            Location lever = leverOffset != null ? SegmentGeometry.toAbsoluteLocation(placed, leverOffset) : null;
+            groups.add(new GateGroup(lever, bounds, sacrifices, template.getName()));
         }
         return groups;
     }
